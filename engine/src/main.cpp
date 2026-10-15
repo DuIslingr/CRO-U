@@ -14330,17 +14330,43 @@ int runSelfTest(App& app) {
         app.game = cr::GameState();
         fm = App::FieldMenu();
     }
-    { // A puzzle room (stage 0, map 114: teleport): its objects on the grid, a swap with a block,
-      // both gems picked up (+1 ESP each), then the gem crystal's scene, and the room cleared
+    { // Puzzle rooms (Omega's 16: 0..3 teleport, 4..7 psychokinesis, 8..11 toughness, 12..15
+      // pyrokinesis). The banner as a gate's way in shows it (flag 3090); stage 0: two blocks
+      // teleported onto the weigh switches bring the crystal, ESP 3 -> 1, at 0 a swap is refused;
+      // stage 4: eight slides put a block on the switch (the other its stopper), a slide at an
+      // edge is let go for nothing, one into the leader squashes the try; stage 8: a fragile
+      // block broken (ESP 1 -> 0), a gem through its cell (ESP 1), at 0 a tap refused; stage 12:
+      // a candle switch lights, and lighting the rest brings the crystal
         int problems = 0;
-        app.runner.stop();
-        app.game = cr::GameState();
-        app.mapNumber = -1;
+        App::Puzzle& pz = app.puzzle;
         cr::WarpRequest w;
         w.valid = true, w.area = cr::kPuzzleArea, w.map = cr::kFirstPuzzleMap;
-        app.game.setFlag(3070, true); // as a dungeon's way into a puzzle room sets it: the area's script 0 shows the banner
-        performWarp(app, w, -1);
-        int bannerFrames = 0, bannerPeak = 0; // Uty_PuzzleStart: up, held, gone
+        auto settle = [&](int most) {
+            for (int quiet = 0, f = 0; f < most && quiet < 10; ++f) {
+                stepEvents(app);
+                app.dialogue.clear();
+                if (app.choiceFlag >= 0) answerChoice(app, true);
+                app.tapPending = true;
+                quiet = app.runner.running() || app.pendingEntry != App::Entry::None || pz.tpState ? 0 : quiet + 1;
+            }
+        };
+        auto room = [&](int stageNo, bool banner) {
+            app.runner.stop();
+            app.game = cr::GameState();
+            app.mapNumber = -1;
+            if (banner) app.game.setFlag(3090, true); // (j001_p01 entry 0: the banner, then the flag off)
+            w.map = cr::kFirstPuzzleMap + stageNo;
+            performWarp(app, w, -1);
+        };
+        auto crystalShown = [&] {
+            for (const App::Puzzle::Obj& o : pz.objs)
+                if (o.type == cr::kTypeCrystal && o.shown) return true;
+            return false;
+        };
+        auto steps = [&](int n) { for (int f = 0; f < n; ++f) stepEvents(app); };
+        // The banner
+        room(0, true);
+        int bannerFrames = 0, bannerPeak = 0;
         float bannerX1 = 0;
         for (int f = 0; f < 3000 && (app.runner.running() || app.pendingEntry != App::Entry::None || app.puzzleBanner.on); ++f) {
             stepEvents(app);
@@ -14358,389 +14384,155 @@ int runSelfTest(App& app) {
             app.tapPending = true;
         }
         const bool banner = bannerFrames >= 38 && bannerFrames <= 44 && bannerPeak == 255 && bannerX1 == 60 && !app.puzzleBanner.on &&
-                            !app.game.flag(3070);
+                            !app.game.flag(3090);
         problems += !banner;
         std::printf("puzzle room: \"Puzzle Start\" banner %s (%d frames, alpha up to %d, at x %.0f)\n",
                     banner ? "shown" : "WRONG", bannerFrames, bannerPeak, bannerX1);
-        App::Puzzle& pz = app.puzzle;
-        int blocks = 0, gems = 0;
-        for (const App::Puzzle::Obj& o : pz.objs) blocks += o.type == cr::kTypeNormal, gems += o.type == cr::kTypeGem;
-        problems += pz.stage != 0 || blocks != 2 || gems != 2 || pz.esp != 0;
-        // no ESP yet: a swap is refused (only the mark)
-        setActor(app, 0, puzzle::centre(app, 2, 2), nullptr, false);
-        const int block = puzzle::objectAt(app, 1, 2, 1);
-        problems += block < 0;
-        if (block >= 0) puzzle::teleportTo(app, block);
-        const bool refused = !pz.busy && pz.tpState == 0 && app.game.vars[13] == 0 && pz.punished > 0;
-        problems += !refused;
-        // the gem at (0, 0), walked to (ESP 1): effects 2 and 3 there
-        const int gemFx = app.fieldEffectCount[2] + app.fieldEffectCount[3];
-        setActor(app, 0, puzzle::centre(app, 0, 0), nullptr, true);
-        for (int f = 0; f < 3; ++f) stepEvents(app);
-        const bool firstGem = pz.esp == 1 && app.fieldEffectCount[2] + app.fieldEffectCount[3] == gemFx + 2;
-        stepPuzzleHud(app); // the HUD has shown a count above 0
-        const bool popped = pz.pop > 0;
-        // stand at the centre (2, 2) and swap with the block at (2, 1) (ESP 0)
-        setActor(app, 0, puzzle::centre(app, 2, 2), nullptr, false);
-        app.menuSoundLog.clear();
-        if (block >= 0) puzzle::teleportTo(app, block);
-        for (int f = 0; f < 30; ++f) stepEvents(app);
-        int pr = -1, pc = -1;
-        puzzle::cellOf(app, app.walker.pos, pr, pc);
+        // Stage 0 (teleport)
+        settle(3000);
+        int blocks = 0, switches = 0;
+        for (const App::Puzzle::Obj& o : pz.objs) blocks += o.type == cr::kTypeNormal, switches += o.type == cr::kTypeWeighSwitch;
+        const bool start0 = pz.stage == 0 && blocks == 3 && switches == 2 && pz.esp == 3 && !crystalShown();
+        auto swapOnto = [&](int sr, int sc, int br, int bc) { // the leader on (sr, sc) swaps with the block at (br, bc)
+            setActor(app, 0, puzzle::centre(app, sr, sc), nullptr, false);
+            const int b = puzzle::objectAt(app, 1, br, bc);
+            if (b >= 0) puzzle::teleportTo(app, b);
+            settle(3000);
+            return b >= 0 && pz.objs[size_t(b)].row == sr && pz.objs[size_t(b)].col == sc;
+        };
+        const bool tp1 = swapOnto(0, 2, 1, 1);
+        const bool onePressed = !puzzle::allSwitchesOn(app) && !crystalShown();
+        const bool tp2 = swapOnto(4, 2, 2, 1);
+        steps(3);
+        const bool solved0 = tp1 && tp2 && onePressed && puzzle::allSwitchesOn(app) && crystalShown() && pz.esp == 1 &&
+                             app.game.vars[13] == 2;
+        pz.esp = 0;
+        setActor(app, 0, puzzle::centre(app, 0, 0), nullptr, false);
+        const int b3 = puzzle::objectAt(app, 1, 3, 1);
+        if (b3 >= 0) puzzle::teleportTo(app, b3);
+        const bool refused = b3 >= 0 && !pz.busy && pz.tpState == 0 && pz.punished > 0 && pz.objs[size_t(b3)].row == 3;
         for (int f = 0; f < 3; ++f) stepPuzzleHud(app);
-        if (const char* path = SDL_getenv("CR_PUZZLE_SHOT_HUD")) { // the pad at 0 ESP (CR_PUZZLE_SHOT_HUD: saved)
-            pz.blink = 0;
-            const int keepFade = app.fieldMenu.fade;
-            app.fieldMenu.fade = 320;
-            app.lastTicks = 0;
-            drawFrame(app, false);
-            saveFrame(app, path);
-            app.fieldMenu.fade = keepFade;
-        }
-        const bool hudBlink = popped && pz.hadEsp && pz.blink > 0 && pz.shownEsp == 0;
-        problems += !hudBlink;
-        const bool swapped = firstGem && block >= 0 && pz.objs[size_t(block)].row == 2 && pz.objs[size_t(block)].col == 2 &&
-                             pr == 2 && pc == 1 && puzzle::objectAt(app, 1, 2, 2) == block && app.game.vars[13] == 1 && pz.esp == 0;
-        // the gem at (4, 4) (ESP 1, none left)
-        setActor(app, 0, puzzle::centre(app, 4, 4), nullptr, true);
-        for (int f = 0; f < 3; ++f) stepEvents(app);
-        const int espAfterGems = pz.esp;
-        problems += espAfterGems != 1;
-        problems += !swapped || puzzle::gemsLeft(app);
-        // the crystal's scene starts by itself, sets the room's flag, then the crystal shows
-        bool sceneRan = false;
-        for (int f = 0; f < 6000; ++f) {
-            stepEvents(app);
-            sceneRan |= app.runner.running();
-            app.dialogue.clear();
-            if (app.choiceFlag >= 0) answerChoice(app, true);
-            app.tapPending = true;
-            if (sceneRan && !app.runner.running() && app.pendingEntry == App::Entry::None) break;
-        }
-        for (int f = 0; f < 3; ++f) stepEvents(app); // the crystal shows the frame after
-        bool crystal = false;
-        for (const App::Puzzle::Obj& o : pz.objs) crystal |= o.type == cr::kTypeCrystal && o.shown;
-        const bool roomFlag = app.game.flag(3300), clearFlag = app.game.flag(3000);
-        problems += !sceneRan || (!crystal && !clearFlag);
         app.lastTicks = 0;
         drawFrame(app, false);
         const int errs = app.renderer.takeErrors();
-        problems += errs;
-        // stage 8 (map 122): the block at (4, 4) teleported onto the switch at (0, 0) presses it - the switch crystal's scene
-        app.runner.stop();
-        app.game = cr::GameState();
-        app.mapNumber = -1;
-        w.map = cr::kFirstPuzzleMap + 8;
-        performWarp(app, w, -1);
-        for (int f = 0; f < 3000 && (app.runner.running() || app.pendingEntry != App::Entry::None); ++f) {
-            stepEvents(app);
-            app.dialogue.clear();
-            if (app.choiceFlag >= 0) answerChoice(app, true);
-            app.tapPending = true;
-        }
-        for (int quiet = 0, f = 0; f < 3000 && quiet < 10; ++f) { // the room's entry script, to its end
-            stepEvents(app);
-            app.dialogue.clear();
-            if (app.choiceFlag >= 0) answerChoice(app, true);
-            app.tapPending = true;
-            quiet = app.runner.running() || app.pendingEntry != App::Entry::None ? 0 : quiet + 1;
-        }
-        auto crystalShown = [&] {
-            for (const App::Puzzle::Obj& o : pz.objs)
-                if (o.type == cr::kTypeCrystal && o.shown) return true;
-            return false;
+        problems += !start0 || !solved0 || !refused || errs;
+        std::printf("puzzle room: stage 0 (teleport) - start %s, two blocks onto the switches %s, at 0 ESP %s\n", start0 ? "right" : "WRONG",
+                    solved0 ? "bring the crystal" : "DON'T bring the crystal", refused ? "refused" : "NOT refused");
+        // Stage 4 (psychokinesis): A (3, 2), B (4, 4); the leader at (1, 1), out of every path
+        room(4, false);
+        settle(3000);
+        int poseOk = 0, quakes = 0, slides = 0;
+        auto slide = [&](int r, int c, int dir) { // dir 1 up, 2 down, 3 left, 4 right: the block's cell after it
+            const int t = puzzle::objectAt(app, 1, r, c);
+            if (t < 0) return std::pair<int, int>{-1, -1};
+            puzzle::pkGrab(app, t);
+            for (int f = 0; f < 20 && pz.objs[size_t(t)].pk != 2; ++f) stepEvents(app);
+            updatePlayer(app, 0, 0); // the leader's pose while it's held
+            poseOk += app.player.action == 3 && app.player.loopFrom == 2;
+            puzzle::pkSend(app, dir);
+            bool quaked = false;
+            for (int f = 0; f < 200 && pz.pkState && pz.scene == 4; ++f) {
+                stepEvents(app);
+                quaked |= app.fieldQuake.mode == 1 && app.fieldQuake.frames == 8 && app.fieldQuake.amp == 0.5f;
+            }
+            ++slides, quakes += quaked;
+            updatePlayer(app, 0, 0);
+            return std::pair<int, int>{pz.objs[size_t(t)].row, pz.objs[size_t(t)].col};
         };
-        for (int f = 0; f < 3; ++f) stepEvents(app);
-        const bool hiddenBefore = !crystalShown() && !app.runner.running(); // the room's script done, the switch up
-        setActor(app, 0, puzzle::centre(app, 0, 0), nullptr, false);
-        const int b8 = puzzle::objectAt(app, 1, 4, 4);
-        if (b8 >= 0) puzzle::teleportTo(app, b8);
-        for (int quiet = 0, f = 0; f < 3000 && quiet < 10; ++f) {
-            stepEvents(app);
-            app.dialogue.clear();
-            if (app.choiceFlag >= 0) answerChoice(app, true);
-            app.tapPending = true;
-            quiet = app.runner.running() || app.puzzle.tpState ? 0 : quiet + 1;
-        }
-        const bool switchScene = hiddenBefore && crystalShown();
-        const bool pressed = puzzle::allSwitchesOn(app);
-        if (SDL_getenv("CR_PUZZLE_DEBUG"))
-            for (const App::Puzzle::Obj& o : pz.objs)
-                if (o.type == cr::kTypeCrystal || o.type == cr::kTypeWeighSwitch)
-                    std::printf("  obj npc %d id %d type %d bits %03x shown %d on %d; flag 3308 %d 4000 %d, runner %s, last %s\n", o.npc,
-                                app.npcs[size_t(o.npc)].id, o.type, app.npcs[size_t(o.npc)].puzzle, o.shown, o.on, app.game.flag(3308),
-                                app.game.flag(4000), app.runner.running() ? app.runner.where().c_str() : "idle", app.lastEvent.c_str());
-        problems += b8 < 0 || !pressed || !switchScene;
-        app.runner.stop();
-        std::printf("puzzle room: stage 8 - the block teleported onto the switch %s, the switch crystal %s\n",
-                    pressed ? "presses it" : "DIDN'T press it", switchScene ? "came" : "DIDN'T come");
-        // stage 24 (map 138, psychokinesis): (3, 3) right to (3, 4), up to (1, 4) under the fixed
-        // block at (0, 4), then (1, 1) right onto the switch at (1, 3); a letting go costs nothing;
-        // then (3, 1) sent right into the leader at (3, 2) squashes the try
-        {
-            app.game = cr::GameState();
-            app.mapNumber = -1;
-            w.map = cr::kFirstPuzzleMap + 24;
-            performWarp(app, w, -1);
-            for (int quiet = 0, f = 0; f < 3000 && quiet < 10; ++f) {
-                stepEvents(app);
-                app.dialogue.clear();
-                if (app.choiceFlag >= 0) answerChoice(app, true);
-                app.tapPending = true;
-                quiet = app.runner.running() || app.pendingEntry != App::Entry::None ? 0 : quiet + 1;
-            }
-            setActor(app, 0, puzzle::centre(app, 2, 2), nullptr, false);
-            int poseOk = 0, quakes = 0, slides = 0;
-            auto slide = [&](int r, int c, int dir) { // the block's cell after the slide (-1 none)
-                const int t = puzzle::objectAt(app, 1, r, c);
-                if (t < 0) return std::pair<int, int>{-1, -1};
-                puzzle::pkGrab(app, t);
-                for (int f = 0; f < 20 && pz.objs[size_t(t)].pk != 2; ++f) stepEvents(app);
-                updatePlayer(app, 0, 0); // the leader's pose while it's held
-                poseOk += app.player.action == 3 && app.player.loopFrom == 2;
-                puzzle::pkSend(app, dir);
-                bool quaked = false;
-                for (int f = 0; f < 200 && pz.pkState && pz.scene == 4; ++f) {
-                    stepEvents(app);
-                    quaked |= app.fieldQuake.mode == 1 && app.fieldQuake.frames == 8 && app.fieldQuake.amp == 0.5f;
-                }
-                ++slides, quakes += quaked;
-                updatePlayer(app, 0, 0);
-                poseOk -= app.player.action == 3; // standing again
-                return std::pair<int, int>{pz.objs[size_t(t)].row, pz.objs[size_t(t)].col};
-            };
-            const bool pkRoom = pz.stage == 24 && pz.esp == -1;
-            const auto drop = slide(3, 3, 2);  // down: (4, 3) free, then the edge
-            const auto drop2 = slide(4, 3, 2); // at the edge: nowhere to go - let go, no use counted
-            const bool letGo = drop2 == std::pair<int, int>{4, 3} && app.game.vars[13] == 1 && !pz.busy;
-            // the solution, from the room as it began
-            app.runner.stop();
-            app.npcs = app.events.npcs(app.mapNumber);
-            puzzle::enter(app);
-            pz.scene = 4;
-            setActor(app, 0, puzzle::centre(app, 2, 2), nullptr, false);
-            const auto s1 = slide(3, 3, 4), s2 = slide(3, 4, 1), s3 = slide(1, 1, 4);
-            const bool solved = s1 == std::pair<int, int>{3, 4} && s2 == std::pair<int, int>{1, 4} &&
-                                s3 == std::pair<int, int>{1, 3} && puzzle::allSwitchesOn(app) && app.game.vars[13] == 3;
-            for (int quiet = 0, f = 0; f < 3000 && quiet < 10; ++f) { // the switch crystal's scene
-                stepEvents(app);
-                app.dialogue.clear();
-                if (app.choiceFlag >= 0) answerChoice(app, true);
-                app.tapPending = true;
-                quiet = app.runner.running() ? 0 : quiet + 1;
-            }
-            // the squash
-            setActor(app, 0, puzzle::centre(app, 3, 2), nullptr, false);
-            app.menuSoundLog.clear();
-            slide(3, 1, 4);
-            const bool squashed = pz.scene == 2;
-            if (SDL_getenv("CR_PUZZLE_DEBUG"))
-                std::printf("  squash: scene %d pkState %d busy %d runner %s cleared %d dialogue %d, player %.1f %.1f\n", pz.scene,
-                            pz.pkState, pz.busy, app.runner.running() ? app.runner.where().c_str() : "idle", puzzle::cleared(app),
-                            int(app.dialogue.size()), app.walker.pos.x, app.walker.pos.z);
-            for (int f = 0; f < 40 && pz.scene != 4; ++f) stepEvents(app);
-            const bool restored = pz.scene == 4 && !puzzle::allSwitchesOn(app) && puzzle::objectAt(app, 1, 1, 1) >= 0 &&
-                                  puzzle::objectAt(app, 1, 3, 3) >= 0 && app.game.vars[13] == 0;
-            problems += poseOk < 3 || quakes < 3;
-            std::printf("puzzle room: stage 24 - the holding pose %d of %d, landing quakes %d\n", poseOk, slides, quakes);
-            problems += !pkRoom || drop != std::pair<int, int>{4, 3} || !letGo ||
-                        !solved || !squashed || !restored;
-            std::printf("puzzle room: stage 24 (psychokinesis) - slides %s, letting go %s, the switch %s in 3, squash %s, "
-                        "room %s\n", drop == std::pair<int, int>{4, 3} ? "ok" : "FAILED", letGo ? "free" : "COUNTED", solved ? "pressed" : "NOT pressed",
-                        squashed ? "resets" : "DIDN'T reset", restored ? "restored" : "NOT restored");
-            app.runner.stop();
-        }
-        // stage 32 (map 146, toughness, ESP 2): from (1, 1) the fragile block at (0, 1) breaks
-        // (ESP 1), the gem at (0, 0) is reached through its cell (ESP 2); at 0 ESP a tap is refused.
-        // Stage 40 (map 154, ESP 0): the gem at (1, 1) (ESP 1), a tap on a red block puts both
-        // away and brings both blue ones; the gem at (1, 3) (ESP 1), then from the red block's cell
-        // (0, 2) a tap on a blue one brings the reds back onto the leader - the room resets
-        {
-            auto room = [&](int stageNo) {
-                app.runner.stop();
-                app.game = cr::GameState();
-                app.mapNumber = -1;
-                w.map = cr::kFirstPuzzleMap + stageNo;
-                performWarp(app, w, -1);
-                for (int quiet = 0, f = 0; f < 3000 && quiet < 10; ++f) {
-                    stepEvents(app);
-                    app.dialogue.clear();
-                    if (app.choiceFlag >= 0) answerChoice(app, true);
-                    app.tapPending = true;
-                    quiet = app.runner.running() || app.pendingEntry != App::Entry::None ? 0 : quiet + 1;
-                }
-            };
-            auto walkTo = [&](int r, int c) {
-                setActor(app, 0, puzzle::centre(app, r, c), nullptr, true);
-                for (int f = 0; f < 3; ++f) stepEvents(app);
-            };
-            room(32);
-            walkTo(1, 1);
-            const int frag = puzzle::objectAt(app, 1, 0, 1);
-            const bool fragOk0 = pz.stage == 32 && pz.esp == 2 && frag >= 0 && pz.objs[size_t(frag)].type == cr::kTypeFragile &&
-                                 pz.objs[size_t(frag)].shown;
-            app.walker.heading = 3.14159265f; // facing row - 1
-            puzzle::abilityKey(app);
-            for (int f = 0; f < 3; ++f) stepEvents(app);
-            const bool broke = frag >= 0 && !pz.objs[size_t(frag)].shown && puzzle::objectAt(app, 1, 0, 1) < 0 && pz.esp == 1 &&
-                               app.game.vars[13] == 1 && !npcVisible(app, size_t(pz.objs[size_t(frag)].npc));
-            walkTo(0, 1);
-            walkTo(0, 0);
-            const bool gem = pz.esp == 2;
-            pz.esp = 0;
-            const int frag2 = puzzle::objectAt(app, 1, 1, 0);
-            puzzle::toughTap(app, frag2);
-            for (int f = 0; f < 3; ++f) stepEvents(app);
-            const bool refusedT = frag2 >= 0 && pz.objs[size_t(frag2)].shown && app.game.vars[13] == 1 && pz.punished > 0;
-            room(40);
-            walkTo(1, 1);
-            const int red = puzzle::objectAt(app, 1, 0, 2), blue = puzzle::objectAt(app, 1, 2, 0);
-            auto solid = [&](int t) { return t >= 0 && pz.objs[size_t(t)].shown && !pz.objs[size_t(t)].ghost; };
-            auto ghostOf = [&](int t) {
-                const App::NpcDraw* d = t >= 0 ? puzzle::drawOf(app, pz.objs[size_t(t)].npc) : nullptr;
-                return t >= 0 && pz.objs[size_t(t)].ghost && d && d->alpha < 0.4f;
-            };
-            const bool start = pz.stage == 40 && solid(red) && ghostOf(blue) && pz.esp == 1;
-            puzzle::toughTap(app, red);
-            for (int f = 0; f < 8; ++f) stepEvents(app);
-            const int red2 = puzzle::objectAt(app, 1, 4, 2), blue2 = puzzle::objectAt(app, 1, 2, 4);
-            const bool swappedRB = ghostOf(red) && ghostOf(red2) && solid(blue) && solid(blue2) && pz.esp == 0;
-            if (const char* shot = SDL_getenv("CR_PUZZLE_SHOT")) { // a look at the changed-over blocks
-                app.lastTicks = 0;
-                drawFrame(app, false);
-                int sw = 0, sh = 0;
-                std::vector<uint8_t> px;
-                if (app.renderer.readPixels(px, sw, sh)) {
-                    SDL_Surface* surf = SDL_CreateSurface(sw, sh, SDL_PIXELFORMAT_RGBA32);
-                    for (int y = 0; y < sh; ++y)
-                        std::memcpy(static_cast<uint8_t*>(surf->pixels) + size_t(y) * surf->pitch, &px[size_t(y) * sw * 4], size_t(sw) * 4);
-                    SDL_SaveBMP(surf, shot);
-                    SDL_DestroySurface(surf);
-                }
-            }
-            walkTo(1, 3);
-            setActor(app, 0, puzzle::centre(app, 0, 2), nullptr, false);
-            puzzle::toughTap(app, blue);
-            stepEvents(app);
-            const bool squashedRB = pz.scene == 2;
-            for (int f = 0; f < 40 && pz.scene != 4; ++f) stepEvents(app);
-            const bool restoredRB = pz.scene == 4 && solid(puzzle::objectAt(app, 1, 0, 2)) && ghostOf(puzzle::objectAt(app, 1, 2, 0));
-            problems += !fragOk0 || !broke || !gem || !refusedT || !start || !swappedRB || !squashedRB || !restoredRB;
-            std::printf("puzzle room: stage 32 (toughness) - fragile block %s, gem %s, at 0 ESP %s; stage 40 - red / blue %s, "
-                        "%s, squash %s, room %s\n", fragOk0 && broke ? "breaks" : "DIDN'T break", gem ? "ok" : "MISSED",
-                        refusedT ? "refused" : "NOT refused", start ? "start right" : "start WRONG", swappedRB ? "change over" : "DON'T change",
-                        squashedRB ? "resets" : "DIDN'T reset", restoredRB ? "restored" : "NOT restored");
-            app.runner.stop();
-        }
-        // stage 48 (map 162, pyrokinesis, ESP 0): the gem at (0, 2) (ESP 1), then the candle switch
-        // at (2, 2) lights (lit 15 frames on) and changes its candle blocks over - the three lit ones
-        // (+22 = 1) put away, the three out lit. Stage 56 (map 170): switches linked in pairs (1, 2)
-        // - (3, 2) and (2, 1) - (2, 3): one lit lights the other (5 + 15 frames), with a beam; one put
-        // out puts the other out; all four lit bring the crystal (its scene)
-        {
-            auto room = [&](int stageNo) {
-                app.runner.stop();
-                app.game = cr::GameState();
-                app.mapNumber = -1;
-                w.map = cr::kFirstPuzzleMap + stageNo;
-                performWarp(app, w, -1);
-                for (int quiet = 0, f = 0; f < 3000 && quiet < 10; ++f) {
-                    stepEvents(app);
-                    app.dialogue.clear();
-                    if (app.choiceFlag >= 0) answerChoice(app, true);
-                    app.tapPending = true;
-                    quiet = app.runner.running() || app.pendingEntry != App::Entry::None ? 0 : quiet + 1;
-                }
-            };
-            auto steps = [&](int n) { for (int f = 0; f < n; ++f) stepEvents(app); };
-            room(48);
-            setActor(app, 0, puzzle::centre(app, 0, 2), nullptr, true);
+        using RC = std::pair<int, int>;
+        const bool pkRoom = pz.stage == 4 && pz.esp == -1;
+        setActor(app, 0, puzzle::centre(app, 1, 1), nullptr, false);
+        const RC m1 = slide(3, 2, 3), m2 = slide(4, 4, 1);
+        const RC edge = slide(0, 4, 1); // at the top already: let go, not counted
+        const bool letGo = edge == RC{0, 4} && app.game.vars[13] == 2 && !pz.busy;
+        const RC m3 = slide(0, 4, 3), m4 = slide(0, 0, 2), m5 = slide(2, 0, 4), m6 = slide(3, 0, 2), m7 = slide(4, 0, 4);
+        const RC m8 = slide(2, 1, 2);
+        const bool path = m1 == RC{3, 0} && m2 == RC{0, 4} && m3 == RC{0, 0} && m4 == RC{2, 0} && m5 == RC{2, 1} && m6 == RC{4, 0} &&
+                          m7 == RC{4, 1} && m8 == RC{3, 1};
+        const bool pressed4 = path && puzzle::allSwitchesOn(app) && app.game.vars[13] == 8;
+        settle(3000); // the switch crystal's scene
+        steps(3);
+        const bool crystal4 = crystalShown();
+        // the squash: a fresh room, the leader at (3, 1), A sent left through it
+        room(4, false);
+        settle(3000);
+        setActor(app, 0, puzzle::centre(app, 3, 1), nullptr, false);
+        slide(3, 2, 3);
+        const bool squashed = pz.scene == 2;
+        for (int f = 0; f < 40 && pz.scene != 4; ++f) stepEvents(app);
+        const bool restored = pz.scene == 4 && puzzle::objectAt(app, 1, 3, 2) >= 0 && app.game.vars[13] == 0;
+        problems += !pkRoom || !letGo || !pressed4 || !crystal4 || !squashed || !restored || poseOk < 8 || quakes < 8;
+        std::printf("puzzle room: stage 4 (psychokinesis) - %d slides (holding pose %d, landing quakes %d), the path %s, at an edge %s, "
+                    "the switch %s, crystal %s, squash %s, room %s\n", slides, poseOk, quakes, path ? "ok" : "WRONG",
+                    letGo ? "let go free" : "COUNTED", pressed4 ? "pressed" : "NOT pressed", crystal4 ? "came" : "DIDN'T come",
+                    squashed ? "resets" : "DIDN'T reset", restored ? "restored" : "NOT restored");
+        // Stage 8 (toughness, ESP 1): from (0, 0) facing down the fragile block at (1, 0) breaks;
+        // through it, the gem at (1, 1)
+        room(8, false);
+        settle(3000);
+        auto walkTo = [&](int r, int c) {
+            setActor(app, 0, puzzle::centre(app, r, c), nullptr, true);
             steps(3);
-            const int sw = puzzle::objectAt(app, 1, 2, 2);
-            int litBlocks = 0, outBlocks = 0;
-            for (const App::Puzzle::Obj& o : pz.objs)
-                if (o.type == cr::kTypeCandle) (o.shown ? litBlocks : outBlocks) += 1;
-            const bool start48 = pz.stage == 48 && pz.esp == 1 && sw >= 0 && pz.objs[size_t(sw)].type == cr::kTypeCandleSwitch &&
-                                 litBlocks == 3 && outBlocks == 3;
-            const int b01 = puzzle::objectAt(app, 1, 0, 1), b03 = puzzle::objectAt(app, 1, 0, 3);
-            setActor(app, 0, puzzle::centre(app, 1, 1), nullptr, false);
-            puzzle::pyroTap(app, sw);
-            steps(2);
-            const bool lighting = sw >= 0 && pz.objs[size_t(sw)].cs == 2 && pz.esp == 0 && app.game.vars[13] == 1;
-            steps(16);
-            const bool lit48 = sw >= 0 && pz.objs[size_t(sw)].cs == 3;
-            const bool changed = b01 >= 0 && b03 >= 0 && !pz.objs[size_t(b01)].shown && pz.objs[size_t(b01)].ghost &&
-                                 pz.objs[size_t(b03)].shown && !npcVisible(app, size_t(pz.objs[size_t(b01)].npc));
-            puzzle::pyroTap(app, sw); // no ESP: refused
-            steps(2);
-            const bool refusedP = sw >= 0 && pz.objs[size_t(sw)].cs == 3 && pz.punished > 0;
-            room(56);
-            const int s12 = puzzle::objectAt(app, 1, 1, 2), s32 = puzzle::objectAt(app, 1, 3, 2), s21 = puzzle::objectAt(app, 1, 2, 1),
-                      s23 = puzzle::objectAt(app, 1, 2, 3);
-            auto csOf = [&](int t) { return t >= 0 ? pz.objs[size_t(t)].cs : -1; };
-            const bool start56 = pz.stage == 56 && csOf(s12) == 0 && csOf(s32) == 0 && csOf(s21) == 0 && csOf(s23) == 0;
-            setActor(app, 0, puzzle::centre(app, 0, 0), nullptr, false);
-            puzzle::pyroTap(app, s12);
-            steps(3);
-            const bool beam = s32 >= 0 && pz.objs[size_t(s32)].csFrom == pz.objs[size_t(s12)].npc;
-            auto shot = [&](const char* var) { // CR_PUZZLE_SHOT56A / B: a look at the stand-ins
-                const char* path = SDL_getenv(var);
-                if (!path) return;
-                app.lastTicks = 0;
-                drawFrame(app, false);
-                int sw = 0, sh = 0;
-                std::vector<uint8_t> px;
-                if (!app.renderer.readPixels(px, sw, sh)) return;
-                SDL_Surface* surf = SDL_CreateSurface(sw, sh, SDL_PIXELFORMAT_RGBA32);
-                for (int y = 0; y < sh; ++y)
-                    std::memcpy(static_cast<uint8_t*>(surf->pixels) + size_t(y) * surf->pitch, &px[size_t(y) * sw * 4], size_t(sw) * 4);
-                SDL_SaveBMP(surf, path);
-                SDL_DestroySurface(surf);
-            };
-            app.lastTicks = 0;
-            drawFrame(app, false); // the beam and the first flame drawn
-            const int fxErrs = app.renderer.takeErrors();
-            shot("CR_PUZZLE_SHOT56A");
-            steps(25);
-            shot("CR_PUZZLE_SHOT56B");
-            auto flames = [&] {
-                int n = 0;
-                for (const Effect& e : app.fieldEffects) n += e.id == 0xc && e.loop;
-                return n;
-            };
-            const bool pair = csOf(s12) == 3 && csOf(s32) == 3 && csOf(s21) == 0 && flames() == 2;
-            puzzle::pyroTap(app, s32); // out again, and its pair
-            steps(40);
-            const bool outPair = csOf(s12) == 0 && csOf(s32) == 0 && flames() == 0;
-            puzzle::pyroTap(app, s12);
-            puzzle::pyroTap(app, s21);
-            bool crystal56 = false;
-            for (int quiet = 0, f = 0; f < 3000 && (quiet < 10 || f < 40); ++f) {
-                stepEvents(app);
-                app.dialogue.clear();
-                if (app.choiceFlag >= 0) answerChoice(app, true);
-                app.tapPending = true;
-                quiet = app.runner.running() ? 0 : quiet + 1;
-            }
-            steps(3);
-            for (const App::Puzzle::Obj& o : pz.objs) crystal56 |= o.type == cr::kTypeCrystal && o.shown;
-            const bool allLit = puzzle::allCandlesLit(app);
-            problems += !start48 || !lighting || !lit48 || !changed || !refusedP || !start56 || !beam || fxErrs || !pair || !outPair ||
-                        !allLit || !crystal56;
-            glErrors += fxErrs;
-            std::printf("puzzle room: stage 48 (pyrokinesis) - %s, switch %s, candle blocks %s, at 0 ESP %s; stage 56 - %s, beam %s, "
-                        "pair %s, out %s, all lit %s, crystal %s\n", start48 ? "start right" : "start WRONG",
-                        lighting && lit48 ? "lights" : "DOESN'T light", changed ? "change over" : "DON'T change",
-                        refusedP ? "refused" : "NOT refused", start56 ? "start right" : "start WRONG", beam ? "drawn" : "MISSING",
-                        pair ? "lit" : "NOT lit", outPair ? "together" : "NOT together", allLit ? "yes" : "no",
-                        crystal56 ? "came" : "DIDN'T come");
-            app.runner.stop();
-        }
-        std::printf("puzzle room: stage 0 - %d blocks, %d gems, swap %s, ESP %d after the gems, crystal scene %s (flag 3300 %d, "
-                    "3000 %d, crystal %s); %d problems\n", blocks, gems, refused ? (swapped ? "refused at 0 ESP, then ok" : "FAILED") : "NOT refused at 0 ESP", espAfterGems,
-                    sceneRan ? "ran" : "didn't run", roomFlag, clearFlag, crystal ? "shown" : "hidden", problems);
+        };
+        walkTo(0, 0);
+        const int frag = puzzle::objectAt(app, 1, 1, 0);
+        const bool fragOk0 = pz.stage == 8 && pz.esp == 1 && frag >= 0 && pz.objs[size_t(frag)].type == cr::kTypeFragile &&
+                             pz.objs[size_t(frag)].shown;
+        app.walker.heading = 0; // facing row + 1
+        puzzle::abilityKey(app);
+        steps(3);
+        const bool broke = frag >= 0 && !pz.objs[size_t(frag)].shown && puzzle::objectAt(app, 1, 1, 0) < 0 && pz.esp == 0 &&
+                           app.game.vars[13] == 1 && !npcVisible(app, size_t(pz.objs[size_t(frag)].npc));
+        walkTo(1, 0);
+        walkTo(1, 1);
+        const bool gem = pz.esp == 1;
+        pz.esp = 0;
+        const int frag2 = puzzle::objectAt(app, 1, 1, 2);
+        puzzle::toughTap(app, frag2);
+        steps(3);
+        const bool refusedT = frag2 >= 0 && pz.objs[size_t(frag2)].shown && app.game.vars[13] == 1 && pz.punished > 0;
+        problems += !fragOk0 || !broke || !gem || !refusedT;
+        std::printf("puzzle room: stage 8 (toughness) - fragile block %s, gem %s, at 0 ESP %s\n", fragOk0 && broke ? "breaks" : "DIDN'T break",
+                    gem ? "ok" : "MISSED", refusedT ? "refused" : "NOT refused");
+        // Stage 12 (pyrokinesis): the switch at (2, 2) lights (lit 15 frames on, a flame); then
+        // every one still out tapped until all are lit, which brings the crystal
+        room(12, false);
+        settle(3000);
+        setActor(app, 0, puzzle::centre(app, 0, 2), nullptr, false);
+        const int sw = puzzle::objectAt(app, 1, 2, 2);
+        auto csOf = [&](int t) { return t >= 0 ? pz.objs[size_t(t)].cs : -1; };
+        const bool start12 = pz.stage == 12 && pz.esp == -1 && sw >= 0 && pz.objs[size_t(sw)].type == cr::kTypeCandleSwitch && csOf(sw) == 0;
+        puzzle::pyroTap(app, sw);
+        steps(2);
+        const bool lighting = csOf(sw) == 2 && app.game.vars[13] == 1;
+        steps(40);
+        auto flames = [&] {
+            int n = 0;
+            for (const Effect& e : app.fieldEffects) n += e.id == 0x92 && e.loop; // (CR1's 0xc + 0x86)
+            return n;
+        };
+        const bool lit12 = csOf(sw) == 3 && flames() >= 1;
+        app.lastTicks = 0;
+        drawFrame(app, false); // the flames (and any beam) drawn
+        const int fxErrs = app.renderer.takeErrors();
+        int taps = 1;
+        for (int round = 0; round < 40 && !puzzle::allCandlesLit(app); ++round)
+            for (size_t i = 0; i < pz.objs.size() && !puzzle::allCandlesLit(app); ++i)
+                if (pz.objs[i].type == cr::kTypeCandleSwitch && pz.objs[i].cs == 0) {
+                    puzzle::pyroTap(app, int(i));
+                    ++taps;
+                    steps(45);
+                }
+        const bool allLit = puzzle::allCandlesLit(app);
+        settle(3000);
+        steps(3);
+        const bool crystal12 = crystalShown();
+        problems += !start12 || !lighting || !lit12 || fxErrs || !allLit || !crystal12;
+        glErrors += fxErrs + errs;
+        std::printf("puzzle room: stage 12 (pyrokinesis) - start %s, a switch %s, all lit %s (%d taps), crystal %s; %d problems\n",
+                    start12 ? "right" : "WRONG", lighting && lit12 ? "lights" : "DOESN'T light", allLit ? "yes" : "NO", taps,
+                    crystal12 ? "came" : "DIDN'T come", problems);
         mapErrors += problems;
-        glErrors += errs;
         app.runner.stop();
         app.game = cr::GameState();
         app.puzzle = App::Puzzle();
@@ -16548,6 +16340,29 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         openLastBattle(app);
         for (int f = 0; f < 40 && app.lastBattle.open; ++f) stepLastBattle(app);
     }
+    if (app.captureMenu == 11) { // --puzzle-dump: each stage's ability, ESP and objects (types by row / column)
+        static const char* const kName[11] = {"-", "block", "fixed", "fragile", "candle", "red", "blue", "cswitch", "wswitch",
+                                              "gem", "crystal"};
+        for (int st = 0; st < cr::kPuzzleStages; ++st) {
+            app.runner.stop();
+            app.game = cr::GameState();
+            cr::WarpRequest w;
+            w.valid = true, w.area = cr::kPuzzleArea, w.map = cr::kFirstPuzzleMap + st;
+            performWarp(app, w, -1);
+            for (int f = 0; f < 400 && (app.runner.running() || app.pendingEntry != App::Entry::None); ++f) {
+                stepEvents(app);
+                app.dialogue.clear();
+                if (app.choiceFlag >= 0) answerChoice(app, true);
+                app.tapPending = true;
+            }
+            const cr::PuzzleStage& ps = cr::kPuzzleStage[st];
+            std::printf("puzzle stage %d (map %d): ability %d, esp %d, %dx%d:", st, cr::kFirstPuzzleMap + st, ps.ability, ps.esp,
+                        ps.rows, ps.cols);
+            for (const App::Puzzle::Obj& o : app.puzzle.objs)
+                std::printf(" %s@%d,%d%s", kName[std::clamp(o.type, 0, 10)], o.row, o.col, o.shown ? "" : "(hidden)");
+            std::printf("\n");
+        }
+    }
     if (app.captureMenu == 10) { // --collection
         openCollection(app);
         for (int f = 0; f < 30; ++f) stepCollection(app);
@@ -16842,6 +16657,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         else if (SDL_strcmp(argv[i], "--last-battle") == 0) app->captureMenu = 9;
         else if (SDL_strcmp(argv[i], "--scenarios") == 0) app->captureMenu = 5;
         else if (SDL_strcmp(argv[i], "--collection") == 0) app->captureMenu = 10;
+        else if (SDL_strcmp(argv[i], "--puzzle-dump") == 0) app->captureMenu = 11;
         else if (SDL_strcmp(argv[i], "--manual") == 0) app->captureMenu = 6;
         else if (SDL_strcmp(argv[i], "--title") == 0) app->captureTitle = true;
     for (int i = 1; i < argc; ++i) {

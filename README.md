@@ -65,7 +65,9 @@ Done so far:
 - [x] native calls 2036..2047 (SetPrtyNo, SetPrtyLv_Add, TBox, SaveEvent, Chk / Chg_BtlFld,
       Chg_MsgSkip, Chg_char, Add_OMU_ITEM, NpcShadow_onoff, puzzle_teleport_cnt, EquipAcce) and
       2015 FireWall
-- [x] puzzle rooms' stages (16, maps 153..168) from Omega's `PUZZLE_ROOM_DATA`
+- [x] puzzle rooms' stages (16, maps 153..168) from Omega's `PUZZLE_ROOM_DATA`, played through in
+      the self-test on Omega's own rooms (teleport, psychokinesis, toughness, pyrokinesis: each to
+      its crystal or its gem; the banner on flag 3090); `--puzzle-dump` lists every stage's objects
 - [x] the story plays by itself (`--explore`) from the opening through its first battles to the
       Ark, the first dungeon and back
 - [x] the Scenarios screen as Omega's bingo cards (`__menuu_Sccnarios*`): the faces and both
@@ -79,7 +81,6 @@ Done so far:
 
 Next (the CR1 self-test's checks that fail on Omega point at most of these):
 
-- [ ] the puzzles' play against Omega's objects (WarpCrystal CS / NG / WS) and the self-test's stages
 - [ ] the battle stage's own motion during a staged action (440: `mdl_set_act_nextanm2` on the
       stage model) and `btlcalc_prc_0404` before 430 / 436 / 442
 
