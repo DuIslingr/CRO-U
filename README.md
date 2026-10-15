@@ -91,6 +91,12 @@ Done so far:
 - [x] Omega's text at its own size (PutMsg's lines doubled with the rest of its tex2d; names at
       about three quarters), the item band (`Uty_GetItem_*`), SD full-screen cards (the second
       scenario's notice), Select Scenario's card (flag 0x643)
+- [x] the Vita, as an add-on (`--vita`) or alone (`--data <PCSG00499>`): its scripts and eight
+      languages, voices (bank order: `_no_silent` then the clips by name) and music, all of its
+      textures (P8 with an ARGB palette for the effects), its boot logos; alone it runs as the Vita
+      does - the iPhone's Retina path (`_is_iPadDisplay` 0, `_is_RetinaDisplay` 1, the `_hd` sheets)
+      on its 960 x 544 screen (Layout "Vita": the 2D at 0.85, the paintings, script pictures and
+      portraits at full size, the battle over the whole screen)
 - [x] the self-test runs clean on Omega's data (its checks moved onto Omega's rooms, groups,
       scripts and tables)
 
