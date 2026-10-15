@@ -3683,14 +3683,13 @@ void openSaveScreen(App& app, bool load) {
     ss.load = load;
     if (load) cr::changeScenario(app.game, app.itemTable, app.chosenPair - 1); // SaveLoadSet: __prty_chg(var 0 - 1)
     ss.haveSave = cr::readSave(slotPath(app, load ? app.chosenPair : currentPair(app)), ss.data);
-    if (load) { // __menuu_SaveLoadSet, the title's: the emblems and plates from every save's flags
+    if (load) { // __menuu_SaveLoadSet, the title's (Omega): the scenario's load flag (_gkanLoadFlgTbl:
+        // 31 / 32, its story cleared) makes New ask about the clear data; no emblems, and the first
+        // plate (CR1's last battle) is never shown
         const cr::GameState sys = allPairsFlags(app);
-        const int p = std::clamp(app.chosenPair - 1, 0, 3);
-        const int emblem[3] = {31 + 2 * p, 32 + 2 * p, 39};
-        for (int k = 0; k < 3; ++k)
-            if (sys.flag(emblem[k])) ss.emblems |= 1u << k;
-        ss.allClear = sys.flag(32) && sys.flag(34) && sys.flag(36) && sys.flag(38);
-        ss.cleared = sys.flag(40 + p);
+        const int p = std::clamp(app.chosenPair - 1, 0, cr::kScenarios - 1);
+        ss.allClear = false;
+        ss.cleared = sys.flag(31 + p);
     }
     if (!load) { // save: straight to "Save data?"
         ss.phase = 1;
@@ -6593,13 +6592,13 @@ void drawResumePrompt(App& app) {
 // the second held back by flag 0xfed / 0xfee until the story lets them fight together -, and
 // ResetFieldFlag_NewGame clears scenario 0's field flags (3000..3015, 3300..3379). Scenario 0 also
 // loses the plates and genes 114, 116, 82, 117, 187..190 and (a fresh run) the gear 476, 257, 341,
-// 475, 229, 313; scenario 1 gets 480, 82 and 188. With the scenario's clear data (flag 40 + s,
-// its slot) the run goes on from it, and mode 3 keeps the records' stat bonuses, gear and plates
+// 475, 229, 313; scenario 1 gets 480, 82 and 188. With the scenario's clear data (flag 31 + s,
+// its slot; Omega's load flag 31 / 32) the run goes on from it, and mode 3 keeps the records' stat bonuses, gear and plates
 // and the bag less its kind 3 and 9 items.
 void newPairParty(App& app, int pair, bool clearData) {
     const int p = std::clamp(pair, 1, cr::kScenarios) - 1;
     cr::SaveData slot;
-    const bool fromClear = allPairsFlags(app).flag(40 + p) && cr::readSave(slotPath(app, p + 1), slot);
+    const bool fromClear = allPairsFlags(app).flag(31 + p) && cr::readSave(slotPath(app, p + 1), slot); // (_gkanLoadFlgTbl)
     cr::GameState g = fromClear ? slot.game : app.game;
     if (fromClear) {
         for (int f : {0, 4089}) g.setFlag(f, app.game.flag(f)); // the boot script's own
@@ -6609,6 +6608,8 @@ void newPairParty(App& app, int pair, bool clearData) {
     cr::changeScenario(g, app.itemTable, p);
     static const int kFlagClear[cr::kScenarios][2] = {{1001, 1500}, {1501, 2500}};
     for (int f = kFlagClear[p][0]; f <= kFlagClear[p][1]; ++f) g.setFlag(f, false);
+    if (p == 1 && !clearData) // mode 2: scenario 1's 0x1024..0x1043 go too
+        for (int f = 0x1024; f < 0x1044; ++f) g.setFlag(f, false);
     auto del = [&](int item) {
         auto it = g.items.find(item);
         if (it != g.items.end() && --it->second <= 0) g.items.erase(it);
@@ -13992,10 +13993,11 @@ int runSelfTest(App& app) {
         }
         problems += var1 != 2 || openingMap != 69;
         app.runner.stop();
-        // Every story cleared: the emblems, the Final plate, New asking about the clear data first
+        // Scenario 0 cleared (its load flag 31): New asks about the clear data first; Omega shows no
+        // first plate (CR1's last battle) and no emblems
         {
             cr::SaveData sd = before;
-            for (int f : {31, 32, 34, 36, 38, 39, 40}) sd.game.setFlag(f, true);
+            sd.game.setFlag(31, true);
             sd.leader = 0;
             cr::writeSave(slotPath(app, 1), sd);
         }
@@ -14003,45 +14005,47 @@ int runSelfTest(App& app) {
         app.chosenPair = 1;
         openSaveScreen(app, true);
         App::SaveScreen& ssc = app.saveScreen;
-        problems += ssc.emblems != 7 || !ssc.allClear || !ssc.cleared || savePlates(app) != std::vector<int>{0, 1, 2};
+        problems += !ssc.cleared || ssc.allClear || savePlates(app) != std::vector<int>{1, 2};
         saveScreenChoose(app, 2); // New: with the clear data?
         problems += ssc.kind != 3 || ssc.message != 57086 || ssc.lines[0] != 57087 || ssc.lines[1] != 57088;
         saveScreenKey(app, SDLK_ESCAPE); // No: a plain new game, then?
         problems += ssc.phase != 1 || ssc.kind != 2 || ssc.message != 57089 || ssc.lines[1] != 57091;
         saveScreenKey(app, SDLK_ESCAPE); // No again: back to the plates
         problems += ssc.phase != 0;
-        saveScreenChoose(app, 0); // the last battle
-        problems += ssc.kind != 1 || ssc.message != 57056;
-        // Uty_LoadPrty with the clear data: mode 3 keeps the bonuses, gear, plates and bag (less the
-        // story's kind 3 / 9 items) and Oz; mode 2 keeps Oz only; either clears the pair's flags
+        app.saveScreen.open = false;
+        // Uty_LoadPrty with the clear data (prty_init_new, Omega): mode 3 keeps the scenario's records'
+        // bonuses, gear and plates and the bag less its kind 3 / 9 items, and Oz; both modes clear the
+        // scenario's flags (_flgclear: 1001..1500 for scenario 0 - 1501.. stays) and its field flags
+        // (3000..3015, 3300..3379; 3020 stays); mode 2 starts the records over
         int storyItem = 0;
         for (int it = 1; it < 500 && !storyItem; ++it)
             if (const cr::ItemParam* ip = app.itemTable.item(it); ip && (ip->kind == 3 || ip->kind == 9)) storyItem = it;
         {
             cr::SaveData sd = before;
-            for (int f : {31, 32, 34, 36, 38, 39, 40, 1100, 2000, 3000, 3020, 3004, 3310}) sd.game.setFlag(f, true);
-            sd.game.items[storyItem] = 1;
+            for (int f : {31, 1100, 2000, 3000, 3020, 3310}) sd.game.setFlag(f, true);
+            sd.game.party[4].seeds[2] = 7, sd.game.party[4].genes[2] = 485, sd.game.party[4].equip[cr::kJewel] = 426;
+            sd.game.items[storyItem] = 1, sd.game.items[7] = 3, sd.game.oz = 777;
             cr::writeSave(slotPath(app, 1), sd);
         }
         ViewerHost host(app);
         app.game = cr::GameState();
         host.loadParty(1, true);
-        const cr::PartyMember& e0 = app.game.party[0];
-        int carry = (e0.level == 1) + (e0.seeds[2] == 7) + (e0.genes[2] == 485) + (e0.equip[cr::kJewel] == 426) +
-                    (app.game.party[1].level == 1) + (app.game.items[7] == 3) + !app.game.items.count(storyItem) +
-                    (app.game.oz == 777) + !app.game.flag(1100) + app.game.flag(2000) + (app.playerChar == 0);
-        // ResetFieldFlag_NewGame: pair 1's blocks 0 and 5 (3000, 3020) and 3310 go, block 1 (pair 2's) stays
-        problems += (carry != 11) + (storyItem == 0) + app.game.flag(3000) + app.game.flag(3020) + app.game.flag(3310) +
-                    !app.game.flag(3004);
+        const cr::PartyMember& e0 = app.game.party[4];
+        int carry = (e0.seeds[2] == 7) + (e0.genes[2] == 485) + (e0.equip[cr::kJewel] == 426) + (app.game.party[0].seeds[2] == 7) +
+                    (app.game.items[7] == 3) + !app.game.items.count(storyItem) + (app.game.oz == 777) + !app.game.flag(1100) +
+                    app.game.flag(2000) + !app.game.flag(3000) + app.game.flag(3020) + !app.game.flag(3310) +
+                    (app.game.pairs[0] == std::array<int, 2>{0, 1});
+        problems += (carry != 13) + (storyItem == 0);
         app.game = cr::GameState();
         host.loadParty(1, false);
-        problems += app.game.party[0].seeds[2] != 0 || app.game.items.count(7) || app.game.items[1] != 3 ||
-                    app.game.oz != 777 || app.game.flag(1100) || !app.game.flag(2000);
-        // a pair without clear data: a fresh start (pair 2: Eluca's leader 2)
+        problems += app.game.party[4].seeds[2] != 0 || app.game.oz != 777 || app.game.flag(1100) || !app.game.flag(2000);
+        // scenario 1 without its clear data: a fresh start (its pair Vieg and Dante, 480 / 82 / 188, 0x1024.. cleared)
         app.game = cr::GameState();
+        app.game.setFlag(0x1030, true);
         host.loadParty(2, false);
-        problems += app.game.oz != 0 || app.game.items[21] != 2 || app.playerChar != 2 || app.game.party[2].level != 1;
-        std::printf("new game with clear data: mode 3 carried %d of 11, mode 2 Oz only, a fresh pair fresh\n", carry);
+        problems += app.game.scenario != 1 || app.game.pairs[1] != std::array<int, 2>{0, 2} || !app.game.flag(0xfee) ||
+                    ownedCount(app, 480) < 1 || ownedCount(app, 188) < 1 || app.game.flag(0x1030);
+        std::printf("new game with clear data: mode 3 carried %d of 13, mode 2 the records over, a fresh scenario 1 fresh\n", carry);
         app.game = cr::GameState();
         app.playerChar = 0;
         for (int f = 0; f < 2; ++f) {
