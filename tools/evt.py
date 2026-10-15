@@ -27,7 +27,7 @@ OPS = {
     48: ("FrmStopEff", "h"), 49: ("Anim2", "hhhhhh"), 50: ("FrmStopEff2", "hh"), 51: ("NpcMdlRead", "h"),
     52: ("FrmAdjc2", "hhhh"), 53: ("FrmSetc2", "hh"), 54: ("SetScale", "hhhh"), 55: ("AdjScale", "hhhhh"),
     56: ("FrmPlayEff2", "hhh"), 57: ("SetDir", "hh"), 58: ("Screen", "hhbbb"), 59: ("Warp2", "hhhhhh"),
-    60: ("AAAA", "bbbbbbbbbbbbbbb"),
+    60: ("Joint", "hhh"), 61: ("AAAA", "bbbbbbbbbbbbbbb"),  # (Omega: Joint at 60, AAAA after it)
     # the Vita's (its j001_t99 boot: the start-up and its logos)
     63: ("Vita3f", ""), 64: ("Vita40", ""), 65: ("Vita41", ""), 67: ("Vita43", ""), 68: ("Vita44", ""),
     71: ("VitaLogoLoad", "hh"), 72: ("VitaLogoShow", "hhhh"), 73: ("Vita49", "hh"), 74: ("VitaLogoShow0", "hhhh"),

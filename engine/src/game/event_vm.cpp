@@ -659,7 +659,14 @@ bool EventRunner::step(EventHost* host) {
             if (host) host->playAnim(n, slot, from, to);
             break;
         }
-        case 60: vm.skip(15); break;                       // AAAA
+        case 60: { // Joint (Omega: the table's 61 entries put it here, AAAA after it)
+            const int n = vm.resolve(vm.u16());
+            const int16_t parentRaw = int16_t(vm.u16());
+            const int parent = parentRaw == -1 ? vm.resolve(0xffff) : parentRaw, node = int16_t(vm.u16());
+            if (host) host->jointNpc(n, parent, node);
+            break;
+        }
+        case 61: vm.skip(15); break;                       // AAAA
         // The Vita release's own (its j001_t99 boot only): 0x40 / 0x44 read the system and save
         // data, 0x41 sets the saves up, 0x45 writes, 0x46 then checks the trophies - nothing here;
         // 0x47 / 0x49 load a logo (u16 slot, u16 picture: 0 sqex, 1 mve, 2 mclogo, 254 warning),

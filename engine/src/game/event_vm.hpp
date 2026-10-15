@@ -97,6 +97,9 @@ public:
     // Born (26) shows an NPC, Kill (27) hides it, until the room reloads (EvtBorn: npc ctl +0x8c
     // bit 0); npc 0 is the player
     virtual void showNpc(int /*npc*/, bool /*shown*/) {}
+    // Joint npc, parent, node (Omega's op 60, __EvtJoint): npc's model rides `parent`'s node
+    // `node` (mdl +0xf80 / +0xf84); parent < 1 lets it go
+    virtual void jointNpc(int /*npc*/, int /*parent*/, int /*node*/) {}
     virtual void screenFade(float /*grey*/, float /*fromAlpha*/, float /*toAlpha*/, int /*frames*/) {}
     virtual bool screenFading() { return false; }        // Wait 0xFFFF / 0xFFFC
     virtual void warp(const WarpRequest& /*w*/) {}       // the script continues on the new field

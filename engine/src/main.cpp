@@ -237,6 +237,7 @@ struct App {
     enum class Entry { None, Area, Room } pendingEntry = Entry::None;
     int entryArea = -1;                    // area whose script 0 last ran
     std::map<int, bool> npcShown;          // Born / Kill in this room (npc 0 = the player)
+    std::map<int, std::pair<int, int>> npcJoints; // Joint: npc -> (parent npc, its node), this room
     struct Move {                          // FrmAdjc / FrmAdjc2 (npc_autoctl_prc), npc 0 = the player
         int npc = 0;
         cr::Vec3 from, to;
@@ -1409,6 +1410,7 @@ void enterMap(App& app) {
     app.lastKick = 0;
     app.lastEvent.clear();
     app.npcShown.clear();
+    app.npcJoints.clear();
     app.moves.clear();
     app.placedNpcs.clear();
     app.actorSlots.clear();
@@ -2447,6 +2449,11 @@ struct ViewerHost : cr::EventHost {
             d->alphaFrom = from; d->alphaTo = to; d->alpha = from;
             d->fadeFrames = d->fadeLeft = std::max(frames, 1);
         }
+    }
+    void jointNpc(int npc, int parent, int node) override {
+        if (parent < 1) { // back where its row puts it
+            if (app.npcJoints.erase(npc)) buildNpcDraws(app);
+        } else app.npcJoints[npc] = {parent, node};
     }
     void showNpc(int id, bool shown) override {
         app.npcShown[id] = shown;
@@ -9060,6 +9067,20 @@ void animateNpcs(App& app, float dt) {
             const float start = std::clamp(float(d.loopFrom), 0.0f, end), len = end - start;
             d.time = len > 0 ? start + std::fmod(d.time - start, len) : start;
         }
+    }
+    // Joint: a model riding another's node - the parent's world, then its node's this frame
+    for (const auto& [child, j] : app.npcJoints) {
+        App::NpcDraw* parent = nullptr;
+        for (auto& d : app.npcDraws)
+            if (d.id == j.first) parent = &d;
+        if (!parent) continue;
+        LoadedModel& pm = app.npcModels[parent->model];
+        const cr::Action* act = parent->action >= 0 && parent->action < int(pm.actions.size()) ? &pm.actions[size_t(parent->action)] : nullptr;
+        cr::computeWorld(pm.cpu.skeleton, act, parent->time, pm.world);
+        if (j.second < 0 || j.second >= int(pm.world.size())) continue;
+        const cr::Mat4 at = parent->world * pm.world[size_t(j.second)];
+        for (auto& d : app.npcDraws)
+            if (d.id == child) d.world = at;
     }
 }
 
