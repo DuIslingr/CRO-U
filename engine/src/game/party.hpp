@@ -9,9 +9,9 @@
 // _prty_init_equip): each its level, weapon, armor, jewel and gene plate. The level needs
 // _exp[level] experience in total (GetNextExp), to level 255.
 //
-// The seeds (items 3..6, `use_item`) add a point each to Attack / Defense / Speed / Luck, into
-// the same bonus: one more while it's below 5000 (`MuCom_GetUsedItemLimitNum`: 5000 - bonus;
-// the save's +0x33c..+0x348).
+// The seeds (items 3..6, `use_item`) add 10 each to Attack / Defense / Speed / Luck, into the
+// same bonus (at most 9999): one more while it's below 9999 (`MuCom_GetUsedItemLimitNum`:
+// (9999 - bonus) / 10 + 1; the record's +0x1c..+0x28).
 
 #include <array>
 
@@ -34,6 +34,7 @@ struct PartyMember {
     int boosts[6] = {0, 0, 0, 0, 0, 0}; // level-up skills' points (164..169): HP, MP, Attack.. Luck
 };
 constexpr int kMaxSeedPoints = 9999;
+constexpr int kSeedPoints = 10; // what one seed adds
 constexpr int kMaxHpBonus = 99999, kMaxStatBonus = 9999;
 constexpr int kScenarios = 2; // Select Scenario's two: their own pair, leader, bag and Oz
 
@@ -54,7 +55,7 @@ int baseStat(int character, Stat stat);
 int levelGrowth(int level, Stat stat);
 // The per-stat bonus: growth, boosts and (Attack..Luck) seeds, capped
 int statBonus(const PartyMember& m, Stat stat);
-// How many more seeds of `stat` (kAttack..kLuck) the member can take
+// How many more seeds of `stat` (kAttack..kLuck) the member can take (MuCom_GetUsedItemLimitNum)
 int seedRoom(const PartyMember& m, Stat stat);
 // The slot an item goes in (kind 6 / 7 / 8), -1 if it isn't equipment
 int equipSlot(int kind);

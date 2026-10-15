@@ -133,8 +133,9 @@ void BattleRules::setupSpecial(const GameState& gs, const ItemTable& items, int 
 }
 
 int BattleRules::leaderLevel() const {
-    // btl_enemy_init_lv: the pair's average when both fight, else the leader's
-    if (f[0].present && f[1].present) return (f[0].level + f[1].level) / 2;
+    // btl_enemy_init_lv: the pair's average when both fight, else the leader's (it runs before
+    // btl_prty_init brings group 695's guest in)
+    if (f[0].present && f[1].present && !f[1].guest) return (f[0].level + f[1].level) / 2;
     return f[0].level;
 }
 

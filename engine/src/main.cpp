@@ -4804,9 +4804,10 @@ bool campUseItem(App& app, int character, int item, int count) {
     if (ownedCount(app, item) < count || count < 1) return false;
     if (item >= 3 && item <= 6) {
         int& points = pm.seeds[item - 3];
-        count = std::min(count, cr::seedRoom(pm, cr::Stat(cr::kAttack + item - 3)));
+        const cr::Stat stat = cr::Stat(cr::kAttack + item - 3);
+        count = std::min(count, cr::seedRoom(pm, stat));
         if (count <= 0) return false;
-        points += count;
+        points += count * cr::kSeedPoints; // use_item: 10 a seed (statBonus caps the bonus at 9999)
     } else if (item >= 24 && item <= 27) {
         const int most = cr::memberStat(app.game, character, cr::kMp, app.itemTable);
         const int mp = pm.mp < 0 ? most : std::min(pm.mp, most);
@@ -10151,7 +10152,7 @@ void battleChooseTop(App& app, int i) {
         battleMenu(app, App::Battle::Commands);
         break;
     case 1: // Pair: both standing (not with a guest)
-        if (!b.rules.f[0].alive() || !b.rules.f[1].alive() || b.rules.allyAuto) { menuSound(app, se::kBuzzer); break; }
+        if (!b.rules.f[0].alive() || !b.rules.f[1].alive() || b.rules.allyAuto || b.rules.f[1].guest) { menuSound(app, se::kBuzzer); break; }
         b.rules.pair = true;
         b.member = 0;
         menuSound(app, se::kChoose);
@@ -11335,6 +11336,11 @@ void stepBattle(App& app) {
     case App::Battle::WinTalk: // btl_main 8000: the last word said, the victory
         battleWon(app);
         break;
+    case App::Battle::Command: // btl_main 400: group 695's guest (+0xa6b) with its leader down - no orders
+        if (b.rules.f[1].guest && !b.rules.allyAuto && !b.rules.f[0].alive() && b.rules.f[1].alive() &&
+            !battletalk::on(app) && b.menu == App::Battle::Top)
+            battleStartRound(app);
+        break;
     case App::Battle::Acting:
         if (b.breakFx.on) { // the battle waits for it; then the Break's tutorial (0xff2)
             if (stepBreakFx(app)) b.breakFx.on = false, battletalk::tutorial(app, 0xff2);
@@ -12433,7 +12439,9 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
             cr::BattleRules r;
             cr::GameState gs;
             r.setupParty(gs, app.itemTable, 0);
-            bad += r.f[0].hpMax != 896 || r.f[1].hpMax != 786 || r.f[0].mp != 60 || r.f[1].mp != 166; // the video's level 1
+            // the battle's stats are the menus' (btlpcparam_prty_init: pcparam_max_*)
+            bad += r.f[0].hpMax != cr::memberStat(gs, 0, cr::kHp, app.itemTable) || r.f[1].hpMax != cr::memberStat(gs, 1, cr::kHp, app.itemTable) ||
+                   r.f[0].mp != cr::memberStat(gs, 0, cr::kMp, app.itemTable) || r.f[1].mp != cr::memberStat(gs, 1, cr::kMp, app.itemTable);
             // physical: (50 solo bonus + 150) x 200 / 100 - 100 = 300, a critical (+50) 400
             for (cr::Fighter& x : r.f) x = cr::Fighter();
             r.f[0].present = r.f[2].present = true;
@@ -12487,18 +12495,25 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
             r.breakEvent(2, 0x10, 0), r.breakEvent(2, 0x10, 1); // two kills by the enemies: gone, even
             r.catchUpBreak();
             bad += r.breakGauge != 0 || !(r.breakFlags & 0x400);
-            // enemies: Garm (group 1) at band 0 with the pair at level 1: levels 1..3, the row's growth
+            // enemies: the first group whose lead takes the band's levels, at band 0 with the pair at
+            // level 1: levels 1..3, the row's growth (read_btlcpl)
             cr::BattleRules e;
             e.setupParty(gs, app.itemTable, 0);
+            int banded = 1;
+            for (int gi = 1; gi < 400; ++gi) {
+                const cr::MonsterDef* m = app.battleData.monster(app.battleData.group(gi)[0]);
+                if (m && m->model >= 0 && !m->strongGrowth && m->level <= 0) { banded = gi; break; }
+            }
             int lo = 99, hi = 0;
             for (uint32_t seed = 1; seed <= 50; ++seed) {
                 e.seed(seed);
-                e.setupEnemies(app.battleData, app.battleData.group(1), 0);
+                e.setupEnemies(app.battleData, app.battleData.group(banded), 0);
                 lo = std::min(lo, e.f[2].level), hi = std::max(hi, e.f[2].level);
                 const cr::MonsterDef* m = e.f[2].def;
-                bad += !m || e.f[2].hpMax != int(m->hp) + 30 * e.f[2].level || e.f[2].exp != int(m->exp) + e.f[2].level * e.f[2].level;
+                bad += !m || e.f[2].hpMax != int(m->hpAt(e.f[2].level)) || e.f[2].exp != int(m->expAt(e.f[2].level));
             }
-            bad += lo != 1 || hi != 3;
+            const int lead = e.leaderLevel(); // the new pair's 1 and 5: 3
+            bad += lo != (lead < 6 ? 1 : lead - 5) || hi != std::min(10, lead + 2);
             // items: 21 (Chocolate) is action 100, 1000 HP
             const cr::BattleActionDef* choc = app.battleActions.get(21 + 79);
             bad += !choc || choc->calc != 17 || choc->power != 100;
@@ -12518,11 +12533,11 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 cr::GameState g;
                 cr::giveStartingItems(g, app.itemTable);
                 const std::vector<int> own = cr::usableAbilities(g, 0);
-                bad += own != std::vector<int>{81} || !cr::hasSkill(g, 0, 131) || cr::hasSkill(g, 0, 133);
+                bad += own != std::vector<int>{85, 114} || !cr::hasSkill(g, 0, 135) || cr::hasSkill(g, 0, 131); // plate 474
                 g.items[481] = 1, g.items[108] = 1;
                 g.party[0].genes[1] = 481;
                 const std::vector<int> more = cr::usableAbilities(g, 0);
-                bad += more.size() != 2 || cr::plateLearned(g, 481) != 1;
+                bad += more.size() != own.size() + 1 || cr::plateLearned(g, 481) != 1; // 108 of plate 481
                 bad += cr::plateDrop(32) != 0 || cr::plateDrop(33) != 481 + cr::kBattleAnimTable[33][15] || cr::plateDrop(139) != 0;
                 int plates = 0, taught = 0;
                 for (uint32_t seed = 1; seed <= 40; ++seed) { // monster 200 (model 13) falls to a level-1 attack
@@ -12565,25 +12580,28 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 std::printf("genes: new game knows %zu, a plate adds %zu, plates dropped %d/40, genes taught %d/40\n", own.size(),
                             more.size() - own.size(), plates, taught);
             }
-            { // 1.0.1 / 2.2.0 decompile checks: levels from 20 grow every stat (pcparam_change_lv),
-              // seeds share that bonus's 5000, guests' Speed / Luck are their Defense, a monster
+            { // decompile checks: levels from 20 add 10 HP and 1 to the others (Omega's pcparam_change_lv),
+              // seeds add 10 into that bonus, to 9999 (use_item, MuCom_GetUsedItemLimitNum), guests' Speed / Luck are their Defense, a monster
               // teaches the first of its six genes not known (btlcalc_0506)
                 int gbad = 0;
                 gbad += cr::levelGrowth(20, cr::kHp) != 0 || cr::levelGrowth(21, cr::kHp) != 10 ||
-                        cr::levelGrowth(22, cr::kHp) != 30 || cr::levelGrowth(40, cr::kHp) != 2100 ||
-                        cr::levelGrowth(99, cr::kHp) != 31600 || cr::levelGrowth(21, cr::kAttack) != 1 ||
-                        cr::levelGrowth(99, cr::kLuck) != 3160;
+                        cr::levelGrowth(22, cr::kHp) != 20 || cr::levelGrowth(40, cr::kHp) != 200 ||
+                        cr::levelGrowth(255, cr::kHp) != 2350 || cr::levelGrowth(21, cr::kAttack) != 1 ||
+                        cr::levelGrowth(99, cr::kLuck) != 79 || cr::levelGrowth(21, cr::kMp) != 1;
                 cr::PartyMember pm;
                 pm.level = 99;
-                gbad += cr::seedRoom(pm, cr::kAttack) != 5000 - 3160;
-                pm.seeds[0] = 5000;
-                gbad += cr::statBonus(pm, cr::kAttack) != 5000 || cr::seedRoom(pm, cr::kAttack) != 0;
+                gbad += cr::seedRoom(pm, cr::kAttack) != (9999 - 79) / 10 + 1;
+                pm.seeds[0] = 9915; // 9994: one more seed, to 9999
+                gbad += cr::seedRoom(pm, cr::kAttack) != 1;
+                pm.seeds[0] = 9925;
+                gbad += cr::statBonus(pm, cr::kAttack) != 9999 || cr::seedRoom(pm, cr::kAttack) != 0;
                 cr::GameState fresh;
                 cr::giveStartingItems(fresh, app.itemTable);
                 cr::BattleRules gr;
-                gr.setupSpecial(fresh, app.itemTable, 372, 1); // Ayuta's guest
+                gr.setupSpecial(fresh, app.itemTable, 695, 0); // Olgar's guest (record 3)
                 const bool quirk = gr.f[1].guest && gr.f[1].spd == gr.f[1].grd && gr.f[1].lck == gr.f[1].grd &&
-                                   gr.f[1].hpMax == cr::baseStat(gr.f[1].character, cr::kHp) + 50 * gr.f[1].level;
+                                   gr.f[1].hpMax == cr::baseStat(gr.f[1].character, cr::kHp) + 50 * gr.f[1].level &&
+                                   gr.f[1].character == 3 && gr.f[1].level == gr.f[0].level + 5;
                 gbad += !quirk;
                 int firstOk = 0, tries = 0; // monster 203 (row +0xb4.. 92 170 89 175 100 182) at level 30
                 for (uint32_t seed = 1; seed <= 60 && firstOk == tries; ++seed) {
@@ -12606,8 +12624,8 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 }
                 gbad += tries == 0 || firstOk != tries;
                 const bool armor = cr::armorSkill(222) == 148 && cr::armorSkill(226) == 149 && cr::armorSkill(227) == 150 &&
-                                   cr::armorSkill(228) == 0 && cr::armorSkill(421) == 148 && cr::armorSkill(446) == 0 &&
-                                   cr::armorSkill(215) == 0;
+                                   cr::armorSkill(228) == 0 && cr::armorSkill(365) == 148 && cr::armorSkill(368) == 0 &&
+                                   cr::armorSkill(421) == 0 && cr::armorSkill(215) == 0; // chk_gene_btl's lists
                 gbad += !armor;
                 // _get_random: MT19937 (seed 5489 when unseeded) and the original's bounded draw
                 cr::GameRandom gr0, gr1;
@@ -12623,7 +12641,7 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 gbad += !mt || first != 6696 || !flat || gr2.get(0) != 0;
                 std::printf("random: MT19937 %s, first draw below 10000 %d (6696), get_random(6) even %s\n", mt ? "yes" : "NO",
                             first, flat ? "yes" : "NO");
-                std::printf("level growth: +%d HP / +%d each by level 99, seeds share the 5000, guests' Speed / Luck their "
+                std::printf("level growth: +%d HP / +%d each by level 99, seeds 10 into the 9999, guests' Speed / Luck their "
                             "Defense %s, the first unknown gene taught %d/%d, resisting armors %s\n", cr::levelGrowth(99, cr::kHp),
                             cr::levelGrowth(99, cr::kAttack), quirk ? "yes" : "NO", firstOk, tries, armor ? "yes" : "NO");
                 bad += gbad;
@@ -12737,9 +12755,9 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 g.items[164] = 1; // HP Boost isn't on a worn plate: nothing
                 cr::levelUpBoosts(g, 0, 3);
                 sbad += g.party[0].boosts[0] != 0;
-                g.items[166] = 1, g.items[483] = 1, g.party[0].genes[2] = 483; // Attack Boost (plate 483): +1 a level
+                g.items[166] = 1, g.items[483] = 1, g.party[0].genes[2] = 483; // Attack Boost (plate 483): +5 a level
                 cr::levelUpBoosts(g, 0, 3);
-                sbad += g.party[0].boosts[2] != 3;
+                sbad += g.party[0].boosts[2] != 15;
                 // the other calcs, each through a round: member 0 uses the action on its target
                 auto runAs = [&](int action, int target, cr::BattleRules& rr) {
                     for (cr::Fighter& x : rr.f) x = cr::Fighter();
@@ -12834,37 +12852,29 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                     rr.endRound();
                     cbad += rr.f[2].hp != 900;
                 }
-                { // story line-ups and the guest's rotation
+                { // story line-ups (btl_prty_init): 651 Vieg alone, 695 Olgar with the guest at his level
+                  // + 5 (no rotation: it takes orders; the enemies' levels from Olgar's alone), 675 scenario
+                  // 1's leader alone
                     cr::GameState g;
                     cr::giveStartingItems(g, app.itemTable);
                     cr::BattleRules a;
                     a.setupParty(g, app.itemTable, 0);
-                    a.setupSpecial(g, app.itemTable, 371, 0);
+                    a.setupSpecial(g, app.itemTable, 651, 0);
                     cbad += a.f[0].character != 0 || a.f[1].present;
                     cr::BattleRules gb;
                     gb.setupParty(g, app.itemTable, 0);
-                    gb.setupSpecial(g, app.itemTable, 370, 0);
-                    cbad += !gb.allyAuto || gb.f[1].character != 4 || gb.f[1].level != gb.f[0].level + 5 || !gb.f[1].guest;
-                    gb.setupEnemies(app.battleData, app.battleData.group(370), 0);
-                    cr::BattleCommand cc[2];
-                    cc[0].kind = cr::kCmdDefend;
-                    int ally[3] = {0, 0, 0};
-                    for (int r = 0; r < 3; ++r) {
-                        gb.f[2].hp = gb.f[2].hpMax = 99999;
-                        if (gb.f[3].present) gb.f[3].hp = gb.f[3].hpMax = 99999;
-                        gb.f[1].hp = gb.f[1].hpMax, gb.f[0].hp = gb.f[0].hpMax, gb.f[1].mp = gb.f[1].mpMax;
-                        gb.beginRound(cc, app.battleActions);
-                        cr::BattleTurn tt;
-                        while (gb.nextTurn(app.battleActions, tt))
-                            if (tt.actors[0] == 1 && !ally[r]) ally[r] = tt.action;
-                        gb.endRound();
-                    }
-                    if (ally[0] != 212 || ally[1] != 14 || ally[2] != 14)
-                        std::printf("  guest rotation %d %d %d\n", ally[0], ally[1], ally[2]), ++cbad;
+                    gb.setupSpecial(g, app.itemTable, 695, 0);
+                    cbad += gb.allyAuto || gb.f[0].character != 1 || gb.f[1].character != 3 ||
+                            gb.f[1].level != gb.f[0].level + 5 || !gb.f[1].guest || gb.leaderLevel() != gb.f[0].level;
                     cr::BattleRules zb;
-                    zb.setupParty(g, app.itemTable, 1);
-                    zb.setupSpecial(g, app.itemTable, 372, 1);
-                    cbad += zb.f[0].character != 3 || zb.f[1].character != 6 || zb.allyScript != 2;
+                    g.scenario = 1;
+                    zb.setupParty(g, app.itemTable, 0);
+                    zb.setupSpecial(g, app.itemTable, 675, 0);
+                    cbad += zb.f[0].character != 0 || zb.f[1].present;
+                    cr::BattleRules nb; // not a story group: the pair as it is
+                    nb.setupParty(g, app.itemTable, 0);
+                    nb.setupSpecial(g, app.itemTable, 651, 0);
+                    cbad += !nb.f[1].present;
                 }
                 { // a monster with row +0x3e 2 acts twice; Asura Lotus strikes 2..5 times
                     cr::BattleRules rr;
@@ -12904,17 +12914,23 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                     }
                     if (fewest != 2 || most != 5) std::printf("  Asura Lotus %d..%d times\n", fewest, most), ++cbad;
                 }
-                { // Steal Item: monster 1's item, once
-                    int got = 0, twice = 0;
+                { // Steal Item: the first monster with something to steal (+0xd2, the first of five by level:
+                  // the only one below level 25), once
+                    int got = 0, twice = 0, thief = 1, loot = 0;
+                    for (int id = 1; id < 600 && !loot; ++id) {
+                        const cr::MonsterDef* m = app.battleData.monster(id);
+                        if (!m || m->model < 0) continue;
+                        if (int16_t(m->raw[0xd2] | m->raw[0xd3] << 8) > 0) thief = id, loot = int16_t(m->raw[0xd2] | m->raw[0xd3] << 8);
+                    }
                     for (uint32_t seed = 1; seed <= 30; ++seed) {
                         cr::BattleRules rr;
                         rr.seed(seed);
                         cr::GameState g;
                         rr.setupParty(g, app.itemTable, 0);
-                        std::array<int, 3> one{1, 0, 0};
+                        std::array<int, 3> one{thief, 0, 0};
                         rr.setupEnemies(app.battleData, one, 0);
-                        rr.f[2].hp = rr.f[2].hpMax = 99999, rr.f[2].lck = 0;
-                        rr.f[0].lck = 500;
+                        rr.f[2].hp = rr.f[2].hpMax = 99999, rr.f[2].lck = 0, rr.f[2].level = 1;
+                        rr.f[0].lck = 500, rr.f[0].atk = 3000; // (no damage, no catch)
                         for (int r = 0; r < 2; ++r) {
                             cr::BattleCommand cc[2];
                             cc[0].kind = cr::kCmdGene, cc[0].action = 223, cc[0].target = 2;
@@ -12924,10 +12940,10 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                             while (rr.nextTurn(app.battleActions, tt)) {}
                             rr.endRound();
                         }
-                        got += !rr.stolen.empty() && rr.stolen[0] == 3;
+                        got += !rr.stolen.empty() && rr.stolen[0] == loot;
                         twice += rr.stolen.size() > 1;
                     }
-                    if (got == 0 || twice) std::printf("  steal: %d got, %d twice\n", got, twice), ++cbad;
+                    if (got == 0 || twice || !loot) std::printf("  steal (monster %d): %d got, %d twice\n", thief, got, twice), ++cbad;
                 }
                 std::printf("calcs: fixed, split by targets, to 1, %%HP, MP, Oz stolen, Apples, barrier, revive, poison: %d problems\n", cbad);
                 sbad += cbad;
@@ -14263,12 +14279,13 @@ int runSelfTest(App& app) {
         problems += c.count != 3;
         key(SDLK_RETURN);                                     // Yes
         const int atk1 = cr::maxStat(app.game.party[0], 0, cr::kAttack, app.itemTable);
-        problems += atk1 != atk0 + 3 || app.game.party[0].seeds[0] != 3 || ownedCount(app, 3) != 0;
+        problems += atk1 != atk0 + 30 || app.game.party[0].seeds[0] != 30 || ownedCount(app, 3) != 0; // 10 a seed
         const auto plum = std::find(c.list.begin(), c.list.end(), 24); // Plum: MP + 100
         problems += plum == c.list.end();
         if (plum != c.list.end()) c.listCursor = int(plum - c.list.begin());
         key(SDLK_RETURN), key(SDLK_RETURN), key(SDLK_RETURN);
-        problems += app.game.party[0].mp != 60 || ownedCount(app, 24) != 0; // 10 + 100, capped at 60
+        problems += app.game.party[0].mp != std::min(110, cr::memberStat(app.game, 0, cr::kMp, app.itemTable)) ||
+                    ownedCount(app, 24) != 0; // 10 + 100, capped at the most
         const auto choc = std::find(c.list.begin(), c.list.end(), 21); // HP items do nothing on the field
         if (choc != c.list.end()) c.listCursor = int(choc - c.list.begin()), key(SDLK_RETURN);
         problems += c.phase != App::Camp::List || ownedCount(app, 21) != 1;

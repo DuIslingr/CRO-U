@@ -86,7 +86,8 @@ int memberStat(const GameState& gs, int character, int stat, const ItemTable& it
 void levelUpBoosts(GameState& gs, int character, int levels) {
     if (levels <= 0) return;
     for (int k = 0; k < 6; ++k)
-        if (hasSkill(gs, character, 164 + k)) gs.party[size_t(character)].boosts[k] += (k == 0 ? 10 : 1) * levels;
+        if (hasSkill(gs, character, 164 + k)) // pcparam_change_lv: 30 HP, 3 MP, 5 to the others a level
+            gs.party[size_t(character)].boosts[k] += (k == 0 ? 30 : k == 1 ? 3 : 5) * levels;
 }
 
 bool sharedItem(const ItemTable& items, int item) {

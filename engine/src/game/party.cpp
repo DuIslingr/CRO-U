@@ -76,7 +76,7 @@ int baseStat(int character, Stat stat) { return kBase[std::clamp(character, 0, k
 
 int levelGrowth(int level, Stat stat) {
     const int n = std::max(0, std::clamp(level, 1, kMaxLevel) - 20); // the level-ups from 20
-    return stat == kHp ? 5 * n * (n + 1) : n * (n + 1) / 2;         // 10, 20, 30.. / 1, 2, 3..
+    return stat == kHp ? 10 * n : n;                                // 10 HP, 1 to each of the others
 }
 
 int statBonus(const PartyMember& m, Stat stat) {
@@ -86,7 +86,9 @@ int statBonus(const PartyMember& m, Stat stat) {
 }
 
 int seedRoom(const PartyMember& m, Stat stat) {
-    return stat >= kAttack ? std::max(0, kMaxStatBonus - statBonus(m, stat)) : 0;
+    if (stat < kAttack) return 0;
+    const int v = statBonus(m, stat);
+    return v < kMaxStatBonus ? (kMaxStatBonus - v) / kSeedPoints + 1 : 0;
 }
 
 int equipSlot(int kind) {
