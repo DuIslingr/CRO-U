@@ -9446,6 +9446,7 @@ constexpr int kMessageFrames = 60; // 0x3c: the calcs' messages and the queued o
 constexpr int kSlotIdle = 0, kSlotWin = 1, kSlotReturn = 3, kSlotGuard = 4, kSlotHit = 5, kSlotDown = 6, kSlotEvade = 7;
 } // namespace btlui
 
+constexpr int kPropFighter = 5; // an actor that is no fighter: groups 0x291 / 0x22c's extra model
 App::Battle::Actor* battleActor(App& app, int fighter) {
     for (App::Battle::Actor& a : app.battle.actors)
         if (a.fighter == fighter) return &a;
@@ -10037,6 +10038,14 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
         a.hp = a.hpMax = uint32_t(rules.f[size_t(2 + k)].hpMax);
         a.name = sysText(app, 53000 + m->id - 1); // font block 2: monster names
     }
+    if (start.group == 0x291 || start.group == 0x22c) {
+        // read_btlcpl: these two bring btlcplname[28] (m127) in on model slot 4 at (500, 0, 465), no
+        // fighter of its own (+0x23c set back to 0); btl_anm_load reads its action set 14 alone, which
+        // btlact_440 plays - till then it stands at rest
+        static const short kPropAt[2] = {500, 465};
+        App::Battle::Actor& p = add(28, kPropAt, 0.0f, kPropFighter);
+        p.action = -1, p.slot = 0, p.time = 0;
+    }
     for (int i = 0; i < 5; ++i) {
         b.shownHp[i] = rules.f[size_t(i)].hp;
         b.shownMp[i] = rules.f[size_t(i)].mp;
@@ -10555,7 +10564,12 @@ void startStaged(App& app, const cr::BattleActionDef* a) {
         b.hitFrame = 0xd7;
         break;
     case 439: played(0x233, 40); b.hitFrame = 0x62; break;
-    case 440: played(0x23d, 40); b.hitFrame = 0x97; b.fov = 50; break;
+    case 440: // btlact_440_init: groups 0x291 / 0x22c's extra model on to its slot 14 as the user's motion starts
+        played(0x23d, 40);
+        b.hitFrame = 0x97;
+        b.fov = 50;
+        if (App::Battle::Actor* prop = battleActor(app, kPropFighter)) playSlot(app, *prop, 14, -2); // (gac+0x429c: model slot 4)
+        break;
     case 441: // its motion phase is 120 frames, whatever the slot's length
         spawnEffect(app, 0x1e, user);
         played(0x247, 40);
@@ -12422,12 +12436,13 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
             ++started;
             const std::array<int, 3> ids = app.battleData.group(group);
             const size_t want = size_t(app.battle.rules.f[0].present) + size_t(app.battle.rules.f[1].present) + // who fights
-                                size_t(std::count_if(ids.begin(), ids.end(), [](int id) { return id > 0; }));
+                                size_t(std::count_if(ids.begin(), ids.end(), [](int id) { return id > 0; })) +
+                                size_t(group == 0x291 || group == 0x22c); // (their extra model)
             if (app.battle.actors.size() != want) ++noModel;
             noModel += app.battle.stage.meshes.empty();
             for (const App::Battle::Actor& a : app.battle.actors) {
                 ++actors;
-                unnamed += a.name.empty();
+                unnamed += a.name.empty() && a.fighter != kPropFighter;
                 noModel += app.battle.models[a.model].meshes.empty();
                 noAction += a.action < 0;
             }
@@ -13024,10 +13039,10 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                                   /* (436: only CR1's boss rows still list it - model 0, no slot 13) */   {503, 666, 140, 40, 3, true, true, 3},
                                   {505, 716, -1, 40, 5, false, false, 0},    {507, 667, 130, 65, 2, true, true, 3},
                                   {437, 655, 0xd7, -1, -1, true, false, 0},    {439, 659, 0x62, -1, -1, true, true, -1},
-                                  {440, 658, 0x97, -1, -1, true, true, -1},  {441, 660, 0x52, -1, -1, false, true, -1},
+                                  {440, 657, 0x97, -1, -1, true, true, -1},  {441, 660, 0x52, -1, -1, false, true, -1},
                                   {442, 660, 0x9b, -1, -1, true, true, -1},  {511, 677, -2, 40, -1, false, false, -1}};
             constexpr int kWants = int(sizeof wants / sizeof wants[0]);
-            int sbad = 0, rerrs = 0, ran = 0, hitQuakes = 0;
+            int sbad = 0, rerrs = 0, ran = 0, hitQuakes = 0, otherSlot = -1;
             const cr::GameState saved = app.game;
             for (const Want& w : wants) {
                 app.game = saved;
@@ -13050,6 +13065,8 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                     const bool was = b.turnOn && b.turn.action == w.action;
                     stepBattle(app);
                     const bool on = b.turnOn && b.turn.action == w.action;
+                    if (on && w.action == 440 && b.turnFrame == 10)
+                        if (const App::Battle::Actor* o = battleActor(app, kPropFighter)) otherSlot = o->slot;
                     if (on && !started) {
                         started = true;
                         if (const App::Battle::Actor* u = battleActor(app, b.turn.actors[0])) slot = u->slot;
@@ -13130,9 +13147,10 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
             app.runner.stop();
             app.game = saved;
             const int boss15 = app.battleData.anim(9, 14).loopEnd > 0 || app.battleData.anim(9, 14).hit > 0;
+            sbad += otherSlot != 14; // btlact_440_init: group 0x291's extra model on to slot 14
             std::printf("battle staging: %d of %d boss actions staged, hit quake %s, effect %d: %d of %d scrolling materials move, "
-                        "boss slots past 13 %s; %d problems, %d render API errors\n", ran, kWants, hitQuakes ? "yes" : "no", scrollFx, moved,
-                        scrolling, boss15 ? "read" : "missing", sbad, rerrs);
+                        "boss slots past 13 %s, 440's extra model in slot %d; %d problems, %d render API errors\n", ran, kWants, hitQuakes ? "yes" : "no", scrollFx, moved,
+                        scrolling, boss15 ? "read" : "missing", otherSlot, sbad, rerrs);
             problems += sbad + rerrs + (ran != kWants) + !hitQuakes + (scrolling == 0 || moved == 0);
             glErrors += rerrs;
         }

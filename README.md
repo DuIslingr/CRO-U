@@ -80,7 +80,8 @@ Done so far:
       the music changing with the page
 - [x] worn equipment stays in the bag, as Omega's `prty_init` / `__ChangeEquipItem` have it
 - [x] the bosses' staged actions (`btlact_main`'s kinds 10..22: 430..443, 509) with Omega's
-      effects, sounds and camera chains, and the story battles' set moves (`_btlque_special`)
+      effects, sounds and camera chains, and the story battles' set moves (`_btlque_special`);
+      groups 0x291 / 0x22c's extra model (`read_btlcpl`: m127 at (500, 0, 465), its slot 14 in 440)
 - [x] Omega's own battle calcs (38..44: the kiss, Down and the Ward, 437's blow, MP / HP x power),
       its stat formula (`btlpcparam_*` with Down / the Ward) and warrior / sorcerer by character
 - [x] level-ups as `pcparam_change_lv` has them (from 20: 10 HP and 1 to each other stat a level;
@@ -92,8 +93,6 @@ Done so far:
 
 Next:
 
-- [ ] the battle stage's own motion during a staged action (440: `mdl_set_act_nextanm2` on the
-      stage model - stages are drawn unskinned)
 
 ## Reverse-engineering groundwork
 
