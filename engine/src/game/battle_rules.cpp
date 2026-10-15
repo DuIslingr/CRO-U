@@ -35,9 +35,9 @@ bool BattleActionTable::load(const std::string& dataDir) {
         const uint32_t o = u32(&f[h]);
         if (o > at && o < end) end = o;
     }
-    // The voiced releases (sys.evt with section +0x40, the battle-voice table) keep 38-byte records:
-    // six voice situations at +10, the 1.0.1 fields from there on 12 bytes later, 2 more at the end
-    const bool voiced = u32(&f[0x40]) != 0;
+    // 38-byte records (Omega's, every release: gac + 0x912f0, -0x26 + 0x26 n): six voice situations
+    // at +10, CR1 1.0.1's fields from there on 12 bytes later, 2 more at the end
+    const bool voiced = true;
     const uint32_t stride = voiced ? 38 : 24;
     for (uint32_t p = at; p + stride <= end; p += stride) {
         const uint8_t* base = &f[p];
