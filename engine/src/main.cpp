@@ -14701,7 +14701,7 @@ int runSelfTest(App& app) {
         startBattle(app, {1, 0, -1, 0}, 0);
         const bool ordinary = app.battle.active && !app.battle.eventBattle;
         if (app.battle.active) loseToArk(app);
-        const bool ark = app.area == 13 && app.mapNumber == 103 && !app.battle.active;
+        const bool ark = app.area == 9 && app.mapNumber == 175 && !app.battle.active; // (Omega: scenario 0's Ark)
         const bool oz = app.game.oz == 1005 - 201;
         problems += !ordinary || !ark || !oz;
         std::printf("battle lost: back to the Ark (area %d, room %d) %s, Oz %d (a fifth gone %s); %d problems\n", app.area,
