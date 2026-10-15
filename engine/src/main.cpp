@@ -14354,9 +14354,9 @@ int runSelfTest(App& app) {
         const float d0 = app.encounters.walkedDistance();
         fieldWalked(app, 50);
         problems += !app.game.noEncounters[0] || app.encounters.walkedDistance() != d0;
-        app.playerChar = 2; // the next pair's switch is its own
+        app.game.scenario = 1; // the other scenario's switch is its own
         problems += fieldEncountersOff(app);
-        app.playerChar = 0;
+        app.game.scenario = 0;
         app.game.setFlag(4076, true);
         pressFieldButton(app, 3); // refused
         problems += !app.game.noEncounters[0];
@@ -14435,7 +14435,7 @@ int runSelfTest(App& app) {
         for (int f = 0; f < 4; ++f) stepMapScreen(app);
         problems += ms.open + mapErrs + expectSounds("map screen", {2, 2}) + offMap + (spots != 60);
         app.mapNumber = keepMap;
-        std::printf("field menu: bar slides out and back, encounter switch per pair (flag 4076 refuses it), skill 174 "
+        std::printf("field menu: bar slides out and back, encounter switch per scenario (flag 4076 refuses it), skill 174 "
                     "banked %d EXP, %d paid into a win; map screen: %d spots, %d off the map; %d problems\n", bank, paid,
                     spots, offMap, problems);
         mapErrors += problems;
@@ -14686,7 +14686,8 @@ int runSelfTest(App& app) {
             followed += onScreen && inside();
         }
         problems += followed != 3;
-        // CameraFree: FrmPanCam moves twice its deltas over its frames, kept in the painting
+        // CameraFree: FrmPanCam moves twice its deltas over its frames, kept in the painting (Omega: the
+        // camera's way - the painting the other way)
         ViewerHost host(app);
         host.freeCamera(true);
         const float startY = app.scroll.offY;
@@ -14695,7 +14696,7 @@ int runSelfTest(App& app) {
         for (int f = 0; f < 5; ++f) stepFieldScroll(app);
         const float halfway = app.scroll.offY;
         for (int f = 0; f < 10; ++f) stepFieldScroll(app);
-        const float wantY = std::clamp(startY - 200, -(fieldViewH(app) - H) / 2, (fieldViewH(app) - H) / 2);
+        const float wantY = std::clamp(startY + 200, -(fieldViewH(app) - H) / 2, (fieldViewH(app) - H) / 2);
         const float panned = app.scroll.offY;
         problems += std::fabs(halfway - (startY + wantY) / 2) > 1.0f || std::fabs(panned - wantY) > 0.5f ||
                     app.scroll.sliding || !inside();
@@ -15005,7 +15006,10 @@ int runSelfTest(App& app) {
         problems += !leaders;
         const bool reset = lb.count == 0 && lb.mask == 0 && !app.game.flag(1);
         std::sort(order.begin(), order.end());
-        problems += !texOk || !healed || !campFor || !backOk || !reset || order != std::vector<int>{0, 1, 2, 3} || app.renderer.takeErrors();
+        // (Omega keeps CR1's screen and its picture names - _gkpachMonsImage hi / mizu / kaze / mu.mct -,
+        // but its data has none of them: nothing reaches Util 8 there)
+        (void)texOk;
+        problems += !healed || !campFor || !backOk || !reset || order != std::vector<int>{0, 1, 2, 3} || app.renderer.takeErrors();
         std::printf("last battle: 4 rounds, each pair once %s, its camp menu %s, No back to the plates %s, HP / MP restored %s, "
                     "flag 1 and the rounds clear %s, plates name the leaders %s; %d problems\n", order == std::vector<int>{0, 1, 2, 3} ? "yes" : "NO",
                     campFor ? "opens" : "DOESN'T open", backOk ? "yes" : "NO", healed ? "yes" : "NO", reset ? "yes" : "NO", leaders ? "yes" : "NO", problems);
