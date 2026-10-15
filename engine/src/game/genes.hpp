@@ -1,9 +1,10 @@
 #pragma once
 // Genes (chk_gene, MuCom_IsSkillEquip, GetSkillAddrFromPlate, btlcalc_0506, btlcalc_chk_dead).
 //
-// Everything is an item: gene abilities are items 81..130 (owning one = knowing it; its battle
-// action is the item + 120, its MP that action's), skills (passive) 131..186, gene plates
-// 479..500. A plate (0xd3890, 8 s16 each) lists three abilities and three skills; plates 479 /
+// Omega: gene abilities are items 81..130 (owning one = knowing it; its battle action is the
+// item + 120, its MP that action's), skills (passive) 131..198, gene plates 474..504 (_geneplate:
+// 8 s16 each - three abilities, three skills); a record wears four plates (+0x30..+0x36) and an
+// ability / skill counts when it is held and on one of them (chk_gene). What follows is CR1's: A plate (0xd3890, 8 s16 each) lists three abilities and three skills; plates 479 /
 // 480 are the men's and the women's Human Genes (each character's own ability 81 + c and skill
 // 131 + c). A character wears four plates (the save's +0x350): slot 0 the Human Genes, 1..3 gene
 // plates. An ability can be used, a skill counts, when it's known and on a plate the character
@@ -26,14 +27,13 @@ struct GameState;
 class ItemTable;
 
 constexpr int kGeneSlots = 4;
-constexpr int kFirstPlate = 479, kPlates = 22;
-constexpr int kFirstAbility = 81, kLastAbility = 130, kFirstSkill = 131, kLastSkill = 186;
+constexpr int kFirstPlate = 474, kPlates = 31; // Omega: 474..480 the characters' own, 481..504
+constexpr int kFirstAbility = 81, kLastAbility = 130, kFirstSkill = 131, kLastSkill = 198;
 
 inline bool isPlate(int item) { return item >= kFirstPlate && item < kFirstPlate + kPlates; }
 inline bool isGeneAbility(int item) { return item >= kFirstAbility && item <= kLastAbility; }
 inline bool isSkill(int item) { return item >= kFirstSkill && item <= kLastSkill; }
 inline int geneAction(int ability) { return ability + 120; }
-inline int humanPlate(int character) { return kFirstPlate + (character & 1); }
 
 // The plate's six entries (abilities then skills, 0 = none); empty for a non-plate
 const std::array<int, 8>& plateContents(int plate);
@@ -42,8 +42,8 @@ int plateLearned(const GameState& gs, int plate);
 // The abilities character c can use (known, on a worn plate; the Human Genes' only c's own)
 std::vector<int> usableAbilities(const GameState& gs, int character);
 bool hasSkill(const GameState& gs, int character, int skill);
-// chk_gene_btl: armor that resists an element counts as its skill (148 Blaze / 149 Aqua / 150
-// Gale Resistance): each character's armors 222..227 (+28 a character) - 0 none
+// chk_gene2: gear that resists an element counts as its skill (148 Blaze / 149 Aqua / 150 Gale
+// Resistance): offsets 21..26 of each 28-item set (201..368) - 0 none
 int armorSkill(int armor);
 // pcparam_max_*: the stat with equipment, seeds, boosts and the skills' (175..186, the Gates:
 // each known stage worn adds its item's stat)

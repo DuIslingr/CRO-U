@@ -364,7 +364,7 @@ struct App {
         std::string message;
         int messageFrames = 0;
         int anim = 0;
-        std::array<cr::Texture, 22> plateArt; // gene_m*c.mct, loaded when a board first shows them
+        std::array<cr::Texture, 31> plateArt; // gene_m*c.mct, loaded when a board first shows them
     } camp;
     float saveClock = 0;
     int resumePrompt = 0;                  // 1: "You have save data from your last session" (Yes / No)
@@ -4580,11 +4580,10 @@ std::vector<int> campItems(const App& app, int category) {
 // What can go in member c's slot: the bag's items of the slot's kind that c may wear
 std::vector<int> campEquipList(const App& app, int c, int slot) {
     std::vector<int> out;
-    if (slot >= 3) { // gene plates: the bag's, but not one either member wears already
-        if (slot == 3) return out; // the Human Genes stay
+    if (slot >= 3) { // gene plates: the bag's, but not one either member wears already (Omega: all four slots)
         const cr::PartyMember& pm = app.game.party[size_t(c)];
         if (pm.genes[slot - 3] > 0) out.push_back(0); // take it off
-        for (int p = cr::kFirstPlate + 2; p < cr::kFirstPlate + cr::kPlates; ++p) {
+        for (int p = cr::kFirstPlate; p < cr::kFirstPlate + cr::kPlates; ++p) {
             if (ownedCount(app, p) <= 0) continue;
             bool worn = false;
             for (int k = 0; k < 2; ++k)
@@ -4941,16 +4940,20 @@ void drawGeneBoard(App& app, cr::MenuPainter& m, float x, float y, int plate, fl
     drawShopNumber(m, cr::plateLearned(app.game, plate), x + 90, y + 24, 1, 12, a, 2);
     m.picture(65, x + 102, y + 24, a);
     drawShopNumber(m, 6, x + 114, y + 24, 1, 12, a, 2);
-    static const char* const kArt[cr::kPlates] = {"gene_m001c.mct", "gene_m002c.mct", "gene_m201c.mct", "gene_m202c.mct",
-                                                  "gene_m203c.mct", "gene_m204c.mct", "gene_m205c.mct", "gene_m206c.mct",
-                                                  "gene_m207c.mct", "gene_m208c.mct", "gene_m209c.mct", "gene_m210c.mct",
-                                                  "gene_m211c.mct", "gene_m212c.mct", "gene_m213c.mct", "gene_m214c.mct",
-                                                  "gene_m215c.mct", "gene_m216c.mct", "gene_m217c.mct", "gene_m218c.mct",
-                                                  "gene_m219c.mct", "gene_m220c.mct"};
+    // __MuCamp_GeneTexRead (_gkpachGenePlateImage): gene_m001c..m007c, then m201c..m224c
+    static const std::array<std::string, cr::kPlates> kArt = [] {
+        std::array<std::string, cr::kPlates> a;
+        char name[32];
+        for (int i = 0; i < cr::kPlates; ++i) {
+            std::snprintf(name, sizeof name, "gene_m%03dc.mct", i < 7 ? i + 1 : 201 + i - 7);
+            a[size_t(i)] = name;
+        }
+        return a;
+    }();
     cr::Texture& art = app.camp.plateArt[size_t(plate - cr::kFirstPlate)];
     if (!art.id) {
         cr::Image img;
-        if (loadImage(app, kArt[plate - cr::kFirstPlate], img)) art = app.renderer.upload(img);
+        if (loadImage(app, kArt[size_t(plate - cr::kFirstPlate)].c_str(), img)) art = app.renderer.upload(img);
     }
     if (art.id) { // the picture fitted into 76 x 76 under the bar
         const float w = float(art.width), h = float(art.height), k = std::min(76 / std::max(w, 1.0f), 76 / std::max(h, 1.0f));
