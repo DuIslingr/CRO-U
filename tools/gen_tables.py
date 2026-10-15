@@ -13,6 +13,7 @@ symbol, so nothing here hard-codes an address:
   - battle stages / models         _btlflrname, _btlcplname
   - battle formations / positions  _btl_init_index, _btlinitpos
   - menu pictures                  _gstWindowMct, _gstOutReadMct (MuTex_GetTexInfo groups 0 / 1)
+  - plate words' icons             _kanIconNoTbl
   - treasure item pools            _TBOX_TABLE_A/B/C, _TBOX_PAIR_TABLE_A/B/C
   - footsteps                      PlayFootstepSE's FOOTSTEP_FRAME / FOOTSTEP_SE, _FOOTSTEP_FRAME.*
 Only file names and numbers are copied.
@@ -98,6 +99,8 @@ def main():
     positions = [[[s16(posa + (f * 12 + k) * 4 + c * 2) for c in range(2)] for k in range(12)] for f in range(formations)]
     wm = find("_gstWindowMct")
     menu_pictures = [[s16(wm + 8 * i + 2 * k) for k in range(4)] for i in range(size(wm) // 8)]
+    kan = find("_kanIconNoTbl")
+    word_icons = [s32(kan + 4 * i) for i in range(size(kan) // 4)]
     orm = find("_gstOutReadMct")
     out_pictures = [[s16(orm + 8 * i + 2 * k) for k in range(4)] for i in range(size(orm) // 8)]
     tbox = []
@@ -156,7 +159,8 @@ def main():
     cpp += ["};", "", "const short kOutReadPicture[kNumOutReadPictures][4] = {"]
     for i in range(0, len(out_pictures), 6):
         cpp.append("    " + ", ".join("{%d, %d, %d, %d}" % tuple(r) for r in out_pictures[i:i + 6]) + ",")
-    cpp += ["};", "", "const short kTreasureItems[3][10][13] = {"]
+    cpp += ["};", "", "const short kWordIcon[kNumPlateWords] = {" + ", ".join(map(str, word_icons)) + "};", "",
+            "const short kTreasureItems[3][10][13] = {"]
     for t in tbox:
         cpp.append("    {" + ", ".join("{" + ", ".join(map(str, row)) + "}" for row in t) + "},")
     cpp += ["};", "", "const short kTreasurePairs[3][10][kNumTreasureRoutes][2] = {"]
@@ -185,6 +189,7 @@ constexpr int kNumFormationCodes = {len(formation_codes)};
 constexpr int kNumFormations = {formations};
 constexpr int kNumMenuPictures = {len(menu_pictures)};
 constexpr int kNumOutReadPictures = {len(out_pictures)};
+constexpr int kNumPlateWords = {len(word_icons)};
 constexpr int kNumTreasureRoutes = {routes};
 constexpr int kNumFootstepSets = {sets};
 
@@ -210,6 +215,9 @@ extern const short kMenuPicture[kNumMenuPictures][4];
 // MuTex_GetTexInfo group 1 (_gstOutReadMct): the pictures of the textures the menus read for
 // themselves (the title's title1 / chaos in slots 0x11 / 0x12, the World Select's maps, ...)
 extern const short kOutReadPicture[kNumOutReadPictures][4];
+// kanIconNoTbl: a plate word's icon + 1 (0 / -1 none) - ComUty_ChoicePlateDraw draws word w with icon
+// kWordIcon[w] - 1
+extern const short kWordIcon[kNumPlateWords];
 // TreasureBoxManager::randomSelect item pools: [table A/B/C][level 0..9][13 items] and the two
 // extra items per [table][level][route]
 extern const short kTreasureItems[3][10][13];

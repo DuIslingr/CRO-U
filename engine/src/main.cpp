@@ -4238,14 +4238,11 @@ constexpr float kRowX = 192, kRowY = 92, kRowH = 48;
 constexpr int kRows = 4;
 constexpr float kBackX = 192, kBackY = 344;
 constexpr float kPhoneBackY = 286; // 2.2.0's (__MuCamp_NextProc's box (192, 286, 256, 34)); it has no Save plate
-// kanIconNoTbl (0xc8740): a plate word's icon + 1
-constexpr int kIconOfWord[37] = {1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 14, 13, 13, 14, 13,
-                                 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 25, 26, 27, 28, -1, -1, 14, 14};
 constexpr uint32_t kSoundEquip = 21, kSoundUse = 22;
 } // namespace campui
 
 bool keyHints(const App& app) { return app.showHud && !app.renderer.phoneLayout(); }
-int plateIcon(int word) { return word >= 0 && word < 37 ? campui::kIconOfWord[word] - 1 : -1; }
+int plateIcon(int word) { return word >= 0 && word < cr::kNumPlateWords ? cr::kWordIcon[word] - 1 : -1; } // (kanIconNoTbl)
 int campRoute(const App& app) { return std::clamp(app.playerChar / 2, 0, 3); }
 int campCharacter(const App& app, int member) { return campRoute(app) * 2 + std::clamp(member, 0, 1); }
 

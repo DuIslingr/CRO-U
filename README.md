@@ -23,12 +23,25 @@ battle voice clips). Everything past the title is CR1's behaviour and still to b
 against Omega's code: the binary (`ChaosRingsOmegaHDeng`, armv7, unencrypted, 12965 symbols)
 is the reference, as 1.0.1's was for CR1.
 
-Known so far:
+Done so far:
 
-- [ ] the title's emblems and other menu pieces: Omega's `window_hd.mct` sheet differs from CR1's
-- [ ] `c207b.bin` doesn't load (a model format difference)
-- [ ] maps, cameras, events, battles, menus: CR1's tables (map list, NPC models, items, the
-      menus' layouts) are compiled in and need Omega's
+- [x] Omega's tables from its own binary (`tools/gen_tables.py`, by symbol): 11 areas, 215 maps,
+      379 NPC models, 429 images, 250 action files, 35 battle stages, 166 battle models, the menu
+      pictures (groups 0 and 1), plate icons, treasure, footsteps
+- [x] images load as `chk_hd_name` does: `<base>_ipad.mct` on the iPad, else `<base>_hd.mct`
+      (the UI sheet is `window_ipad`)
+- [x] the title screen as `__menuu_TitlePut` draws it (logo, Please Touch, copyright, the two
+      pictures down the left, the plates)
+- [x] a new game reaches the opening; with Omega's data the self-test loads all 373 models and
+      spawns and walks the player on all 125 fields
+
+Next (the CR1 self-test's checks that fail on Omega point at most of these):
+
+- [ ] Select Scenario (Util 4, `__menuu_StartSet` / `Put` / `Prc`): Omega's own animated screen
+- [ ] the other menus against Omega's `*Put` / `*Prc` (save / load, Camp, shop, World Select, ...)
+- [ ] `sys.evt`'s data (items, monsters, actions) and the battle rules where Omega changed them
+- [ ] puzzle rooms (Omega's `PuzzleManager`), field cameras, the story's scripts
+- [ ] `c207b.bin` (a model the loader rejects)
 
 ## Reverse-engineering groundwork
 

@@ -15,6 +15,7 @@ constexpr int kNumFormationCodes = 48;
 constexpr int kNumFormations = 16;
 constexpr int kNumMenuPictures = 165;
 constexpr int kNumOutReadPictures = 35;
+constexpr int kNumPlateWords = 40;
 constexpr int kNumTreasureRoutes = 4;
 constexpr int kNumFootstepSets = 5;
 
@@ -40,6 +41,9 @@ extern const short kMenuPicture[kNumMenuPictures][4];
 // MuTex_GetTexInfo group 1 (_gstOutReadMct): the pictures of the textures the menus read for
 // themselves (the title's title1 / chaos in slots 0x11 / 0x12, the World Select's maps, ...)
 extern const short kOutReadPicture[kNumOutReadPictures][4];
+// kanIconNoTbl: a plate word's icon + 1 (0 / -1 none) - ComUty_ChoicePlateDraw draws word w with icon
+// kWordIcon[w] - 1
+extern const short kWordIcon[kNumPlateWords];
 // TreasureBoxManager::randomSelect item pools: [table A/B/C][level 0..9][13 items] and the two
 // extra items per [table][level][route]
 extern const short kTreasureItems[3][10][13];
