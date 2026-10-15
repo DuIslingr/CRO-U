@@ -593,6 +593,7 @@ struct App {
     std::string captureBattleView;         // --battle-view top|commands|targets|items|escape|hit|results
     std::string captureShop;               // --shop main|category|buy|sell|count|confirm|talk
     int captureTitlePair = 0;              // --title-new p: the title's Start, Character Select pair p, New
+    int captureScenario = 0;               // --scenario s: --new-game's scenario (1: the boot's Warp 10, 214)
     int captureBattle[2] = {-1, -1};       // --capture ... --battle group stage
     bool showNpcs = true;                  // N (map mode): NPCs, treasure boxes, field objects
     struct NpcDraw {
@@ -9253,6 +9254,9 @@ constexpr float kWinBadge[4] = {936, 399, 81, 83};         // round "!" badge
 // The page's lines at (x, y): as one block, or - when a line is centred (0x17 flips a line; the
 // windowless style 0x10 centres them all unless flipped) - one by one, the centred ones about the
 // layout's middle (CmdFont: tex2d x 240)
+// PutMsg / CmdFont: a line every 24 tex2d units, the glyphs 16 - doubled on the iPad (and the iPhone's
+// Retina screen) as all of Omega's tex2d is: 48 px a line (CR1's iPad-native layout had half that)
+constexpr float kMsgScale = 4.0f;
 void drawMessageLines(App& app, const std::vector<std::string>& page, float x, float y, float scale, bool centreAll) {
     cr::Renderer& r = app.renderer;
     bool any = centreAll;
@@ -9340,11 +9344,11 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
             app.dialogueHud.setTint(0, 0, 0);
             for (int k = 0; k < 8; ++k) {
                 static const float d[8][2] = {{-2, -2}, {0, -2}, {2, -2}, {-2, 0}, {2, 0}, {-2, 2}, {0, 2}, {2, 2}};
-                drawMessageLines(app, page, tx + d[k][0], ty + d[k][1], 2.2f, centreAll);
+                drawMessageLines(app, page, tx + d[k][0], ty + d[k][1], kMsgScale, centreAll);
             }
         }
         app.dialogueHud.setTint(1, 1, 1);
-        drawMessageLines(app, page, tx, ty, 2.2f, centreAll);
+        drawMessageLines(app, page, tx, ty, kMsgScale, centreAll);
         if (!pageNo.empty()) {
             app.pageHud.setTint(1, 1, 1);
             app.pageHud.drawAt(r, {pageNo}, right - 140, H - 48, 1.5f, 0, 0, 0.0f);
@@ -9402,7 +9406,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         app.dialogueHud.setTint(1, 1, 1);
         textY = H - 140;
     }
-    drawMessageLines(app, page, textX, textY, 2.2f, false); // text and name from the screen's left
+    drawMessageLines(app, page, textX, textY, kMsgScale, false); // text and name from the screen's left
     if (!pageNo.empty()) {
         app.pageHud.setTint(0.12f, 0.10f, 0.08f);
         app.pageHud.drawAt(r, {pageNo}, right - 140, H - 48, 1.5f, 0, 0, 0.0f);
@@ -12249,7 +12253,14 @@ void drawFrame(App& app, bool present = true) {
                     // 640 one for tex2d (0, 0) 480 x 320. Scaled to cover the screen - the whole width in
                     // widescreen -, centred and cut at the sides or top and bottom (the iPhone layout's
                     // screen: (32, 64) 960 x 640); the slide moves it
+                    // A plain (SD) sheet - 512 wide, tyuui's - holds a 480 x 320 card: tex2d_img_prc draws it
+                    // 480 x 320 at tex2d (0, 0), the iPad's (32, 64) 960 x 640, not over the whole screen
                     const bool phone = r.phoneLayout(), small = app.phoneData || app.vitaOnly;
+                    if (!small && p.tex.width < 1024) {
+                        const float ox = phone ? 0.0f : 0.0f;
+                        r.drawQuadUV(p.tex, 32 + ox + p.x, 64 + p.y, 960, 640, 0, 0, 480, 320, p.shade, p.shade, p.shade, p.alpha);
+                        continue;
+                    }
                     const float pw = small ? 960.0f : 1024.0f, ph = small ? 640.0f : 768.0f;
                     const float vw = phone ? 960.0f : SW, vh = phone ? 640.0f : float(H), top = phone ? 64.0f : 0.0f;
                     const float k = phone ? vh / ph : std::max(vw / pw, vh / ph); // (the iPhone's: its height)
@@ -16309,7 +16320,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             } else app.saveScreen.anim = 100; // (faded in: a capture draws one frame)
         } else app.charSelectAnim = 100;
     } else if (app.captureTitle) bootTitle(app); // --title: the boot script, --frames n into it
-    else if (app.newGame) startNewGame(app);
+    else if (app.newGame) startNewGame(app, app.captureScenario);
     else {
         for (int f : app.captureFlags) app.game.setFlag(f, true);
         for (const auto& [from, to] : app.captureItems)
@@ -17130,6 +17141,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
                 if (*p == ',') ++p;
             }
         else if (SDL_strcmp(argv[i], "--title-new") == 0) app->captureTitlePair = std::clamp(SDL_atoi(argv[i + 1]), 1, 2);
+        else if (SDL_strcmp(argv[i], "--scenario") == 0) app->captureScenario = std::clamp(SDL_atoi(argv[i + 1]), 0, 1);
         else if (SDL_strcmp(argv[i], "--talk-portrait") == 0) app->captureTalk = SDL_atoi(argv[i + 1]);
         else if (SDL_strcmp(argv[i], "--save-screen") == 0)
             app->captureMenu = SDL_strcmp(argv[i + 1], "load") == 0 ? 3 : SDL_strcmp(argv[i + 1], "clear") == 0 ? 7 : 2;
