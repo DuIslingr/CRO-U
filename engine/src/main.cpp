@@ -15696,6 +15696,7 @@ int runExplore(App& app, int maxActions) {
     startNewGame(app);
     int totalFrames = 0, pagesRead = 0;
     bool worldAsked = false;                  // the last action opened the World Select
+    std::set<std::pair<int, int>> triedEver;  // (map, id x 2 + examine): done before, in any state
     std::set<std::pair<int, uint64_t>> escaped; // (map, state) where the way out to another area was taken
     std::set<std::pair<int, int>> worldDoors; // (map, id) that do: tried last, once the rooms about are done
     auto settle = [&](int limit) {
@@ -15763,6 +15764,9 @@ int runExplore(App& app, int maxActions) {
                 cands.push_back({n.id, true, worldDoors.count({app.mapNumber, n.id}) ? 60 : rankOf(n.treasure & 3 ? n.id + 1 : n.id, 0)});
             if (n.touchTrigger()) cands.push_back({n.id, false, rankOf(n.id, 1)});
         }
+        // a talk or touch that leads nowhere, done here before (a lever, often): after the ways into new rooms
+        for (Cand& c : cands)
+            if (c.rank < 2 && triedEver.count({app.mapNumber, c.id * 2 + c.examine})) c.rank = 3;
         // (at the same rank walk-in triggers first: they're the rooms' ways on more often than doors)
         std::stable_sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) {
             return a.rank != b.rank ? a.rank < b.rank : (!a.examine && b.examine);
@@ -15813,6 +15817,7 @@ int runExplore(App& app, int maxActions) {
         }
         if (!pick) { stuckReason = 1; break; }
         tried.insert({app.mapNumber, pick->id * 2 + pick->examine, key});
+        triedEver.insert({app.mapNumber, pick->id * 2 + pick->examine});
         const int pickMap = app.mapNumber, pickId = pick->id;
         worldAsked = false;
         const int fromMap = app.mapNumber, flagsBefore = flagCount(), pagesBefore = pagesRead;
@@ -16523,8 +16528,8 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                                              {0, 1, 0});
         if (SDL_getenv("CR_CAPTURE_NPCS")) // (debugging) every NPC of the room: id, kind, +0x12, active, where
             for (const cr::FieldNpc& n : app.npcs)
-                std::printf("npc id %d kind %#x treasure %#x active %d at (%.1f %.1f %.1f) touch %d\n", n.id, n.kind, n.treasure,
-                            npcActive(app, n), n.pos[0], n.pos[1], n.pos[2], n.touchTrigger());
+                std::printf("npc id %d kind %#x treasure %#x active %d (show %d hide %d) at (%.1f %.1f %.1f) touch %d\n", n.id, n.kind,
+                            n.treasure, npcActive(app, n), n.flagShow, n.flagHide, n.pos[0], n.pos[1], n.pos[2], n.touchTrigger());
         for (const auto& d : app.npcDraws) {
             const float o[3] = {0, 0, 0};
             const cr::Vec3 p = d.world.transformPoint(o);
