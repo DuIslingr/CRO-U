@@ -927,22 +927,35 @@ bool loadOriginalImage(App& app, const std::string& mct, cr::Image& img) {
     static const char* const kVitaRedrawn[] = {"MAPtitle_hd.mct", "chaos_hd.mct", "chara1_hd.mct", "chara2_hd.mct",
                                                "chara3_hd.mct", "daimei01_hd.mct", "daimei02_hd.mct", "title1_hd.mct",
                                                "title2_hd.mct", "t0107-b00a00.mct"};
-    const bool redrawn = std::any_of(std::begin(kVitaRedrawn), std::end(kVitaRedrawn), [&](const char* n) { return mct == n; });
-    if (app.vita.isOpen() && mct.size() > 4 && (!redrawn || app.vitaOnly)) { // (alone: its own screens too)
-        std::vector<uint8_t> g;
-        if (app.vita.read(mct.substr(0, mct.size() - 4) + ".gxt", g) && cr::decodeGxt(g, img)) { ++app.vitaTextures; return true; }
-    }
     // chk_hd_name (Omega): a base name loads <base>_ipad.mct on an iPad when the data has one - the
     // iPad's own art (window_ipad, title1_ipad, chara1..3_ipad, ...) -, else <base>_hd.mct, else
-    // the name itself; names that already say _hd / _ipad are taken as they are
-    std::vector<uint8_t> data;
+    // the name itself; names that already say _hd / _ipad are taken as they are. Each in turn
+    // from the Vita first (its lossless .gxt of the same name and size) - the Vita has no _ipad
+    // art, and keeps SD (plain) and Retina (_hd) versions as the iPhone did
     const std::string base = mct.size() > 4 && mct.compare(mct.size() - 4, 4, ".mct") == 0 ? mct.substr(0, mct.size() - 4) : "";
     const auto ends = [&](const char* sfx) { const size_t n = SDL_strlen(sfx); return base.size() > n && base.compare(base.size() - n, n, sfx) == 0; };
-    if (!base.empty() && !ends("_hd") && !ends("_ipad")) {
-        if (cr::readFile(app.dataDir + base + "_ipad.mct", data) && cr::decodeMct(data, img)) { ++app.ipadImages; return true; }
-        if (cr::readFile(app.dataDir + base + "_hd.mct", data) && cr::decodeMct(data, img)) { ++app.hdImages; return true; }
+    std::vector<std::string> names;
+    // (the iPhone layout - its code path, chk_hd_name off the iPad - takes no _ipad art; nor has the Vita any)
+    if (!base.empty() && !ends("_hd") && !ends("_ipad"))
+        names = app.renderer.phoneLayout() ? std::vector<std::string>{"", base + "_hd", base} : std::vector<std::string>{base + "_ipad", base + "_hd", base};
+    else if (!base.empty()) names = {base};
+    std::vector<uint8_t> data;
+    for (size_t k = 0; k < names.size(); ++k) {
+        if (names[k].empty()) continue;
+        const std::string name = names[k] + ".mct";
+        const bool redrawn = std::any_of(std::begin(kVitaRedrawn), std::end(kVitaRedrawn), [&](const char* n) { return name == n; });
+        if (app.vita.isOpen() && (!redrawn || app.vitaOnly) && app.vita.read(names[k] + ".gxt", data) && cr::decodeGxt(data, img)) {
+            ++app.vitaTextures;
+            if (k + 1 < names.size()) ++(k == 0 ? app.ipadImages : app.hdImages);
+            return true;
+        }
+        if (!app.vitaOnly && cr::readFile(app.dataDir + name, data) && cr::decodeMct(data, img)) {
+            if (k + 1 < names.size()) ++(k == 0 ? app.ipadImages : app.hdImages);
+            return true;
+        }
     }
-    return cr::readFile(app.dataDir + mct, data) && cr::decodeMct(data, img);
+    if (base.empty()) return cr::readFile(app.dataDir + mct, data) && cr::decodeMct(data, img);
+    return app.vitaOnly && cr::readFile(app.dataDir + mct, data) && cr::decodeMct(data, img); // (the overlay's other names)
 }
 
 // An iOS data file's names in the Vita's cr1.psarc: x.mct -> x.gxt (and x.gxt for x_hd.mct, which
@@ -2997,7 +3010,16 @@ void applyVideo(App& app) {
     App::Video& v = app.video;
     cr::Renderer& r = app.renderer;
     r.setWidescreen(v.widescreen);
-    r.setPhoneLayout(v.layout == 2 || (v.layout == 0 && app.phoneData)); // 2.2.0's screens (3:2)
+    // 2.2.0's / Omega's iPhone screens (3:2): the iPhone's data, or the Vita's alone - its art is the
+    // iPhone's Retina sheets (the Vita ran the iPhone code path) - unless the iPad layout is asked for
+    const bool phone = v.layout == 2 || (v.layout == 0 && (app.phoneData || app.vitaOnly));
+    const bool changed = phone != r.phoneLayout();
+    r.setPhoneLayout(phone);
+    if (changed && app.rendererReady) { // the UI's sheets again, by chk_hd_name for this layout
+        cr::Image wi;
+        if (loadImage(app, "window.mct", wi)) app.renderer.destroy(app.windowTex), app.windowTex = app.renderer.upload(wi);
+        for (cr::Texture& t : app.titleArt) app.renderer.destroy(t);
+    }
     r.setRenderScale(v.renderScale / 100.0f);
     r.setSamples(v.msaa);
     r.setVSync(v.vsync);
@@ -9453,7 +9475,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         drawWinPiece(app, kWinParchment, left, H - 280, width, 280);
         if (!speaker.empty()) {
             app.nameHud.setTint(1, 1, 1);
-            app.nameHud.drawAt(r, {speaker}, left + 44, H - 274, 2.0f, 0, 0, 0.0f); // on the streak (piece y 14..52)
+            app.nameHud.drawAt(r, {speaker}, left + 44, H - 285, kNameScale, 0, 0, 0.0f); // on the streak (piece y 14..52)
         }
         app.dialogueHud.setTint(0.12f, 0.10f, 0.08f); // ink
         textY = H - 196;
@@ -12316,7 +12338,7 @@ void drawFrame(App& app, bool present = true) {
                     // screen: (32, 64) 960 x 640); the slide moves it
                     // A plain (SD) sheet - 512 wide, tyuui's - holds a 480 x 320 card: tex2d_img_prc draws it
                     // 480 x 320 at tex2d (0, 0), the iPad's (32, 64) 960 x 640, not over the whole screen
-                    const bool phone = r.phoneLayout(), small = app.phoneData || app.vitaOnly;
+                    const bool phone = r.phoneLayout(), small = app.phoneData || app.vitaOnly || phone; // (the iPhone layout: _hd art)
                     if (!small && p.tex.width < 1024) {
                         const float ox = phone ? 0.0f : 0.0f;
                         r.drawQuadUV(p.tex, 32 + ox + p.x, 64 + p.y, 960, 640, 0, 0, 480, 320, p.shade, p.shade, p.shade, p.alpha);
