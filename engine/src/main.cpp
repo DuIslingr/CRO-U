@@ -553,7 +553,7 @@ struct App {
     std::vector<Effect> fieldEffects;      // eff3d_set_fld & co. on the field (32 at most)
     int effectHandles = 0;
     std::vector<std::array<int, 3>> frameEffects; // FrmPlayEff's: key (effect + 1) x (actor + 1), effect, handle
-    std::array<int, 100> fieldEffectCount{};   // started on the field, by id (tests)
+    std::array<int, 256> fieldEffectCount{};   // started on the field, by id (tests; Omega's field ids run past 0x90)
     int frameEffectCalls = 0, scriptEffectCalls = 0, scriptQuakes = 0;
     int texDispCalls = 0, tutoCalls = 0, tutoPage = -1, exclamationCalls = 0; // (tests)
     bool paramUp[2] = {};                  // Uty_Btl_ParamUp02 / 01 waiting for the next battle
@@ -15706,13 +15706,16 @@ int runSelfTest(App& app) {
     { // eff3d on the field over the whole run: the puzzle rooms', the footsteps' dust, the scripts'
         // The dust: walk the leader on the maps in turn until a step lands on a floor with a sound
         int stepMap = -1, dust = 0, steps = 0;
+        const bool keepPlaying = app.playing;
+        const float keepSpeed = app.speed;
+        app.playing = true, app.speed = 1.0f; // (the animations run)
         for (size_t m = 0; m < app.maps.size() && stepMap < 0; ++m) {
             app.runner.stop();
             showMap(app, int(m));
             app.runner.stop();
             app.pendingEntry = App::Entry::None;
             if (!app.havePlayer || app.player.actions.size() < 2) continue;
-            const int before = app.fieldEffectCount[0];
+            const int before = app.fieldEffectCount[0x87];
             const size_t sounds = app.soundLog.size();
             app.walker.gait = cr::Gait::Walk;
             for (int f = 0; f < 60; ++f) {
@@ -15723,18 +15726,20 @@ int runSelfTest(App& app) {
                 stepEffects(app, app.fieldEffects);
             }
             app.walker.gait = cr::Gait::Stand;
-            dust = app.fieldEffectCount[0] - before;
+            dust = app.fieldEffectCount[0x87] - before;
             steps = int(app.soundLog.size() - sounds);
             if (dust > 0) stepMap = int(m);
         }
+        app.playing = keepPlaying, app.speed = keepSpeed;
         mapErrors += dust == 0 || dust != steps;
         std::printf("footstep dust: %d puffs for %d step sounds on %s\n", dust, steps,
                     stepMap >= 0 ? app.maps[size_t(stepMap)].c_str() : "no map");
         std::string ids;
         int kinds = 0;
-        for (int i = 0; i < 100; ++i)
+        for (int i = 0; i < int(app.fieldEffectCount.size()); ++i)
             if (app.fieldEffectCount[size_t(i)]) ids += (kinds++ ? " " : "") + std::to_string(i) + "x" + std::to_string(app.fieldEffectCount[size_t(i)]);
-        const int fxProblems = !app.fieldEffectCount[0] + !app.fieldEffectCount[0xc] + !app.fieldEffectCount[5];
+        // (Omega: the dust 0x87, the candles' flame 0x92)
+        const int fxProblems = !app.fieldEffectCount[0x87] + !app.fieldEffectCount[0x92] + !app.fieldEffectCount[5];
         std::printf("field effects: %d kinds started (%s); FrmPlayEff %d, Uty_eff3d_set_fld %d, script quakes %d; %d problems\n",
                     kinds, ids.c_str(), app.frameEffectCalls, app.scriptEffectCalls, app.scriptQuakes, fxProblems);
         std::printf("pictures: TexDisp %d, TutoTexDisp %d (pages up to %d), the \"!\" %d\n", app.texDispCalls, app.tutoCalls,
