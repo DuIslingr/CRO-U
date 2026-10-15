@@ -12991,8 +12991,8 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
             // after: the strongest from the hit on (3 = the calc's own, when a hit lands; -1 not checked)
             struct Want { int action, group, hit, wait, cams; bool flash, quake; float after; };
             const Want wants[] = {{430, 340, 140, 40, 3, true, true, 3},     {432, 348, -1, 40, 5, false, false, 0},
-                                  {434, 352, 130, 65, 2, true, true, 3},     {435, 356, 163, 140, 5, true, false, 3},
-                                  {436, 356, 61, 50, 4, false, false, 10},   {503, 666, 140, 40, 3, true, true, 3},
+                                  {434, 352, 130, 65, 2, true, true, 3},     {241, 664, 63, 142, 0, true, false, 3}, /* btlact_435 from 100 */
+                                  /* (436: only CR1's boss rows still list it - model 0, no slot 13) */   {503, 666, 140, 40, 3, true, true, 3},
                                   {505, 716, -1, 40, 5, false, false, 0},    {507, 667, 130, 65, 2, true, true, 3},
                                   {437, 655, 0xd7, -1, -1, true, false, 0},    {439, 659, 0x62, -1, -1, true, true, -1},
                                   {440, 658, 0x97, -1, -1, true, true, -1},  {441, 660, 0x52, -1, -1, false, true, -1},
@@ -13007,6 +13007,8 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 const cr::BattleActionDef* def = app.battleActions.get(w.action);
                 if (!b.active || !def) { ++sbad; continue; }
                 b.rules.forceAction = w.action;
+                for (int k = 0; k < 2; ++k) // (the pair outlasts the later groups' blows)
+                    if (b.rules.f[size_t(k)].present) b.rules.f[size_t(k)].hp = b.rules.f[size_t(k)].hpMax = 9999999;
                 int hitAt = -1, endAt = -1, cams = 0, slot = -1, stageEnd = 0, motionEnd = 0;
                 float flash = 0, quake = 0, after = 0;
                 bool started = false, landed = false;
@@ -13077,10 +13079,17 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 endBattle(app, false);
                 app.runner.stop();
             }
-            // effect 48's light shafts: their offset moves between frames 5 and 15
-            int scrolling = 0, moved = 0;
+            // the first effect with scrolling materials (CR1: 48's light shafts): their offset moves
+            // between frames 5 and 15
+            int scrolling = 0, moved = 0, scrollFx = -1;
             startBattle(app, {1, 0, -1, 0}, 0);
-            if (const LoadedModel* fx = app.battle.active ? effectModel(app, 48) : nullptr)
+            for (int id = 0; id < effects::kEffects && scrollFx < 0 && app.battle.active; ++id)
+                if (const LoadedModel* fx = effectModel(app, id))
+                    for (const cr::Material& mt : fx->cpu.materials) {
+                        float s0[2] = {0, 0}, k0[2] = {1, 1};
+                        if (effectUvMotion(*fx, &mt, 5, s0, k0)) { scrollFx = id; break; }
+                    }
+            if (const LoadedModel* fx = app.battle.active && scrollFx >= 0 ? effectModel(app, scrollFx) : nullptr)
                 for (const cr::Material& mt : fx->cpu.materials) {
                     float s0[2] = {0, 0}, s1[2] = {0, 0}, k0[2] = {1, 1}, k1[2] = {1, 1};
                     if (!effectUvMotion(*fx, &mt, 5, s0, k0)) continue;
@@ -13092,8 +13101,8 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
             app.runner.stop();
             app.game = saved;
             const int boss15 = app.battleData.anim(9, 14).loopEnd > 0 || app.battleData.anim(9, 14).hit > 0;
-            std::printf("battle staging: %d of %d boss actions staged, hit quake %s, effect 48: %d of %d scrolling materials move, "
-                        "boss slots past 13 %s; %d problems, %d render API errors\n", ran, kWants, hitQuakes ? "yes" : "no", moved,
+            std::printf("battle staging: %d of %d boss actions staged, hit quake %s, effect %d: %d of %d scrolling materials move, "
+                        "boss slots past 13 %s; %d problems, %d render API errors\n", ran, kWants, hitQuakes ? "yes" : "no", scrollFx, moved,
                         scrolling, boss15 ? "read" : "missing", sbad, rerrs);
             problems += sbad + rerrs + (ran != kWants) + !hitQuakes + (scrolling == 0 || moved == 0);
             glErrors += rerrs;
