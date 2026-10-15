@@ -13468,7 +13468,7 @@ int runSelfTest(App& app) {
         }
     std::printf("solid npcs: %d walk-ins, %d ended inside a box\n", solidTests, entered);
     // Examine everything examinable on every (area, map)
-    int examined = 0, gotItems = 0, lidsHidden = 0, examineWarps = 0, examineErrors = 0;
+    int examined = 0, gotItems = 0, lidsHidden = 0, examineWarps = 0, examineErrors = 0, boxesOpen = 0, goldBoxes = 0;
     std::map<std::string, int> examinedByModel;
     for (int area0 = 0; area0 < cr::kNumAreas; ++area0)
         for (int map0 = 0; map0 < cr::kNumMaps; ++map0) {
@@ -13490,6 +13490,12 @@ int runSelfTest(App& app) {
                 const cr::FieldNpc* t = interactTarget(app);
                 if (!t) continue;
                 const size_t drawsBefore = app.npcDraws.size();
+                // a box already opened (its lid's hide flag: the ids and flags repeat across an area's maps)
+                // and the gold boxes (f0000gbx00: Uty_ChkItem for key 2, then a Yes / No) give nothing here
+                cr::NpcRow lidRow;
+                const bool wasOpen = (n.treasure & 3) && app.events.npcRow(n.id + 1, lidRow) && lidRow.flagHide >= 0 &&
+                                     app.game.flag(lidRow.flagHide);
+                const bool gold = n.model >= 0 && std::string(cr::kNpcModelFile[n.model]) == "f0000gbx00.bin";
                 ++examined;
                 ++examinedByModel[n.model >= 0 ? cr::kNpcModelFile[n.model] : "none"];
                 const bool warped = interact(app, true);
@@ -13497,14 +13503,15 @@ int runSelfTest(App& app) {
                 const bool gave = app.lastEvent.find(", got ") != std::string::npos;
                 gotItems += gave;
                 lidsHidden += (n.treasure & 3) && app.npcDraws.size() < drawsBefore;
-                if ((n.treasure & 3) && !gave)
+                boxesOpen += wasOpen, goldBoxes += gold && !gave;
+                if ((n.treasure & 3) && !gave && !wasOpen && !gold)
                     std::printf("  box without item: %s map %d box %d (lid script %d)\n", cr::kAreaEventFile[area0], map0, n.id, n.id + 1);
                 (void)warped;
             }
         }
-    std::printf("examine: %d examined, %d gave items (%d different, item 0 x%d), %d boxes lost their lid, %d warped; "
-                "by model:", examined, gotItems, int(app.game.items.size()),
-                app.game.items.count(0) ? app.game.items[0] : 0, lidsHidden, examineWarps);
+    std::printf("examine: %d examined, %d gave items (%d different, item 0 x%d), %d boxes lost their lid, %d already open, %d gold "
+                "(a key asked), %d warped; by model:", examined, gotItems, int(app.game.items.size()),
+                app.game.items.count(0) ? app.game.items[0] : 0, lidsHidden, boxesOpen, goldBoxes, examineWarps);
     for (const auto& [m, c] : examinedByModel) std::printf(" %s x%d", m.c_str(), c);
     std::printf("\n");
     (void)examineErrors;
@@ -13553,6 +13560,43 @@ int runSelfTest(App& app) {
                         lidGone ? "removed" : "STILL THERE");
             if (lidAnimFrame < 0 || windowFrame < 0 || endFrame < 0 || !lidGone) ++mapErrors;
         }
+    }
+    { // a gold box (c101_d07 map 94, box 408): Uty_ChkItem counts key 2 into var 0 - none, a message; with
+      // one, a Yes opens it and DelItem takes the key
+        app.game = cr::GameState();
+        const int gm = 94, ga = cr::areaForMap(94, 8);
+        const auto at = std::find(app.maps.begin(), app.maps.end(), std::string(cr::kMapCollisionFile[gm]));
+        int gotWithout = -1, gotWith = -1, keysLeft = -1;
+        cr::NpcRow row;
+        if (at != app.maps.end()) {
+            showMap(app, int(at - app.maps.begin()), gm, ga);
+            app.pendingEntry = App::Entry::None;
+            const cr::FieldNpc* box = nullptr;
+            for (const cr::FieldNpc& n : app.npcs)
+                if (n.id == 408 && npcActive(app, n)) box = &n;
+            if (box && app.havePlayer && app.events.npcRow(408, row) && row.item > 0) {
+                const cr::FieldNpc b = *box;
+                for (int withKey = 0; withKey < 2; ++withKey) {
+                    app.game.items.erase(row.item);
+                    if (withKey) app.game.items[2] = 1;
+                    app.walker.pos = {b.pos[0] + b.box[0] / 2 + app.walker.radius, b.pos[1], b.pos[2]};
+                    app.runner.stop();
+                    interact(app);
+                    for (int f = 0; f < 900 && (app.runner.running() || app.itemWindowOpen); ++f) {
+                        stepEvents(app);
+                        if (app.choiceFlag >= 0) answerChoice(app, true);
+                        if (app.itemWindowOpen) app.tapPending = true;
+                        if (!app.dialogue.empty()) app.dialogue.clear(), app.tapPending = true;
+                    }
+                    (withKey ? gotWith : gotWithout) = app.game.items.count(row.item) ? app.game.items[row.item] : 0;
+                }
+                keysLeft = app.game.items.count(2) ? app.game.items[2] : 0;
+            }
+        }
+        const bool ok = gotWithout == 0 && gotWith == 1 && keysLeft == 0;
+        std::printf("gold box 408: item %d - without a key %d, with one %d (keys left %d) %s\n", row.item, gotWithout, gotWith,
+                    keysLeft, ok ? "ok" : "WRONG");
+        mapErrors += !ok;
         // exit: walk into trigger 2's box and let the script play
         for (const cr::FieldNpc& n : app.npcs)
             if (n.id == 2 && n.touchTrigger()) {
