@@ -15048,7 +15048,7 @@ int runSelfTest(App& app) {
         for (int l = 0; l < cr::kLanguages; ++l) languages += app.systemText.hasLanguage(l);
         problems += languages != cr::kLanguages;
         if (app.sound.voiceClips(false) == 0 && app.vitaVoice[0].isOpen()) startSound(app), vitaAudio(app); // (tests run before it)
-        const bool voices = app.sound.vitaVoices() && app.sound.voiceClips(false) == 2900 && app.sound.voiceClips(true) == 1220;
+        const bool voices = app.sound.vitaVoices() && app.sound.voiceClips(false) == 2557 && app.sound.voiceClips(true) == 1732; // (Omega's: _no_silent and the story's 2556, the battles' 1732)
         problems += !voices;
         int decoded = 0, rate = 0, ch = 0;
         std::vector<uint8_t> f;
@@ -15543,8 +15543,17 @@ int runSelfTest(App& app) {
         problems += !rate || !whole || !turned;
         int frames = 0, taps = 0, pauses = 0, pauseFrames = 0, total = 0, closeAfter = -2;
         bool closed = false;
+        int typedId = 6717; // (the Vita's block starts with three more: its 6720)
         if (app.events.load(app.dataDir, 7)) {
-            showMessages(app, {6717});
+            for (int id = 6700; id < 6800; ++id) {
+                std::vector<std::vector<std::string>> pg;
+                cr::MessageInfo mi;
+                if (app.events.message(id, app.language, [](int) { return 0; }, pg, &mi) && mi.pauses.size() >= 3 && mi.closeAfter > 0) {
+                    typedId = id;
+                    break;
+                }
+            }
+            showMessages(app, {typedId});
             for (size_t k = 0; k < app.dialogueInfo.size() && k < app.dialogue.size(); ++k) // (one after the last
                 for (const auto& pz : app.dialogueInfo[k].pauses)                           // character is the closing wait)
                     if (pz.at < pageChars(app.dialogue[k])) ++pauses, pauseFrames += pz.frames;
@@ -15562,9 +15571,9 @@ int runSelfTest(App& app) {
         }
         const int least = total + pauseFrames + std::max(0, closeAfter);
         problems += pauses == 0 || closeAfter <= 0 || !closed || frames < least || frames > least + 2 * (taps + 2);
-        std::printf("message typing: a character a frame %s, a tap brings it out %s, the next turns it %s; 6717: %d "
+        std::printf("message typing: a character a frame %s, a tap brings it out %s, the next turns it %s; %d: %d "
                     "characters, %d pauses (%d frames), then closes by itself %d frames after the last %s in %d frames; %d problems\n",
-                    rate ? "yes" : "NO", whole ? "yes" : "NO", turned ? "yes" : "NO", total, pauses, pauseFrames, closeAfter,
+                    rate ? "yes" : "NO", whole ? "yes" : "NO", turned ? "yes" : "NO", typedId, total, pauses, pauseFrames, closeAfter,
                     closed ? "yes" : "NO", frames, problems);
         mapErrors += problems;
         app.dialogue.clear();
