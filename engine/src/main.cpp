@@ -366,6 +366,7 @@ struct App {
         int messageFrames = 0;
         int anim = 0;
         std::array<cr::Texture, 31> plateArt; // gene_m*c.mct, loaded when a board first shows them
+        std::array<cr::Texture, 11> statusArt; // _gkpachFaceImage: the records' Status portraits (j039_L01..)
     } camp;
     float saveClock = 0;
     int resumePrompt = 0;                  // 1: "You have save data from your last session" (Yes / No)
@@ -4615,8 +4616,10 @@ void openCamp(App& app) {
     App::Camp& c = app.camp;
     app.campOpen = true;
     auto art = std::move(c.plateArt); // the plates' pictures stay loaded
+    auto portraits = std::move(c.statusArt);
     c = App::Camp();
     c.plateArt = std::move(art);
+    c.statusArt = std::move(portraits);
     c.cursor = 0; // (Omega: none lit until touched - the keys start on Items)
 }
 
@@ -6216,6 +6219,8 @@ void drawMapScreen(App& app) {
     if (ms.spot[0] >= 0) m.imagePiece(ms.tex, float(ms.spot[0]) + 16, float(ms.spot[1]) + 32, float(48 * frame), 320, 48, 48, a);
 }
 
+void outPicture(cr::MenuPainter& m, const cr::Texture& tex, int pict, float x, float y, float a);
+
 void drawCamp(App& app) {
     using namespace campui;
     App::Camp& c = app.camp;
@@ -6386,19 +6391,21 @@ void drawCamp(App& app) {
         if (c.phase == App::Camp::Member) {
             drawShopBoard(app, 12, 92, ch, 0, ease);
             memberPlates(true);
-        } else { // the member's board on the right, their face board on the left
-            int hp, hpMax, mp, mpMax;
-            memberHpMp(app, ch, hp, hpMax, mp, mpMax);
-            right();
-            drawShopBoard(app, 308, 68 + 32, ch, 0, ease);
-            left();
-            drawFaceBoard(app, m, 0, 120, ch, hp, hpMax, mp, mpMax, ease);
-            const cr::PartyMember& pm = app.game.party[size_t(ch)];
-            static const char* const kSeedName[4] = {"Attack", "Defense", "Speed", "Luck"};
-            for (int k = 0; k < 4; ++k) { // the seeds' points (our addition: the original folds them in)
-                m.text(std::string(kSeedName[k]) + " seeds", 24, 248 + 16.0f * float(k), false, ease * 0.8f, 12);
-                drawShopNumber(m, pm.seeds[k], 130, 248 + 16.0f * float(k), 4, 12, ease);
+        } else { // CampMainPut case 3: the record's portrait (texture 8 / 9, group-1 picture 4) at
+            // (0, 64), its state board at (308, 68)
+            static const char* const kFaceImage[11] = {"j039_L01.mct", "j040_L01.mct", "j041_L01.mct", "j001_L01.mct",
+                                                       "j002_L01.mct", "j003_L01.mct", "j004_L01.mct", "j005_L01.mct",
+                                                       "j006_L01.mct", "j007_L01.mct", "j008_L01.mct"};
+            cr::Texture& art = c.statusArt[size_t(std::clamp(ch, 0, 10))];
+            if (!art.id) {
+                cr::Image img;
+                if (loadImage(app, kFaceImage[std::clamp(ch, 0, 10)], img)) art = app.renderer.upload(img);
             }
+            left();
+            outPicture(m, art, 4, 0 - 140 * (1 - ease), 64, ease);
+            right();
+            drawShopBoard(app, 308 + 200 * (1 - ease), 68, ch, 0, ease);
+            left();
         }
         break;
     default: break;
