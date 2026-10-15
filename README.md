@@ -69,7 +69,10 @@ Done so far:
       the self-test on Omega's own rooms (teleport, psychokinesis, toughness, pyrokinesis: each to
       its crystal or its gem; the banner on flag 3090); `--puzzle-dump` lists every stage's objects
 - [x] the story plays by itself (`--explore`): the first scenario from the opening through all six
-      worlds (100 rooms, 22 battles, the puzzle rooms taken as solved) to its ending and staff roll
+      worlds (100 rooms, 22 battles, the puzzle rooms taken as solved) to its ending and staff roll;
+      the second (`--explore n 1`) through its seven worlds to its ending (flag 32) - the Scenarios
+      cards it fills from the Camp give the points the last world needs (var 0x16, the presents a
+      full collection would hold taken as found once it's out of ideas)
 - [x] the Scenarios screen as Omega's bingo cards (`__menuu_Sccnarios*`): the faces and both
       Achievement rates, the cards and their pictures, cells opened from the Camp with presents;
       the Collection (`__menuu_Collection*`: weapons, armor and jewels seen, the rate's rank)
@@ -91,8 +94,6 @@ Next:
 
 - [ ] the battle stage's own motion during a staged action (440: `mdl_set_act_nextanm2` on the
       stage model - stages are drawn unskinned)
-- [ ] `--explore n 1` (the second scenario) to its end: it gets 61 rooms and 43 battles in (its
-      first five worlds) before it runs out of ideas
 
 ## Reverse-engineering groundwork
 

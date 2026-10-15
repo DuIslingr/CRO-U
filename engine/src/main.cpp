@@ -6772,6 +6772,33 @@ void refresh(App& app) {
         s.canPush[size_t(i)] = held - used > 0;
     }
 }
+// What the Camp's Scenarios screen lets the player do, all at once (--explore): every cell a held
+// present opens, card by card; a card all open is done (its flag, var 0x16 + 1). The cells opened
+int openAll(App& app) {
+    cr::GameState& g = app.game;
+    if (!g.flag(0x642)) return 0; // (no cards yet)
+    const int n = g.flag(0x1f) && g.flag(0x65) && g.flag(0x665) ? 5 : 4;
+    int opened = 0;
+    for (int k = 0; k < n; ++k)
+        for (int i = 0; i < 16; ++i) {
+            if (g.flag(kOpenFlag[k] + i)) continue;
+            int held = 0, used = 0;
+            for (short item : kItems[i]) held += ownedCount(app, item) > 0;
+            for (int j = 0; j < 5; ++j) used += g.flag(kPushFlag[j] + i);
+            if (held - used <= 0) continue;
+            g.setFlag(kOpenFlag[k] + i, true);
+            for (int j = 0; j < 5; ++j)
+                if (!g.flag(kPushFlag[j] + i)) { g.setFlag(kPushFlag[j] + i, true); break; }
+            ++opened;
+            bool all = true;
+            for (int c = 0; c < 16; ++c) all &= g.flag(kOpenFlag[k] + c);
+            if (all && !g.flag(kCardFlag + k)) {
+                g.setFlag(kCardFlag + k, true);
+                g.vars[kDoneVar] = (g.vars.count(kDoneVar) ? g.vars[kDoneVar] : 0) + 1;
+            }
+        }
+    return opened;
+}
 void loadCard(App& app, int card) {
     App::Scenarios& s = app.scc;
     if (s.cardLoaded != card) {
@@ -15871,6 +15898,7 @@ int runExplore(App& app, int maxActions, int scenario) {
             }
             if (app.shop.open && !app.shop.talkRunning) closeShop(app); // (it buys nothing)
             if (app.staffRoll.open) { // the ending's credits, fast, the end card tapped away
+                if (!app.staffRoll.fast) std::printf("     staff roll (flags 31 %d, 32 %d)\n", int(app.game.flag(31)), int(app.game.flag(32)));
                 app.staffRoll.fast = true;
                 stepStaffRoll(app);
                 if (app.staffRoll.state >= 7) staffRollTap(app);
@@ -15897,6 +15925,7 @@ int runExplore(App& app, int maxActions, int scenario) {
     std::set<int> mapsSeen{app.mapNumber};
     std::map<int, int> visits{{app.mapNumber, 1}}; // (rooms seen: the less visited first)
     int step = 0, stuckReason = 0;
+    bool presentsGiven = false;
     for (; step < maxActions; ++step) {
         // candidates: people / objects (kind bit 3), then touch boxes that don't warp, then exits
         struct Cand { int id; bool examine; int rank; };
@@ -15943,6 +15972,11 @@ int runExplore(App& app, int maxActions, int scenario) {
             buildWalkCollision(app);
             tried.clear();
             continue;
+        }
+        if (const int opened = bingo::openAll(app)) { // the Camp's Scenarios: cells the presents open (cards done: var 0x16)
+            std::printf("     scenarios: %d cells opened, var 0x16 = %d\n", opened,
+                        app.game.vars.count(0x16) ? app.game.vars[0x16] : 0);
+            tried.clear();
         }
         const uint64_t key = stateKey();
         { // what's left here, for the way back when stuck elsewhere
@@ -16002,6 +16036,17 @@ int runExplore(App& app, int maxActions, int scenario) {
                     if (c.id * 2 + c.examine == firstHop[goal]) { pick = &c; break; }
             if (pick) std::printf("     towards map %d\n", goal), hopping = true;
         }
+        if (!pick && app.game.flag(0x642) && !presentsGiven) {
+            // out of ideas with the cards up: the presents (551..630) a full collection would hold,
+            // taken as found (the worlds' hunt for them isn't played), once - their cards then fill
+            presentsGiven = true;
+            int given = 0;
+            for (int item = 551; item <= 630; ++item)
+                if (ownedCount(app, item) == 0) app.game.items[item] = 1, ++given;
+            std::printf("     presents taken as found: %d\n", given);
+            tried.clear();
+            continue;
+        }
         if (!pick) { stuckReason = 1; break; }
         const int hopKey = pick->id * 2 + pick->examine;
         tried.insert({app.mapNumber, pick->id * 2 + pick->examine, key});
@@ -16009,6 +16054,7 @@ int runExplore(App& app, int maxActions, int scenario) {
         const int pickMap = app.mapNumber, pickId = pick->id;
         worldAsked = false;
         const int fromMap = app.mapNumber, flagsBefore = flagCount(), pagesBefore = pagesRead;
+        const cr::GameState flagsWere = app.game;
         const size_t unsupportedBefore = app.unsupported.size();
         const cr::FieldNpc* n = findNpc(app, pick->id);
         if (!n || !app.havePlayer) continue;
@@ -16046,6 +16092,12 @@ int runExplore(App& app, int maxActions, int scenario) {
                     pick->examine ? "talk " : "touch", pick->id, flagCount() - flagsBefore, pagesRead - pagesBefore,
                     frames, app.mapNumber != fromMap ? (" -> map " + std::to_string(app.mapNumber)).c_str() : "",
                     extra.c_str());
+        if (flagCount() != flagsBefore && SDL_getenv("CR_EXPLORE_FLAGS")) { // (debugging: which)
+            std::printf("     flags:");
+            for (int fl = 0; fl < cr::GameState::kFlagCount; ++fl)
+                if (app.game.flag(fl) != flagsWere.flag(fl)) std::printf(" %s%d", app.game.flag(fl) ? "+" : "-", fl);
+            std::printf("\n");
+        }
         if (app.runner.running()) { app.runner.stop(); stuckReason = 2; break; }
     }
     std::printf("explore: area %d, puzzle stage %d\n", app.area, app.puzzle.stage);
