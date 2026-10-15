@@ -3565,6 +3565,7 @@ bool applySave(App& app, const cr::SaveData& s) {
     app.booting = false;
     app.titleOpen = false;
     app.game = s.game;
+    if (!app.game.wornInBag) cr::putWornInBag(app.game, app.itemTable);
     app.treasureBoxes.clear();
     app.entryArea = -1;
     app.playSeconds = s.playSeconds;
@@ -3973,7 +3974,7 @@ int shopUnitPrice(const App& app, int item) {
 }
 
 int shopMaxCount(const App& app, int item) {
-    if (app.shop.selling) return std::min(ownedCount(app, item), cr::kMaxItemCount);
+    if (app.shop.selling) return std::clamp(ownedCount(app, item) - cr::wornCount(app.game, item), 0, cr::kMaxItemCount);
     return cr::maxPurchase(shopUnitPrice(app, item), app.game.oz, ownedCount(app, item));
 }
 
@@ -4118,16 +4119,13 @@ void shopPay(App& app) {
     shopBackToList(app);
 }
 
-// Yes to "Equip it?": worn by the board's character, what they wore goes back in the bag
+// Yes to "Equip it?": worn by the board's character (both stay in the bag: __ChangeEquipItem)
 void shopEquip(App& app) {
     App::Shop& s = app.shop;
     const int item = s.list[size_t(s.listCursor)];
     const cr::ItemParam* p = app.itemTable.item(item);
     if (p && cr::equipSlot(p->kind) >= 0 && ownedCount(app, item) > 0) {
-        int& slot = app.game.party[size_t(shopCharacter(app))].equip[cr::equipSlot(p->kind)];
-        if (slot > 0) app.game.items[slot] = std::min(cr::kMaxItemCount, ownedCount(app, slot) + 1);
-        --app.game.items[item];
-        slot = item;
+        app.game.party[size_t(shopCharacter(app))].equip[cr::equipSlot(p->kind)] = item;
         menuSound(app, shopui::kSoundEquip);
     }
     shopBackToList(app);
@@ -4645,9 +4643,14 @@ std::vector<int> campEquipList(const App& app, int c, int slot) {
     }
     const int kind = slot == cr::kWeapon ? cr::kKindWeapon : slot == cr::kArmor ? cr::kKindArmor : cr::kKindJewel;
     if (slot == cr::kJewel && app.game.party[size_t(c)].equip[cr::kJewel] > 0) out.push_back(0); // take it off
+    const int other = campMembers(app) > 1 ? campCharacter(app, campCharacter(app, 0) == c ? 1 : 0) : -1;
     for (int n = 201; n <= 418; ++n) { // (Omega: weapons and armor 201..368, jewels 369..418)
         const cr::ItemParam* p = app.itemTable.item(n);
         if (!p || p->kind != kind || ownedCount(app, n) <= 0 || !(p->owners & (1 << c))) continue;
+        // (worn equipment stays in the bag: a copy the other member wears isn't free)
+        if (other >= 0 && other != c && ownedCount(app, n) - int(std::count(std::begin(app.game.party[size_t(other)].equip),
+                                                                           std::end(app.game.party[size_t(other)].equip), n)) <= 0)
+            continue;
         out.push_back(n);
     }
     return out;
@@ -4826,10 +4829,7 @@ void campChoose(App& app) {
             menuSound(app, campui::kSoundEquip);
             c.phase = App::Camp::Slot;
         } else if (c.phase == App::Camp::List && !c.list.empty()) {
-            int& worn = app.game.party[size_t(campCharacter(app, c.member))].equip[c.slot];
-            if (worn > 0) app.game.items[worn] = std::min(cr::kMaxItemCount, ownedCount(app, worn) + 1);
-            if (item > 0 && --app.game.items[item] <= 0) app.game.items.erase(item);
-            worn = item;
+            app.game.party[size_t(campCharacter(app, c.member))].equip[c.slot] = item; // (the bag as it was: __ChangeEquipItem)
             menuSound(app, campui::kSoundEquip);
             c.phase = App::Camp::Slot;
         }
@@ -13731,8 +13731,20 @@ int runSelfTest(App& app) {
         key(SDLK_RETURN);
         problems += c.phase != App::Camp::List || c.list.empty() || c.list[0] != 202;
         for (int f = 0; f < 3; ++f) { app.lastTicks = 0; drawFrame(app, false); ++frames; }
-        key(SDLK_RETURN);                                     // wear the Bastard Sword
-        problems += app.game.party[0].equip[0] != 202 || ownedCount(app, 201) != 1 || ownedCount(app, 202) != 0;
+        key(SDLK_RETURN);                                     // wear the Bastard Sword (the bag as it was)
+        problems += app.game.party[0].equip[0] != 202 || ownedCount(app, 201) != 0 || ownedCount(app, 202) != 1;
+        app.shop.selling = true;                              // worn: none of it to sell
+        problems += shopMaxCount(app, 202) != 0;
+        app.shop.selling = false;
+        { // an older save: what the records wear put in their scenario's bag
+            cr::GameState old;
+            for (auto& pm : old.party) pm.equip[0] = pm.equip[1] = pm.equip[2] = 0;
+            old.party[4].equip[0] = 201;
+            old.party[7].equip[0] = 229;
+            old.items[201] = 1;
+            cr::putWornInBag(old, app.itemTable);
+            problems += old.items[201] != 1 || old.otherBag[229] != 1 || old.items.count(229) || !old.wornInBag;
+        }
         key(SDLK_ESCAPE), key(SDLK_ESCAPE), key(SDLK_ESCAPE);
         c.cursor = 3, key(SDLK_RETURN), key(SDLK_RETURN), key(SDLK_RIGHT); // Status: Musiea's
         problems += c.page != App::Camp::Status || c.member != 1;

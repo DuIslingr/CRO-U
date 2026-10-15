@@ -1,3 +1,4 @@
+#include <map>
 #include "game/genes.hpp"
 
 #include <algorithm>
@@ -119,8 +120,8 @@ void addScenarioItem(GameState& gs, const ItemTable& items, int scenario, int it
 }
 
 void giveStartingItems(GameState& gs, const ItemTable& items) {
-    // prty_init: records 3..6 fill scenario 0's bag, 7..9 scenario 1's - their plates and two
-    // extras (the port keeps worn equipment out of the bag) -, scenario 1 also gets 480, 82 and
+    // prty_init: records 3..6 fill scenario 0's bag, 7..9 scenario 1's - their plates, two extras
+    // and what they wear (add_item2: worn equipment stays in the bag) -, scenario 1 also gets 480, 82 and
     // 188, scenario 0 _prty_init_item_all; then plate 475 (record 6's) and 369 go again
     static const short kItemAll[] = {419, 420, 421, 422, 423, 428, 429, 430, 431, 432, 433,
                                      434, 435, 437, 438, 443, 444, 445, 459, 460};
@@ -128,6 +129,7 @@ void giveStartingItems(GameState& gs, const ItemTable& items) {
         const int s = (c - 3) / 4;
         addScenarioItem(gs, items, s, gs.party[size_t(c)].genes[0], 1);
         for (int k = 0; k < 2; ++k) addScenarioItem(gs, items, s, startItem(c, k), 1);
+        for (int e : gs.party[size_t(c)].equip) addScenarioItem(gs, items, s, e, 1);
     }
     for (int i : {480, 82, 188}) addScenarioItem(gs, items, 1, i, 1);
     for (int i : kItemAll) addScenarioItem(gs, items, 0, i, 1);
@@ -138,5 +140,29 @@ void giveStartingItems(GameState& gs, const ItemTable& items) {
 }
 
 void ensureStartingGenes(GameState&) {} // (CR1's Human Genes; Omega's records carry their plates)
+
+int wornCount(const GameState& gs, int item) {
+    int n = 0;
+    if (item <= 0) return 0;
+    for (int r = 0; r < 3; ++r)
+        for (int e : gs.party[size_t(r)].equip) n += e == item;
+    return n;
+}
+
+void putWornInBag(GameState& gs, const ItemTable& items) {
+    // Records 3.. hold each scenario's block (4..6 scenario 0, 7..9 scenario 1; 3 the guest, with
+    // the one in play); 0..2 are copies of the block in play
+    std::map<std::pair<bool, int>, int> need; // (the other scenario's bag?, item) -> copies worn
+    for (int r = 3; r < kCharacters; ++r) {
+        const int s = r == 3 ? gs.scenario : (r - 4) / 3;
+        for (int e : gs.party[size_t(r)].equip)
+            if (e > 0) ++need[{!sharedItem(items, e) && s != gs.scenario, e}];
+    }
+    for (const auto& [key, n] : need) {
+        auto& bag = key.first ? gs.otherBag : gs.items;
+        bag[key.second] = std::min(99, std::max(bag[key.second], n));
+    }
+    gs.wornInBag = true;
+}
 
 } // namespace cr
