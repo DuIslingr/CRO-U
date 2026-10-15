@@ -72,12 +72,15 @@ Done so far:
       Achievement rates, the cards and their pictures, cells opened from the Camp with presents;
       the Collection (`__menuu_Collection*`: weapons, armor and jewels seen, the rate's rank)
 - [x] worn equipment stays in the bag, as Omega's `prty_init` / `__ChangeEquipItem` have it
+- [x] the bosses' staged actions (`btlact_main`'s kinds 10..22: 430..443, 509) with Omega's
+      effects, sounds and camera chains, and the story battles' set moves (`_btlque_special`)
 
 Next (the CR1 self-test's checks that fail on Omega point at most of these):
 
 - [ ] Select Scenario's second page sliding in by drag (flag 31: page turn only for now)
 - [ ] the puzzles' play against Omega's objects (WarpCrystal CS / NG / WS) and the self-test's stages
-- [ ] the rest of the battle rules where Omega changed them (special commands 10..22)
+- [ ] the battle stage's own motion during a staged action (440: `mdl_set_act_nextanm2` on the
+      stage model) and `btlcalc_prc_0404` before 430 / 436 / 442
 
 ## Reverse-engineering groundwork
 
