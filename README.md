@@ -41,8 +41,8 @@ Done so far:
       (f009a / f009b, f010, f011)
 - [x] rooms' paintings and overlays as their stage records name them (+60 / +62 of the record)
 - [x] scene effects as Omega's `ScnEffectRead` / `Proc`: eleven sets, effects 2..30 (weather, the
-      elevator shaft, the space backdrop, the battleship's sky behind its painting); not yet effect
-      1 (a blinking overlay) or additive blending
+      elevator shaft, the space backdrop, the battleship's sky behind its painting) and effect 1
+      (syuutyuusen's concentration lines, every other frame); not yet additive blending
 - [x] a new game reaches the opening; with Omega's data the self-test loads all 373 models and
       spawns and walks the player on all 125 fields
 - [x] the party as Omega keeps it (`_prty`): ten records (the scenario's three in play, a guest,
@@ -75,7 +75,7 @@ Next (the CR1 self-test's checks that fail on Omega point at most of these):
 - [ ] Select Scenario's second page sliding in by drag (flag 31: page turn only for now)
 - [ ] the puzzles' play against Omega's objects (WarpCrystal CS / NG / WS) and the self-test's stages
 - [ ] the rest of the battle rules where Omega changed them (special commands 10..22)
-- [ ] scene effect 1 and additive blending (`c207b.bin`, in the NPC model table, isn't in the data:
+- [ ] the scene effects' additive blending (`c207b.bin`, in the NPC model table, isn't in the data:
       every package there parses)
 
 ## Reverse-engineering groundwork

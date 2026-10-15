@@ -225,6 +225,7 @@ struct App {
     cr::Hud optionsHud;
     cr::Texture windowTex;                 // window.mct (chk_hd_name: window_ipad on the iPad): the UI atlas
     cr::Texture cutinTex;                  // window_cutin.mct (tex2d slot 0x2b on the iPad): the talk parchment
+    cr::Texture speedLinesTex;             // syuutyuusen(_ipad).mct (slot 0x2e): scene effect 1
     cr::Texture titleArt[2];               // __menuu_TitleSet: title1.mct (MuCom slot 0x11), chaos.mct (0x12)
     float footPrev = 0;                    // player's animation time last frame (footsteps)
     std::vector<uint32_t> soundLog;        // every sound started (self-test)
@@ -1834,8 +1835,7 @@ void placePlayer(App& app) {
 // field-only effects need the field's bit (G+0x364 & 0x40) - in a battle (bit 0x20) the weather
 // uses its own copies. Layers at z -1998 (the magma, the elevator shaft, the space and sky
 // backdrops: 11..22, 26..28, 30) go behind the field's painting, the rest over it.
-// (Not done: effect 1, a blinking overlay of syuutyuusen's pieces (bkanTexUv); 0x4a's / 0x4d's
-// additive blending.)
+// (Not done: 0x4a's / 0x4d's additive blending.)
 namespace scenefx {
 struct SetTexture { int set; const char* file; int slot; int w, h; };
 // ScnEffectRead's sets (Omega 1.0.0): file, slot, tex2d_read's logical size
@@ -1962,6 +1962,7 @@ void stepSceneEffects(App& app) {
         int& a = fx.timerA[size_t(id)];
         int& b = fx.timerB[size_t(id)];
         switch (id) {
+        case 1: a ^= 1; break; // the concentration lines: every other frame (gac + 0x188)
         case 2: case 3: case 4: // the alarm lights: a 31-frame pulse, on the field
             if (!battle && weatherOn && ++a >= 31) a = 0;
             break;
@@ -2127,6 +2128,22 @@ void drawSceneEffects(App& app, bool battle = false) {
         if (!app.environmentEffects && weatherEffect(id)) continue;
         const float a = float(fx.timerA[size_t(id)]), b = float(fx.timerB[size_t(id)]);
         switch (id) {
+        case 1: { // syuutyuusen's concentration lines on alternate frames: four mirrored quarters
+            // (_bkanTexUv_ipad: each tex2d (x - 16, y - 32) its own (u, v) and size, z -50)
+            if (!(fx.timerA[1] & 1)) break;
+            if (!app.speedLinesTex.id) {
+                cr::Image img;
+                if (loadImage(app, "syuutyuusen.mct", img)) app.speedLinesTex = app.renderer.upload(img);
+            }
+            if (!app.speedLinesTex.id) break;
+            static const int kUv[4][4] = {{0, 0, 256, 192}, {256, 0, -256, 192}, {256, 192, -256, -192}, {0, 192, 256, -192}};
+            const float k = app.speedLinesTex.width / 256.0f;
+            for (const auto& q : kUv) {
+                const float x = 2.0f * float(q[0] - 16) + 32, y = 2.0f * float(q[1] - 32) + 64; // (a negative size flips the uv only)
+                r.drawQuadUV(app.speedLinesTex, x, y, 512, 384, q[0] * k, q[1] * k, q[2] * k, q[3] * k);
+            }
+            break;
+        }
         case 2: case 3: case 4: { // the alarm lights: a grey level 0 -> 128 -> 0, at 0xa0
             if (battle) break;
             const float g = a < 15 ? a / 15 * 128 : (a - 15) / 15 * -128 + 128;
