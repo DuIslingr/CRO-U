@@ -16,13 +16,6 @@ struct TreasureBox {
     int item = 1;  // item number (getItemNo; 1 when not found)
 };
 
-// randomSelect: candidates are every second NPC id in [100, 140) and [140, 180) whose NPC
-// table +18 bit 0 is set; random ones are dropped until 7 and 8 remain. Their items come from
-// one of _TBOX_TABLE_A/B/C (row `level` 0..9, 13 items) plus two from _TBOX_PAIR_TABLE_A/B/C
-// [level][route], shuffled and dealt out in box order. The original seeds with the clock;
-// `seed` makes it repeatable.
-std::vector<TreasureBox> selectTreasureBoxes(const EventFile& file, uint32_t seed, int level, int route);
-
 // Omega's randomSelect (and AddInfoList), run as the World Select leads into one of the first four
 // worlds (_InitDungeon): the same candidates and pools by the scenario's level band (0..9 of
 // `band`), drawn by `random(n)` (0..n-1: the original's rand() % n, seeded by the clock); the
