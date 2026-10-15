@@ -323,6 +323,7 @@ private:
     bool holdsBreak(int i) const { return i < 2 ? breakGauge > 0 : breakGauge < 0; }
     bool blocked(int target, int skill);
     bool knows(int item) const;
+    int levelBand(int lv);
 
     int bonusFor(const int actors[2], bool magic) const;
     int elementScale(const BattleActionDef& a, int user, int target, int& type) const;

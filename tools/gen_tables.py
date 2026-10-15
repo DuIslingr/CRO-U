@@ -122,6 +122,10 @@ def main():
     step_walk = [[s32(walk_a + (r * 2 + k) * 4) for k in range(2)] for r in range(sets)]
     step_se = [[s32(se_a + (t * 3 + k) * 4) for k in range(3)] for t in range(size(se_a) // 12)]
     routes = len(pair[0][0])
+    anm = find("_btlanmtbl")
+    assert size(anm) >= 17 * len(btl_models)
+    anm_rows = [list(rd(anm + 17 * m, 17)) for m in range(len(btl_models))]
+    anm_rows = [[b - 256 if b > 127 else b for b in r] for r in anm_rows]  # (char)
 
     q = lambda s: '"' + s + '"'
 
@@ -170,7 +174,10 @@ def main():
             "const short kFootstepFrameRun[kNumFootstepSets][2] = {" + ", ".join("{%d, %d}" % tuple(r) for r in step_run) + "};",
             "const short kFootstepFrameWalk[kNumFootstepSets][2] = {" + ", ".join("{%d, %d}" % tuple(r) for r in step_walk) + "};",
             f"const short kFootstepSound[{len(step_se)}][3] = {{" + ", ".join("{%d, %d, %d}" % tuple(t) for t in step_se) + "};",
-            "", "} // namespace cr", ""]
+            "", "const signed char kBattleAnimTable[kNumBattleModels][17] = {"]
+    for i in range(0, len(anm_rows), 4):
+        cpp.append("    " + ", ".join("{" + ", ".join(map(str, r)) + "}" for r in anm_rows[i:i + 4]) + ",")
+    cpp += ["};", "", "} // namespace cr", ""]
 
     hpp = f"""#pragma once
 // Field-loading tables from Chaos Rings Omega HD 1.0.0's binary (generated: tools/gen_tables.py -
@@ -227,6 +234,9 @@ extern const short kTreasurePairs[3][10][kNumTreasureRoutes][2];
 extern const short kFootstepFrameRun[kNumFootstepSets][2];
 extern const short kFootstepFrameWalk[kNumFootstepSets][2];
 extern const short kFootstepSound[{len(step_se)}][3];
+// _btlanmtbl, per battle model: [0..14] its action slots read from the package (1) or shared,
+// [15] the species (plate item 481 + it, the dying cry, the announce name), [16] a boss's last act
+extern const signed char kBattleAnimTable[kNumBattleModels][17];
 
 }} // namespace cr
 """

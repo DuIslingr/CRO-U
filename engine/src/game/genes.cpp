@@ -5,6 +5,7 @@
 #include "game/event_vm.hpp"
 #include "game/party.hpp"
 #include "game/shop.hpp"
+#include "game/stage_tables.hpp"
 
 namespace cr {
 
@@ -87,7 +88,8 @@ void levelUpBoosts(GameState& gs, int character, int levels) {
         if (hasSkill(gs, character, 164 + k)) gs.party[size_t(character)].boosts[k] += (k == 0 ? 10 : 1) * levels;
 }
 
-int plateDrop(int model) { return model >= 13 && model < 73 ? 481 + (model - 13) / 3 : 0; }
+// btlcalc_chk_dead: models 33..138 leave the plate of their species (_btlanmtbl [15])
+int plateDrop(int model) { return model >= 33 && model <= 138 ? 481 + kBattleAnimTable[model][15] : 0; }
 
 void giveStartingItems(GameState& gs) {
     ensureStartingGenes(gs);

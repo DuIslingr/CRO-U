@@ -187,9 +187,9 @@ void BattleRules::setupEnemies(const BattleData& data, const std::array<int, 3>&
         x.lck = m->lckAt(x.level);
         x.exp = int(m->expAt(x.level));
         x.oz = int(m->genePointsAt(x.level));
-        if (x.level >= 20) // chk_skill_btl: a monster's skills (+0xaa, five) count from level 20
+        if (x.level >= 20) // chk_skill_btl: a monster's skills (+0xae, five) count from level 20
             for (int k = 0; k < 5; ++k)
-                if (const int s = monsterField(x, 0xaa + 2 * k); s >= 131 && s <= 186) x.skills[size_t(s - 131)] = true;
+                if (const int s = monsterField(x, 0xae + 2 * k); s >= 131 && s <= 186) x.skills[size_t(s - 131)] = true;
     }
 }
 
@@ -451,20 +451,22 @@ BattleHit BattleRules::heal(const BattleActionDef& a, const int actors[2], int t
 }
 
 void BattleRules::enemyChoice(int enemy, bool asPair, Entry& e, const BattleActionTable& actions, int exclude) {
-    // btlai_prc: the row's lists (5 actions each, +0x46 + 10 x list; the enemy pair's 50 on):
-    // 0 always (weight 100), 1 when the enemies hold the Break / 2 otherwise (50), 3 at a
-    // quarter of the HP or less (100), 4 every fifth round (200); "do nothing" actions 413..429
-    // weigh 10 wherever they are
+    // btlai_prc / btlai_make: the row's lists (5 actions each, +0x4a + 10 x list; the enemy
+    // pair's 50 on): 0 always (weight 100), 1 when the enemies hold the Break / 2 otherwise (50),
+    // 3 at a quarter of the HP or less (100), 4 every fifth round (200); "do nothing" actions
+    // 413..429, 459..467 and 478..485 weigh 10 wherever they are; silenced, only attacks
+    // (1..126, 261..401) and those
     const Fighter& x = f[size_t(enemy)];
     struct Choice { int action, weight; };
     std::vector<Choice> list;
-    const int base = 0x46 + (asPair ? 50 : 0);
+    const int base = 0x4a + (asPair ? 50 : 0);
     auto add = [&](int listNo, int weight) {
         for (int k = 0; k < 5; ++k) {
             const int a = monsterField(x, base + listNo * 10 + 2 * k);
             if (a <= 0 || a == exclude) continue;
-            if (x.status[kStatusSilence] && (a - 301u > 64u) && (a - 1u > 124u) && (a - 413u > 16u)) continue;
-            list.push_back({a, a - 413u < 17u ? 10 : weight});
+            const bool idle = a - 413u < 17u;
+            if (x.status[kStatusSilence] && (a - 261u > 140u) && (a - 1u > 125u) && !idle) continue;
+            list.push_back({a, idle || a - 459u < 9u || a - 478u < 8u ? 10 : weight});
         }
     };
     add(0, 100);
@@ -958,7 +960,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             for (int k : e.actors) if (k >= 0) mine += lckOf(k), ++n;
             for (int t : hitList) { theirs += lckOf(t), ++m; anyLeft |= !f[size_t(t)].robbed; }
             const int d = (n ? mine / n : 0) + 20 - (m ? theirs / m : 0) + a->power;
-            const int chance = d < -100 ? 40 : d < -49 ? 50 : d < 0 ? 60 : d < 50 ? 70 : d < 101 ? 80 : 90;
+            const int chance = d < -100 ? 80 : d < -49 ? 85 : d < 0 ? 90 : 100; // Omega's btlcalc_0504
             const bool roll = random(100) < chance;
             if (!anyLeft) out.message = 57037; // nothing to steal
             else if (dealt > 0 && roll) {
@@ -966,9 +968,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                 for (int t : hitList) {
                     Fighter& x = f[size_t(t)];
                     if (x.robbed || !x.def) continue;
-                    int item;
-                    if (x.level >= 40 && random(3) == 1) item = monsterField(x, 0xca);
-                    else item = x.level >= 20 && random(2) ? monsterField(x, 0xc8) : monsterField(x, 0xc6);
+                    const int item = monsterField(x, 0xd2 + 2 * levelBand(x.level)); // btlcalc_0504: five by level
                     if (item <= 0) continue;
                     x.robbed = true;
                     stolen.push_back(item);
@@ -1003,12 +1003,9 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             c.actors[0] = counterBy;
             c.target = e.actors[0];
             if (counterBy < 2) c.action = attackAction(counterBy);
-            else { // a monster answers with its first plain attack
-                c.action = 0;
-                for (int k = 0; k < 5 && !c.action; ++k)
-                    if (const BattleActionDef* d = actions.get(monsterField(f[size_t(counterBy)], 0x46 + 2 * k)); d && d->calc == 0)
-                        c.action = d->id;
-                if (!c.action) c.action = 10;
+            else { // btlque_add_counter: a monster answers with its row's counter (+0xb8)
+                c.action = monsterField(f[size_t(counterBy)], 0xb8);
+                if (!actions.get(c.action)) c.action = 10;
             }
             queue_.insert(queue_.begin() + std::ptrdiff_t(next_), c);
         }
@@ -1049,6 +1046,13 @@ void BattleRules::endRound() {
     }
 }
 
+// btlcalc_0504 / 0505: which of a row's five items - from level 25 a third of the time the one
+// for its band (25 / 50 / 100 / 150), else the first
+int BattleRules::levelBand(int lv) {
+    if (lv < 25 || random(3) != 1) return 0;
+    return lv < 50 ? 1 : lv < 100 ? 2 : lv < 150 ? 3 : 4;
+}
+
 bool BattleRules::knows(int item) const {
     return std::find(known_.begin(), known_.end(), item) != known_.end() ||
            std::find(learned.begin(), learned.end(), item) != learned.end() ||
@@ -1064,26 +1068,24 @@ void BattleRules::fallRewards(int enemy, const int actors[2]) {
         if (actors[k] >= 0) sum += f[size_t(actors[k])].level, ++n;
     const int avg = n ? sum / n : 1, lv = x.level;
     auto row = [&](int off) { return monsterField(x, off); };
-    if (row(0xc0) + row(0xc2) + row(0xc4) != 0) { // btlcalc_0505: an item - the roll, then which
+    if (row(0xc8) + row(0xca) + row(0xcc) + row(0xce) + row(0xd0) != 0) { // btlcalc_0505: an item - the roll, then which
         int d = avg + 10 - lv;
         const int chance = d < -4 ? 20 : d < 1 ? 30 : d < 6 ? 40 : 50;
         if (random(100) < chance) {
-            int item;
-            if (lv >= 40 && random(3) == 1) item = row(0xc4);
-            else item = lv >= 20 && random(2) ? row(0xc2) : row(0xc0);
+            const int item = row(0xc8 + 2 * levelBand(lv)); // five, by level
             if (item > 0 && !((item >= 81 && item <= 186) && knows(item))) drops.push_back(item);
         }
     }
-    if (row(0xb4) != 0) { // a gene
+    if (row(0xbc) != 0) { // a gene
         bool more = false; // 158: Get More Genes
         for (int k = 0; k < 2; ++k) more |= actors[k] >= 0 && has(actors[k], 158);
         const int d = avg - (more ? 15 : 0) - lv;
         const int chance = d < -4 ? 80 : d < 1 ? 40 : d < 6 ? 30 : 10;
-        if (random(100) < chance) { // btlcalc_0506: the first not known yet of up to six (+0xb4..+0xbe:
-            // its plate's abilities and skills, the later ones from levels 5 / 10 / 15 / 20 / 25)
-            static const int kFrom[6] = {0, 5, 10, 15, 20, 25};
+        if (random(100) < chance) { // btlcalc_0506: the first not known yet of up to six (+0xbc..+0xc6:
+            // the later ones from levels 10 / 25 / 50 / 75 / 100)
+            static const int kFrom[6] = {0, 10, 25, 50, 75, 100};
             for (int k = 0; k < 6; ++k) {
-                const int g = row(0xb4 + 2 * k);
+                const int g = row(0xbc + 2 * k);
                 if (lv >= kFrom[k] && g > 0 && !knows(g) &&
                     std::find(learned.begin(), learned.end(), g) == learned.end()) {
                     learned.push_back(g), learnedNew = true;
@@ -1092,7 +1094,7 @@ void BattleRules::fallRewards(int enemy, const int actors[2]) {
             }
         }
     }
-    const int plate = plateDrop(x.def->model); // chk_dead: 481 + (model - 13) / 3
+    const int plate = plateDrop(x.def->model); // chk_dead: 481 + the species
     if (plate > 0 && !knows(plate)) drops.push_back(plate);
 }
 

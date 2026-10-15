@@ -11673,7 +11673,7 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 g.party[0].genes[1] = 481;
                 const std::vector<int> more = cr::usableAbilities(g, 0);
                 bad += more.size() != 2 || cr::plateLearned(g, 481) != 1;
-                bad += cr::plateDrop(13) != 481 || cr::plateDrop(16) != 482 || cr::plateDrop(72) != 500 || cr::plateDrop(73) != 0;
+                bad += cr::plateDrop(32) != 0 || cr::plateDrop(33) != 481 + cr::kBattleAnimTable[33][15] || cr::plateDrop(139) != 0;
                 int plates = 0, taught = 0;
                 for (uint32_t seed = 1; seed <= 40; ++seed) { // monster 200 (model 13) falls to a level-1 attack
                     cr::GameState fresh;
