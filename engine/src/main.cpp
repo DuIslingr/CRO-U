@@ -11419,7 +11419,7 @@ void drawBattle(App& app, float dt) {
     r.setOrigin(0);
     cr::Vec3 eye{488, 12, 555}, target{500, 4, 498};
     battleCameraView(app, eye, target);
-    cr::Mat4 proj = cr::Mat4::perspective(28.5f * 3.14159265f / 180.0f, W / H, 9.0f, 2000.0f);
+    cr::Mat4 proj = cr::Mat4::perspective(b.fov * 3.14159265f / 180.0f, W / H, 9.0f, 2000.0f);
     // btl_prc: the quake shifts the frustum by its offset in the 1024 x 768 screen's pixels
     proj.m[8] -= 2.0f * b.quake.off[0] / W;
     proj.m[9] -= 2.0f * b.quake.off[1] / H;

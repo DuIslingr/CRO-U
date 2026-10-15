@@ -84,7 +84,7 @@ Done so far:
 Next (the self-test's remaining failures are mostly checks still written for CR1's data):
 
 - [ ] the battle stage's own motion during a staged action (440: `mdl_set_act_nextanm2` on the
-      stage model) and `btlcalc_prc_0404` before 430 / 436 / 442
+      stage model - stages are drawn unskinned)
 - [ ] `--explore` through the second gate (it now clears the first, talks the Ark through, takes
       the second world and gets 41 rooms in before it runs out of ideas in area 4)
 - [ ] the rest of the self-test moved onto Omega's data (battle rules, saves, the save screen)
