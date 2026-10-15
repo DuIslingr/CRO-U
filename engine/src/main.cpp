@@ -7353,7 +7353,7 @@ void press(App& app, int r, int c, bool on, bool silent = false) {
     if (s < 0) return;
     App::Puzzle::Obj& sw = app.puzzle.objs[size_t(s)];
     if (sw.type != cr::kTypeWeighSwitch) return;
-    if (on && !silent) app.sound.play(0x28);
+    if (on && !silent) app.sound.play(0x131);
     sw.on = on;
 }
 
@@ -7439,10 +7439,10 @@ void stepBlock(App& app, App::Puzzle::Obj& o) { // NormalBlockTP / NormalGem (th
             const cr::Vec3 c = centre(app, o.row, o.col);
             const cr::Vec3 p = app.walker.pos;
             if (std::fabs(p.x - c.x) < cr::kPuzzleCell * 0.5f && std::fabs(p.z - c.z) < cr::kPuzzleCell * 0.5f) {
-                npcEffect(app, 2, o.npc);
-                npcEffect(app, 3, o.npc);
+                npcEffect(app, 0x88, o.npc);
+                npcEffect(app, 0x89, o.npc);
                 show(app, o, false);
-                app.sound.play(0x27);
+                app.sound.play(0x130);
                 if (int* slot = cellSlot(app, o.layer, o.row, o.col); slot && *slot >= 0 && &app.puzzle.objs[size_t(*slot)] == &o)
                     *slot = -1;
                 if (app.puzzle.esp >= 0) ++app.puzzle.esp; // incESPCount
@@ -7451,7 +7451,7 @@ void stepBlock(App& app, App::Puzzle::Obj& o) { // NormalBlockTP / NormalGem (th
             }
         }
         if (o.pending == 8) {
-            if (o.type == cr::kTypeNormal) npcEffect(app, 3, o.npc); // NormalBlockTP::onIdle
+            if (o.type == cr::kTypeNormal) npcEffect(app, 0x89, o.npc); // NormalBlockTP::onIdle
             fade(app, o.npc, 1, 0, o.outFrames);
             if (o.onSwitch) press(app, o.row, o.col, false);
             o.state = 2;
@@ -7471,7 +7471,7 @@ void stepBlock(App& app, App::Puzzle::Obj& o) { // NormalBlockTP / NormalGem (th
             p.y = cr::kPuzzleStage[app.puzzle.stage].y; // the room's height, raised on a switch
             if (sw) p.y += cr::kPuzzleSwitchRise;
             place(app, o, p);
-            npcEffect(app, 4, o.npc); // onDisappear (the block's and the gem's)
+            npcEffect(app, 0x8a, o.npc); // onDisappear (the block's and the gem's)
             fade(app, o.npc, 0, 1, o.inFrames);
             o.state = 3;
         }
@@ -7496,19 +7496,19 @@ void stepCrystal(App& app, App::Puzzle::Obj& o) {
     else if (bits & cr::kPuzzleObject40) {
         ready = allSwitchesOn(app);
         if (!ready && o.shown) { // a switch let go: it goes again
-            npcEffect(app, 3, o.npc);
+            npcEffect(app, 0x89, o.npc);
             fade(app, o.npc, 1, 0, 4);
             show(app, o, false);
-            app.sound.play(0x29);
+            app.sound.play(0x132);
             return;
         }
     } else if (bits & cr::kPuzzleObject800) {
         ready = allCandlesLit(app);
         if (!ready && o.shown) { // one gone out: it goes again
-            npcEffect(app, 3, o.npc);
+            npcEffect(app, 0x89, o.npc);
             fade(app, o.npc, 1, 0, 4);
             show(app, o, false);
-            app.sound.play(0x29);
+            app.sound.play(0x132);
             return;
         }
     } else return;
@@ -7523,9 +7523,9 @@ void stepCrystal(App& app, App::Puzzle::Obj& o) {
         return;
     }
     show(app, o, true);
-    npcEffect(app, 4, o.npc);
+    npcEffect(app, 0x8a, o.npc);
     fade(app, o.npc, 0, 1, 4);
-    app.sound.play(0x2a);
+    app.sound.play(0x133);
 }
 
 void punish(App& app, int t);
@@ -7545,9 +7545,9 @@ void teleportTo(App& app, int t) {
     o.pending = 8; // TeleportMessage(the player's cell, 4, 4, 6, 6)
     o.toRow = pr, o.toCol = pc, o.outFrames = 4, o.inFrames = 4, o.waitOut = 6, o.waitIn = 6;
     app.playerAlphaFrom = 1, app.playerAlphaTo = 0, app.playerFadeFrames = app.playerFadeLeft = 4;
-    npcEffect(app, 7, -1);
-    npcEffect(app, 8, -1);
-    app.sound.play(0x2b);
+    npcEffect(app, 0x8d, -1);
+    npcEffect(app, 0x8e, -1);
+    app.sound.play(0x134);
     pz.tpState = 1, pz.tpTimer = 6, pz.tpTarget = t;
 }
 
@@ -7557,8 +7557,8 @@ void stepTeleport(App& app) {
         const App::Puzzle::Obj& o = pz.objs[size_t(pz.tpTarget)];
         setActor(app, 0, centre(app, o.row, o.col), nullptr, false);
         app.playerAlphaFrom = 0, app.playerAlphaTo = 1, app.playerFadeFrames = app.playerFadeLeft = 4;
-        npcEffect(app, 9, -1);
-        app.sound.play(0x2c);
+        npcEffect(app, 0x8f, -1);
+        app.sound.play(0x135);
         pz.tpState = 2, pz.tpTimer = 6;
     } else if (pz.tpState == 2 && --pz.tpTimer <= 0) { // onAppear
         pz.busy = false;
@@ -7602,8 +7602,8 @@ bool crushes(App& app, const App::Puzzle::Obj& o) {
 }
 
 void squash(App& app) {
-    fieldEffect(app, 0x19, app.walker.pos + cr::Vec3{0, 5, 0});
-    app.sound.play(0x54);
+    fieldEffect(app, 5, app.walker.pos + cr::Vec3{0, 5, 0});
+    app.sound.play(0x30);
     reset(app);
 }
 
@@ -7625,7 +7625,7 @@ void stepPkBlock(App& app, App::Puzzle::Obj& o) {
     switch (o.pk) {
     case 0: // onIdle: taken hold of
         if (o.pkMsg != 1) break;
-        app.sound.play(0x22);
+        app.sound.play(0x30);
         if (o.onSwitch) press(app, o.row, o.col, false);
         o.onSwitch = false;
         o.pkTimer = 2;
@@ -7648,7 +7648,7 @@ void stepPkBlock(App& app, App::Puzzle::Obj& o) {
             o.pk = switchAt(app, o.row, o.col) ? 5 : 4;
         } else if (o.pkMsg == 3) {
             o.pkMsg = 0;
-            app.sound.play(0x2d);
+            app.sound.play(0x136);
             const cr::Vec3 from = centre(app, o.row, o.col), to = centre(app, o.toRow, o.toCol);
             const float dx = to.x - from.x, dz = to.z - from.z, d = std::sqrt(dx * dx + dz * dz);
             o.pkTimer = std::max(1, int(d / 3.0f));
@@ -7683,7 +7683,7 @@ void stepPkBlock(App& app, App::Puzzle::Obj& o) {
             if (o.pk == 5) {
                 o.onSwitch = true;
                 press(app, o.row, o.col, true);
-            } else app.sound.play(0x23);
+            } else app.sound.play(0x30);
             o.pk = 0;
             pkLanded(app);
         } else setY(y);
@@ -7704,7 +7704,7 @@ void pkGrab(App& app, int t, float sx = -1e9f, float sy = -1e9f) {
     pz.busy = true;
     o.pkMsg = 1;
     pz.pkState = 1, pz.pkTarget = t, pz.pkMoved = false, pz.pkFromX = sx, pz.pkFromY = sy;
-    pz.pkEffect = npcEffect(app, 5, -1, true);
+    pz.pkEffect = npcEffect(app, 0x8b, -1, true);
 }
 
 // The swipe's direction (1 up the grid / row - 1, 2 down, 3 left / column - 1, 4 right); 0 lets go
@@ -7775,8 +7775,8 @@ void toughTap(App& app, int t) {
     if (pz.esp == 0) { punish(app, t); return; } // no ESP left - only the mark
     ++app.game.vars[13]; // decESPCount
     if (pz.esp > 0) --pz.esp;
-    npcEffect(app, 7, -1);
-    app.sound.play(0x2f);
+    npcEffect(app, 0x8d, -1);
+    app.sound.play(0x138);
     if (o.type == cr::kTypeFragile) o.hit = true;
     else
         for (App::Puzzle::Obj& b : pz.objs) b.hit |= b.layer == 1; // postMessage(1, 9)
@@ -7792,36 +7792,36 @@ void stepTough(App& app) {
         if (o.type == cr::kTypeFragile) {
             if (!o.shown) continue;
             o.shown = false; // npc_kill, removePuzzleObject
-            npcEffect(app, 10, o.npc);
+            npcEffect(app, 0x90, o.npc);
             if (int* slot = cellSlot(app, o.layer, o.row, o.col); slot && *slot == int(&o - pz.objs.data())) *slot = -1;
-            app.sound.play(0x29);
+            app.sound.play(0x132);
             rebuild = true;
         } else if (o.type == cr::kTypeRed || o.type == cr::kTypeBlue || o.type == cr::kTypeCandle) {
             if (!o.shown) {
                 o.shown = true, o.ghost = false;
                 born = rebuild = true;
-                npcEffect(app, 4, o.npc);
+                npcEffect(app, 0x8a, o.npc);
                 if (inBox(app, n)) { // came in on the leader
                     buildNpcDraws(app);
                     fade(app, o.npc, kGhostAlpha, 1, 4);
-                    app.sound.play(0x2a);
-                    fieldEffect(app, 0x19, app.walker.pos + cr::Vec3{0, 5, 0});
-                    app.sound.play(0x54);
+                    app.sound.play(0x133);
+                    fieldEffect(app, 5, app.walker.pos + cr::Vec3{0, 5, 0});
+                    app.sound.play(0x30);
                     reset(app);
                     return;
                 }
             } else {
                 o.shown = false, o.ghost = true;
                 killed = rebuild = true;
-                npcEffect(app, 3, o.npc);
+                npcEffect(app, 0x89, o.npc);
             }
         }
     }
     if (!rebuild) return;
     buildNpcDraws(app);
     buildWalkCollision(app);
-    if (born) app.sound.play(0x2a);
-    if (killed) app.sound.play(0x29);
+    if (born) app.sound.play(0x133);
+    if (killed) app.sound.play(0x132);
     for (const App::Puzzle::Obj& o : pz.objs) {
         if (o.type != cr::kTypeRed && o.type != cr::kTypeBlue && o.type != cr::kTypeCandle) continue;
         const App::NpcDraw* d = drawOf(app, o.npc);
@@ -7875,24 +7875,24 @@ void stepCandleSwitch(App& app, App::Puzzle::Obj& o, bool& lightSE, bool& outSE)
     auto goOut = [&] { // the flame off, effect 0xe
         stopEffect(app.fieldEffects, o.flame);
         o.flame = 0;
-        fieldEffect(app, 0xe, top);
+        fieldEffect(app, 0x94, top);
     };
     switch (o.cs) {
     case 0:
         if (o.csMsg == 11) o.csTimer = 5, o.cs = 1;
         else if (o.csMsg == 10) {
-            fieldEffect(app, 0xd, top);
-            app.sound.play(0x31);
+            fieldEffect(app, 0x93, top);
+            app.sound.play(0x13a);
             sendCandle(app, o);
             o.csTimer = 15, o.cs = 2;
         }
         o.csMsg = 0;
         break;
     case 1: // onIgnitionDelay
-        if (--o.csTimer < 1) { fieldEffect(app, 0xd, top); lightSE = true; o.csTimer = 15, o.cs = 2; }
+        if (--o.csTimer < 1) { fieldEffect(app, 0x93, top); lightSE = true; o.csTimer = 15, o.cs = 2; }
         break;
     case 2:
-        if (--o.csTimer < 1) { o.flame = fieldEffect(app, 0xc, top, true); o.cs = 3; }
+        if (--o.csTimer < 1) { o.flame = fieldEffect(app, 0x92, top, true); o.cs = 3; }
         break;
     case 3: // onLighted
         if (o.csMsg == 11) o.csTimer = 5, o.cs = 4;
@@ -7937,8 +7937,8 @@ void stepPyro(App& app) {
     bool lightSE = false, outSE = false;
     for (App::Puzzle::Obj& o : app.puzzle.objs)
         if (o.type == cr::kTypeCandleSwitch) stepCandleSwitch(app, o, lightSE, outSE);
-    if (lightSE) app.sound.play(0x31); // NoOverlapSE
-    if (outSE) app.sound.play(0x32);
+    if (lightSE) app.sound.play(0x13a); // NoOverlapSE
+    if (outSE) app.sound.play(0x13b);
 }
 
 // PuzzleScene: a reset fades out (sound 0x44), builds the room again, puts the leader back where
@@ -7946,7 +7946,7 @@ void stepPyro(App& app) {
 void reset(App& app) {
     App::Puzzle& pz = app.puzzle;
     if (pz.stage < 0 || pz.scene != 4) return;
-    app.sound.play(0x44);
+    app.sound.play(0x14d);
     app.fadeGrey = 0, app.fadeFrom = 0, app.fadeTo = 1, app.fadeFrames = 8, app.fadeT = 0;
     pz.scene = 2;
 }
@@ -8088,10 +8088,10 @@ void stepCrystalCam(App& app) {
         for (App::Puzzle::Obj& o : app.puzzle.objs)
             if (o.npc == index) {
                 show(app, o, true);
-                npcEffect(app, 4, o.npc);
+                npcEffect(app, 0x8a, o.npc); // (Uty_WarpCrystalCamera_Proc: 0x8a, 0x133)
                 fade(app, o.npc, 0, 1, 4);
             }
-        app.sound.play(0x2a);
+        app.sound.play(0x133);
         app.game.vars[0] = 1;
     } else if (cc.phase == 0 && app.game.vars[0] == 2) cc.phase = 1;
     else if (cc.phase == 1) {
@@ -9069,20 +9069,28 @@ void cameraForTurn(App& app, const cr::BattleTurn& t) {
 // is deleted at its end (eff3d_prc). Its materials (diffuse alpha 0 at rest) take their colour
 // from the package action their Appearance's refGid numbers (segment 1, keyType 12 RGBA).
 namespace effects {
-constexpr short kNode[100] = {0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-                              0,    0,    0,    0,    0,    0,    0,    1204, 1203, 1101, 1101, 1102, 1003, 1101, 0,
-                              0,    1101, 1206, 0,    1101, 1101, 0,    0,    1101, 1102, 1101, 1101, 1102, 1101, 1101,
-                              1102, 1101, 1101, 1102, 0,    1101, 1101, 1101, 0,    0,    0,    0,    0,    0,    1101,
-                              1101, 1101, 1101, 1101, 1101, 1102, 1102, 1102, 0,    1102, 1102, 1102, 1101, 1101, 1101,
-                              1101, 1101, 1101, 0,    0,    1101, 1101, 1101, 1101, 1101, 1101, 1101, 1101, 1101, 1101,
-                              1101, 1101, 1101, 100,  100,  100,  200,  250,  300,  0};
+constexpr int kEffects = 165;
+// _eff3d_cpno: the node each effect starts on (0: the actor's place)
+constexpr short kNode[kEffects] = {
+       0,    0, 1204, 1203, 1101, 1101, 1102, 1003, 1102, 1102, 1102,    0, 1101,    0,    0,
+    1101, 1206,    0, 1101, 1101, 1101, 1101, 1101, 1101,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0, 1102,    0,    0, 1101, 1102,
+    1101, 1101, 1102, 1101, 1101, 1102, 1101, 1101, 1102,    0, 1101, 1101, 1101,    0,    0,
+    1101, 1101, 1101, 1101, 1101, 1102, 1102, 1102,    0, 1102, 1102, 1102, 1101, 1102, 1102,
+    1101, 1101, 1101, 1101, 1101, 1101,    0,    0, 1101, 1101, 1101, 1101, 1101, 1101, 1101,
+    1101, 1101,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0};
 // What the calcs show (btlcalc_*'s eff3d_set_btl ids)
-constexpr int kHit = 0x18, kCritical = 0x19, kFall = 0x1a, kFixed = 0x1c, kSacrifice = 0x22, kGene = 0x23,
-              kStatus = 0x24, kDrain = 0x25, kHeal = 0x2f, kRevive = 0x31, kCast = 0x15, kBuff = 0x35, kAnalyze = 0x36;
+// (Omega's eff.bin: CR1's 0x15..0x19 less 0x14, 0x1a..0x22 less 0x10, from 0x23 + 5)
+constexpr int kHit = 4, kCritical = 5, kFall = 6, kFixed = 0xc, kSacrifice = 0x12, kGene = 0x28,
+              kStatus = 0x29, kDrain = 0x2a, kHeal = 0x34, kRevive = 0x36, kCast = 1, kBuff = 0x3a, kAnalyze = 0x3b;
 } // namespace effects
 
 LoadedModel* effectModel(App& app, int id) {
-    if (id < 0 || id >= 100) return nullptr;
+    if (id < 0 || id >= effects::kEffects) return nullptr;
     if (auto it = app.effectModels.find(id); it != app.effectModels.end()) return it->second.meshes.empty() ? nullptr : &it->second;
     LoadedModel& out = app.effectModels[id];
     if (app.effBin.empty() && !cr::readFile(app.dataDir + "eff.bin", app.effBin)) return nullptr;
@@ -9135,7 +9143,7 @@ cr::Vec3 actorPoint(App& app, const App::Battle::Actor& a, int user) {
 // eff3d_set_btl: effect `id` on fighter `fighter` (at its table node)
 void spawnEffect(App& app, int id, int fighter) {
     App::Battle& b = app.battle;
-    if (id < 0 || id >= 100 || b.effects.size() >= 32 || !effectModel(app, id)) return;
+    if (id < 0 || id >= effects::kEffects || b.effects.size() >= 32 || !effectModel(app, id)) return;
     const App::Battle::Actor* a = battleActor(app, fighter);
     if (!a) return;
     Effect e;
@@ -9145,7 +9153,7 @@ void spawnEffect(App& app, int id, int fighter) {
 
 // eff3d_set_with_pos into `list` (32 slots): its handle, 0 when none was free
 int startEffect(App& app, std::vector<Effect>& list, int id, cr::Vec3 at, bool loop, float scale, float yaw) {
-    if (id < 0 || id >= 100 || list.size() >= 32 || !effectModel(app, id)) return 0;
+    if (id < 0 || id >= effects::kEffects || list.size() >= 32 || !effectModel(app, id)) return 0;
     if (&list == &app.fieldEffects) ++app.fieldEffectCount[size_t(id)];
     Effect e;
     e.id = id, e.pos = at, e.loop = loop, e.scale = scale, e.yaw = yaw, e.handle = ++app.effectHandles;
@@ -10454,7 +10462,7 @@ void showHits(App& app) {
                 if (h.amount >= 0 && h.type != cr::kHitGuard && h.type != cr::kHitMiss) startQuake(app, 3, 100, 0, 5, false);
                 if (act->element <= 0 || h.amount < 0) break;
                 if (act->scope == 5 || act->scope == 3) {
-                    if (!area) spawnEffectAt(app, 0x24 + 3 * act->element, {500, 0, t < 2 ? 523.0f : 472.0f});
+                    if (!area) spawnEffectAt(app, 0x29 + 3 * act->element, {500, 0, t < 2 ? 523.0f : 472.0f}); // (CR1's 0x24 + 5)
                     area = true;
                 } else
                     id = kGene + 3 * act->element;
@@ -10465,7 +10473,7 @@ void showHits(App& app) {
             case 12: case 13: case 14: case 15: case 16: case 17: case 18: case 22: case 23: case 35: case 36: id = kHeal; break;
             case 19: id = kRevive; break;
             case 24: id = kAnalyze; break;
-            case 25: id = act->element > 0 ? 0x31 + act->element : -1; break;
+            case 25: id = act->element > 0 ? 0x36 + act->element : -1; break; // (CR1's 0x31 + 5)
             case 26: id = kBuff; break;
             case 27: case 28: case 29: case 30: case 32: case 33: case 34: id = kStatus; break;
             case 31: id = kDrain; break;
@@ -10478,11 +10486,13 @@ void showHits(App& app) {
             }
         }
     }
-    // __effgo: 0x56 a critical, 0x53..0x55 a hit, 0x5d fended off, 0x57 healing
-    if (crit) app.sound.play(0x56);
-    else if (any) app.sound.play(0x53 + uint32_t(b.rules.random(3)));
-    else if (guarded) app.sound.play(0x5d);
-    else if (!b.turn.hits.empty() && b.turn.hits[0].amount < 0) app.sound.play(0x57);
+    // __effgo (Omega's btlcalc_0404): 0x32 a critical, 0x2f..0x31 a hit (0x57 + the attacker's
+    // element when it has one), 0x39 fended off, 0x33 healing (CR1's less 0x24)
+    const int element = b.turn.actors[0] >= 0 && b.turn.actors[0] < 5 ? b.rules.f[size_t(b.turn.actors[0])].element : 0;
+    if (crit) app.sound.play(0x32);
+    else if (any) app.sound.play(element > 0 ? 0x57 + uint32_t(element) : 0x2f + uint32_t(b.rules.random(3)));
+    else if (guarded) app.sound.play(0x39);
+    else if (!b.turn.hits.empty() && b.turn.hits[0].amount < 0) app.sound.play(0x33);
     if (b.rules.breakGauge != b.gaugeShown && b.rules.breakGauge != 0 && (b.gaugeShown == 0 || (b.gaugeShown > 0) != (b.rules.breakGauge > 0)))
         b.breakPop = 5.0f; // btlbreak_set: the label pops when a side takes the Break
 }
@@ -10491,12 +10501,12 @@ void showHits(App& app) {
 // "Enemy" sliding along them (window_hd (704, 328) / (864, 328), 160 x 104), "BREAK!!" (512, 432,
 // 512 x 72) and "The battle situation changed" (512, 504, 512 x 32) sliding in from opposite
 // sides on 480 sin(t): 5 frames in, 30 held (at 15 the other side takes the Break, sound 0x7a),
-// 5 out (sound 0x48, or 0x49 when the enemies hold it). Sound 0x47 as it starts.
+// 5 out (sound 0x24, or 0x25 when the enemies hold it). Sound 0x23 as it starts (Omega's ids).
 void startBreakFx(App& app) {
     App::Battle::BreakFx& fx = app.battle.breakFx;
     fx = App::Battle::BreakFx();
     fx.on = true;
-    app.sound.play(0x47);
+    app.sound.play(0x23); // (Omega's btlbreak_effect_init; CR1's 0x47)
 }
 bool stepBreakFx(App& app) {
     App::Battle& b = app.battle;
@@ -10513,11 +10523,11 @@ bool stepBreakFx(App& app) {
         if (fx.t == fx.limit / 2) {
             b.rules.takeBreak();
             b.breakPop = 5.0f;
-            app.sound.play(0x7a);
+            app.sound.play(0x5d); // (CR1's 0x7a)
         }
         if (fx.t >= fx.limit) {
             fx.t = 0, fx.limit = 90, fx.state = 0x3e6;
-            app.sound.play(b.rules.breakGauge < 1 ? 0x49 : 0x48);
+            app.sound.play(b.rules.breakGauge < 1 ? 0x25 : 0x24); // (CR1's 0x49 / 0x48)
         }
     } else if (fx.state == 0x3e6) {
         fx.t += 18;
