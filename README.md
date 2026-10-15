@@ -32,12 +32,20 @@ Done so far:
       (the UI sheet is `window_ipad`)
 - [x] the title screen as `__menuu_TitlePut` draws it (logo, Please Touch, copyright, the two
       pictures down the left, the plates)
+- [x] the menus' coordinates: Omega's iPad build is the iPhone layout doubled and centred
+      (`tex2d_add`: screen = 2 x + (32, 64)); menu sounds are CR1's + 0x91
+- [x] Select Scenario (`__menuu_Start*`: the scenario's art and banner, one plate, Back) and the
+      title's save / load screen over it
+- [x] the opening as the reference video plays it: painted rooms' `FrmPanCam` moves from
+      `GetScroll`'s unclamped value, camera-wise (up = + y); the leader's model as `Set_Prtyno`
+      (f009a / f009b, f010, f011)
 - [x] a new game reaches the opening; with Omega's data the self-test loads all 373 models and
       spawns and walks the player on all 125 fields
 
 Next (the CR1 self-test's checks that fail on Omega point at most of these):
 
-- [ ] Select Scenario (Util 4, `__menuu_StartSet` / `Put` / `Prc`): Omega's own animated screen
+- [ ] Select Scenario's second page (flag 31: `serect` / `chara3` sliding in by drag)
+- [ ] the party: Omega's (`prty`, the leader / scenario bytes) in place of CR1's eight characters
 - [ ] the other menus against Omega's `*Put` / `*Prc` (save / load, Camp, shop, World Select, ...)
 - [ ] `sys.evt`'s data (items, monsters, actions) and the battle rules where Omega changed them
 - [ ] puzzle rooms (Omega's `PuzzleManager`), field cameras, the story's scripts
