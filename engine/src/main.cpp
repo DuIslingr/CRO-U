@@ -10090,36 +10090,41 @@ int rnd(App& app, int n) {
     return n > 1 ? int((b.voiceRng >> 16) % uint32_t(n)) : 0;
 }
 
-// _btlvoice_speaker: from the fighter's name id (the party: its character x 10, +3 for
-// character 7 under flag 0x997 or flag 0x996 on the fourth pair; monsters: id - 1, ids 71..73
-// as id + 2 under the same flags): 0..7 the eight characters (x0..x3), 80 -> 11, 90..93 -> 8,
-// 94..98 -> 9, 110..113 -> 10, 120..123 -> 12; battle models 7, 87, 88 are always speaker 7
+// Omega 3.1.0's speaker (FUN_000924ac): by the fighter's sys.evt row (+0xaa: the party record + 4
+// - 5 for record 0 as Olgar, 0x106 for record 1 as Dante -, a monster its id - 1), then its battle
+// model (+0xa2: j009a / j009b speak as 0, j010 as 1, model 0xa5 as 6)
 int speaker(const App& app, int k) {
     const App::Battle& b = app.battle;
     if (k < 0 || k > 4) return -1;
     const cr::Fighter& f = b.rules.f[size_t(k)];
     if (!f.present) return -1;
-    const bool alt = (app.game.flag(0x996) && app.playerChar / 2 == 3) || app.game.flag(0x997);
-    int name, model = -1;
+    int row, model = -1;
     if (k < 2) {
-        name = f.character * 10;
-        if (name >= 70 && name < 73 && alt) name += 3;
+        row = f.character + 4;
+        if (f.character == 0 && viegIsOlgar(app)) row = 5;
+        if (f.character == 1 && olgarIsDante(app)) row = 0x106;
         for (const App::Battle::Actor& a : b.actors)
             if (a.fighter == k) model = a.modelId;
     } else {
-        name = f.monster - 1;
-        if (f.monster >= 0x47 && f.monster <= 0x49 && alt) name = f.monster + 2;
+        row = f.monster - 1;
         model = f.def ? f.def->model : -1;
     }
     int sp = -1;
-    static const int kSpan[8] = {4, 4, 4, 3, 4, 3, 4, 3}; // name ids per character (x0 .. x3)
-    if (name >= 0 && name < 80) {
-        if (name % 10 < kSpan[name / 10]) sp = name / 10;
-    } else if (name >= 80) {
-        const int u = name - 80;
-        sp = u == 0 ? 11 : u >= 10 && u <= 13 ? 8 : u >= 14 && u <= 18 ? 9 : u >= 30 && u <= 33 ? 10 : u >= 40 && u <= 43 ? 12 : -1;
+    if (row < 0x7c) sp = row == 4 ? 0 : row == 5 ? 1 : row == 6 ? 2 : row == 7 ? 25 : -1;
+    else {
+        struct R { int row, sp; };
+        static const R kRow[] = {{0x7c, 3},  {0x7f, 3},  {0x7d, 6},  {0x8c, 6},  {0x80, 7},  {0x82, 7},  {0x9d, 7},
+                                 {0x81, 8},  {0x83, 10}, {0x9e, 10}, {0x84, 9},  {0x85, 11}, {0x86, 12}, {0x87, 13},
+                                 {0x8a, 15}, {0x8d, 15}, {0x90, 15}, {0x93, 15}, {0xa1, 15}, {0x8b, 14}, {0x8e, 14},
+                                 {0x91, 14}, {0x94, 14}, {0xa2, 14}, {0x8f, 4},  {0x92, 5},  {0x95, 16}, {0x96, 17},
+                                 {0x97, 21}, {0x98, 22}, {0x99, 25}, {0x9a, 26}, {0x9b, 19}, {0x9c, 20}, {0x9f, 23},
+                                 {0xa0, 24}, {0xa4, 18}};
+        for (const R& e : kRow)
+            if (e.row == row) sp = e.sp;
     }
-    if (model == 7 || model == 87 || model == 88) sp = 7;
+    if (model == 0xa5) sp = 6;
+    else if (model == 8 || model == 0xb) sp = 0;
+    else if (model == 9) sp = 1;
     return sp;
 }
 
@@ -15563,6 +15568,11 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             for (const cr::PartyMember& m : g.party) std::printf(" %d", m.level);
             std::printf(", %zu + %zu bag entries, %d / %d Oz, %d battles\n", g.items.size(), g.otherBag.size(), g.oz, g.otherOz,
                         app.battlesFought);
+            if (pi < app.dialogueVoices.size() && !app.dialogueVoices[pi].empty()) {
+                std::printf("voices on this page:");
+                for (int v : app.dialogueVoices[pi]) std::printf(" %d", v);
+                std::printf("\n");
+            }
         }
         std::printf("field: %s, background %dx%d, %zu stage cameras (%s), scroll (%.0f, %.0f)%s\n",
                     app.mapIndex >= 0 && app.mapIndex < int(app.maps.size()) ? app.maps[size_t(app.mapIndex)].c_str() : "?",
