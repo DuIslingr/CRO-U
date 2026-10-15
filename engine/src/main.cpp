@@ -4878,9 +4878,9 @@ void campClick(App& app, float px, float py) {
             if (in(kPlateX, kMemberY + kMemberStep * float(k), 136, 40)) { c.member = k; if (c.phase == App::Camp::Member) campChoose(app); return; }
         return;
     }
-    if (c.phase == App::Camp::Slot) {
-        for (int k = 0; k < 3; ++k)
-            if (in(kRowX, kRowY + kRowH * float(k), 256, 44)) { c.slot = k; campChoose(app); return; }
+    if (c.phase == App::Camp::Slot) { // the seven rows as drawn (70% from (kRowX + 64, 58), 32 apart)
+        for (int k = 0; k < kEquipSlots; ++k)
+            if (in(kRowX + 64, 58 + 32.0f * float(k), 256 * 0.7f, 32)) { c.slot = k; campChoose(app); return; }
         return;
     }
     if (c.phase == App::Camp::List) {
@@ -6356,11 +6356,11 @@ void drawCamp(App& app) {
         } else if (c.phase == App::Camp::Slot) {
             drawShopBoard(app, 12, 92, ch, 0, ease);
             right();
-            for (int k = 0; k < kEquipSlots; ++k) { // the rows at 70%: weapon, armor, jewel, the genes
-                const float rx = kRowX + 160 * (1 - ease) + 64, ry = 84 + 34.0f * float(k);
+            for (int k = 0; k < kEquipSlots; ++k) { // the rows at 70%: weapon, armor, jewel, the genes (Omega:
+                // all seven above the iPhone layout's Back)
+                const float rx = kRowX + 160 * (1 - ease) + 64, ry = 58 + 32.0f * float(k);
                 m.setScale(rx, ry, 0.7f);
-                drawCampRow(app, m, rx, ry, k < 3 ? pm.equip[k] : pm.genes[k - 3], 0, c.slot == k, k == 3 ? ease * 0.7f : ease,
-                            sysText(app, 58061 + k));
+                drawCampRow(app, m, rx, ry, k < 3 ? pm.equip[k] : pm.genes[k - 3], 0, c.slot == k, ease, sysText(app, 58061 + k));
                 m.setScale(0, 0, 1);
             }
             left();
