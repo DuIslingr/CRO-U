@@ -3904,9 +3904,11 @@ constexpr uint32_t kSoundEquip = 21; // ShopPrc, Yes to "Equip it?"
 constexpr float kStatRowY[6] = {56, 76, 136, 156, 176, 196};
 } // namespace shopui
 
-int shopRoute(const App& app) { return std::clamp(currentPair(app) - 1, 0, 3); }
-// The character the board shows: the pair's first or second
-int shopCharacter(const App& app) { return shopRoute(app) * 2 + std::clamp(app.shop.member, 0, 1); }
+int shopRoute(const App& app) { return std::clamp(app.game.scenario, 0, cr::kScenarios - 1); }
+int campCharacter(const App& app, int member);
+int campMembers(const App& app);
+// The record the board shows: the scenario pair's first or second
+int shopCharacter(const App& app) { return campCharacter(app, app.shop.member); }
 bool shopEquipment(const App& app) { return app.shop.category >= 1 && app.shop.category <= 3; }
 
 int ownedCount(const App& app, int item) {
@@ -3944,7 +3946,7 @@ void openShop(App& app) {
     s.keeper = keeper;
     s.open = true;
     s.level = cr::shopLevel(app.game, shopRoute(app));
-    s.member = std::clamp(app.playerChar - shopRoute(app) * 2, 0, 1);
+    s.member = campMembers(app) > 1 && campCharacter(app, 1) == app.playerChar ? 1 : 0;
     s.bgmBack = app.game.vars[0]; // ShopSet: var 0 kept, the shop's music (_bgmgo(0x13))
     playBgm(app, 0x13);
     if (!s.keeper.id) {
@@ -4031,7 +4033,7 @@ void shopChooseItem(App& app, int index) {
 // ◀ / ▶ in an equipment list: the pair's other character, and their list
 void shopSwitchMember(App& app) {
     App::Shop& s = app.shop;
-    s.member ^= 1;
+    if (campMembers(app) > 1) s.member ^= 1;
     s.listCursor = s.listTop = 0;
     refreshShopList(app);
     menuSound(app, se::kPage); // the Back bar's < > arrows
@@ -4258,7 +4260,7 @@ void drawShop(App& app) {
             }
         }
     }
-    m.picture(152, 316, 0, 1); // the Oz bar
+    m.picture(156, 316, 0, 1); // the Oz bar (ComUty_OzDraw: 0x9c)
     drawShopNumber(m, app.game.oz, 362, 0, 9, 12, 1);
     if (s.phase == App::Shop::Main)
         for (int i = 0; i < 3; ++i)
@@ -15656,10 +15658,10 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         app.msgStyle = 64, app.msgLines = 1;
         app.choiceFlag = 0, app.choiceCursor = 0, app.choiceAnim = 4;
     }
-    if (!app.captureShop.empty()) { // the Ark's shop (area 7), with some Oz and things to sell
-        if (app.area != 7 && app.mapNumber >= 97) {
+    if (!app.captureShop.empty()) { // the Ark's shop (Omega: j001_t01, area 9), with some Oz and things to sell
+        if (app.area != 9 && app.mapNumber >= 169) {
             const auto it = std::find(app.maps.begin(), app.maps.end(), std::string(cr::kMapCollisionFile[app.mapNumber]));
-            if (it != app.maps.end()) showMap(app, int(it - app.maps.begin()), app.mapNumber, 7);
+            if (it != app.maps.end()) showMap(app, int(it - app.maps.begin()), app.mapNumber, 9);
         }
         app.game.oz = 45070;
         app.game.items[21] = 3;
