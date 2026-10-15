@@ -690,7 +690,7 @@ struct App {
         bool skip = false;                 // +0x26: ... and Yes (flag 1)
         bool cancelled = false;            // +0x24: Back (flag 0)
         float win[11] = {}, winTo[11] = {}, fromX[11] = {}, fromY[11] = {};
-        cr::Texture maps[6];               // MAP_01..06.mct (slots 0x11..)
+        cr::Texture maps[7];               // MAP_01..06 / MAP_07..13.mct (slots 0x11..)
         float clock = 0;
     } worldSelect;
     struct LastBattle {                    // __menuu_LastBt* (Util 8): which pair meets the next guardian
@@ -1401,11 +1401,9 @@ void enterMap(App& app) {
     }
     // Treasure boxes: chosen once per area (randomSelect), flags set per map (setup)
     if (!app.treasureBoxes.count(app.area)) {
-        // route from the event file (j001/j003/j005/j007), level from the dungeon number (d01 = 0;
-        // the original keeps a per-route progress byte in the save data)
-        const std::string ev = cr::kAreaEventFile[app.area];
-        const int route = (ev[3] - '1') / 2;
-        const int level = ev[5] == 'd' && ev[6] == '0' ? ev[7] - '1' : 0;
+        // randomSelect: the scenario's tables, at its level byte (the World Select's band, 0..9)
+        const int route = std::clamp(app.game.scenario, 0, cr::kScenarios - 1);
+        const int level = std::clamp(app.game.bands[size_t(route)], 0, 9);
         app.treasureBoxes[app.area] = cr::selectTreasureBoxes(app.events, uint32_t(app.area) + 1, level, route);
     }
     cr::applyTreasureFlags(app.events, app.npcs, app.treasureBoxes[app.area], app.game);
@@ -5397,19 +5395,18 @@ void lastBattleClick(App& app, float px, float py) {
 // bands. Clr: Back sets flag 0; else var 0 = the gate, var 1 = the band, var 2 = the pair,
 // flag 1 = the skip (not for gates 4 and 5).
 namespace wldsel {
-constexpr uint8_t kOrder[4][6] = {{0, 1, 2, 3, 4, 5}, {1, 2, 0, 3, 4, 5}, {2, 0, 1, 3, 4, 5}, {3, 2, 1, 0, 4, 5}};
-constexpr short kAskFlag[4][4] = {{1122, 1142, 1162, 1182}, {1522, 1542, 1562, 1582}, {1922, 1942, 1962, 1982},
-                                  {2322, 2342, 2362, 2382}};
-constexpr short kGateFlag[4] = {1076, 1476, 1876, 2276}; // + gate (0..4)
-constexpr short kSixthFlag[4] = {1104, 1504, 1904, 2304};
-constexpr short kLevelFlag[4][8] = {{1123, 1143, 1163, 1183, 31, 31, 32, 32}, {1523, 1543, 1563, 1583, 33, 33, 34, 34},
-                                    {1923, 1943, 1963, 1983, 35, 35, 36, 36}, {2323, 2343, 2363, 2383, 37, 37, 38, 38}};
-constexpr short kPipFlag[5][4][4] = { // [gate][pip][pair]
-    {{1122, 1522, 1922, 2322}, {1123, 1523, 1923, 2323}, {1052, 1452, 1852, 2252}, {1053, 1453, 1853, 2253}},
-    {{1142, 1542, 1942, 2342}, {1143, 1543, 1943, 2343}, {1054, 1454, 1854, 2254}, {1055, 1455, 1855, 2255}},
-    {{1162, 1562, 1962, 2362}, {1163, 1563, 1963, 2363}, {1056, 1456, 1856, 2256}, {1057, 1457, 1857, 2257}},
-    {{1182, 1582, 1982, 2382}, {1183, 1583, 1983, 2383}, {1058, 1458, 1858, 2258}, {1059, 1459, 1859, 2259}},
-    {{1205, 1605, 2005, 2405}, {1206, 1606, 2006, 2406}, {1207, 1607, 2007, 2407}, {1060, 1460, 1860, 2260}}};
+// Omega's (__menuu_WldChoiceSet / Prc / Clr): scenario 0's worlds 0..5 (_gkanWldSelectFlgTbl0),
+// scenario 1's 6..12 (Tbl1), offered when their flags are set (none: the first alone), in
+// _kachWorldNoTbl's order (as numbered); the last of each (5 / 12) has no level bands. Bands:
+// scenario 0 one per flag of _gkanLvlSelectFlgTbl set, scenario 1 by the collection held. A
+// scenario-0 world below 5 whose flag _gkashStgSkipTbl is set first asks "Skip the first half?".
+// Clr: var 0 the world (within the scenario), var 1 the band, var 2 the scenario, flag 1 the skip;
+// the band is also the scenario's level byte (+0x1544 + s: enemies, treasure)
+constexpr short kWorldFlag[13] = {1076, 1077, 1078, 1079, 1081, 1082, 1576, 1577, 1578, 1579, 1580, 1581, 1582};
+constexpr short kLevelFlag[5] = {1076, 1163, 1203, 1183, 1223};
+constexpr short kSkipFlag[5] = {1162, 1202, 1182, 1222, 1274};
+inline int firstWorld(int scenario) { return scenario ? 6 : 0; }
+inline int lastWorld(int scenario) { return scenario ? 12 : 5; }
 constexpr float kListX = 192, kListY = 92, kListStep = 48; // list layout 0, as the shop's rows
 constexpr int kRows = 4;
 constexpr float kBackX = 208, kBackY = 320;
@@ -5456,19 +5453,32 @@ void openWorldSelect(App& app) {
     App::WorldSelect& ws = app.worldSelect;
     for (cr::Texture& t : ws.maps) app.renderer.destroy(t);
     ws = App::WorldSelect();
-    ws.pair = std::clamp(currentPair(app) - 1, 0, 3);
-    unsigned mask = 0;
-    for (int k = 0; k < 5; ++k)
-        if (app.game.flag(kGateFlag[ws.pair] + k)) mask |= 1u << k;
-    if (app.game.flag(kSixthFlag[ws.pair])) mask |= 0x20;
-    if (!mask) mask = 1;
-    for (int k = 0; k < 6; ++k)
-        if (mask & (1u << kOrder[ws.pair][k])) ws.worlds.push_back(kOrder[ws.pair][k]);
-    for (int k = 0; k < 8; ++k) ws.levels += app.game.flag(kLevelFlag[ws.pair][k]);
-    ws.world = ws.worlds.empty() ? 0 : ws.worlds[0];
-    for (int k = 0; k < 6; ++k) {
+    ws.pair = std::clamp(app.game.scenario, 0, cr::kScenarios - 1);
+    for (int w = firstWorld(ws.pair); w <= lastWorld(ws.pair); ++w)
+        if (app.game.flag(kWorldFlag[w])) ws.worlds.push_back(w);
+    if (ws.worlds.empty()) ws.worlds.push_back(firstWorld(ws.pair));
+    ws.levels = 0;
+    if (ws.pair == 0)
+        for (short f : kLevelFlag) ws.levels += app.game.flag(f);
+    else { // by the collection held (551..630): 1 under 4, then one more each 8 to 9 under 64; from
+        // 64, 10 (11 with flag 0x65), then flags 0x66..0x69 12..15 and 0x6a 20
+        int n = 0;
+        for (int i = 551; i <= 630; ++i) n += ownedCount(app, i) > 0;
+        if (n < 64) ws.levels = n < 4 ? 1 : n < 8 ? 2 : 2 + n / 8;
+        else {
+            ws.levels = app.game.flag(0x65) ? 11 : 10;
+            for (int f = 0x66; f <= 0x69; ++f)
+                if (app.game.flag(f)) ws.levels = 12 + (f - 0x66);
+            if (app.game.flag(0x6a)) ws.levels = 20;
+        }
+    }
+    ws.levels = std::max(1, ws.levels);
+    ws.world = ws.worlds[0];
+    for (int k = 0; k < 7; ++k) { // MAP_01..06 / MAP_07..13
         cr::Image img;
-        if (loadImage(app, "MAP_0" + std::to_string(k + 1) + ".mct", img)) ws.maps[k] = app.renderer.upload(img);
+        char name[16];
+        std::snprintf(name, sizeof name, "MAP_%02d.mct", firstWorld(ws.pair) + k + 1);
+        if (loadImage(app, name, img)) ws.maps[k] = app.renderer.upload(img);
     }
     on(app, 0), on(app, 1), on(app, 2, -140, 0), on(app, 6, -480, 0), on(app, 4), on(app, 5);
     ws.state = 1;
@@ -5482,10 +5492,12 @@ void closeWorldSelect(App& app) { // __menuu_WldChoiceClr
     app.worldChoiceOpen = false;
     app.game.setFlag(0, ws.cancelled);
     if (ws.cancelled) return;
-    app.game.vars[0] = ws.world;
-    app.game.vars[1] = ws.world == 5 ? 0 : ws.level;
+    app.game.vars[0] = ws.world - wldsel::firstWorld(ws.pair);
+    app.game.vars[1] = ws.world == wldsel::lastWorld(ws.pair) ? 0 : ws.level;
     app.game.vars[2] = ws.pair;
-    app.game.setFlag(1, ws.skip && ws.world != 4 && ws.world != 5);
+    if (ws.skip) app.game.setFlag(1, true);
+    if (app.game.vars[0] == 5) app.game.setFlag(1, false);
+    app.game.bands[size_t(ws.pair)] = app.game.vars[1]; // (+0x84340 + scenario)
 }
 
 void worldSelectChoose(App& app, int pos) { // state 1: a gate, or Back (-1)
@@ -5505,10 +5517,10 @@ void worldSelectChoose(App& app, int pos) { // state 1: a gate, or Back (-1)
     menuSound(app, se::kChoose);
     ws.world = ws.worlds[size_t(pos)];
     off(app, 6, -480, 0);
-    if (ws.world == 5) {
+    if (ws.world == lastWorld(ws.pair)) {
         toYesNo(app, false);
         ws.state = 7, ws.timer = 4;
-    } else if (ws.world < 4 && app.game.flag(kAskFlag[ws.pair][ws.world])) {
+    } else if (ws.pair == 0 && ws.world < 5 && app.game.flag(kSkipFlag[ws.world])) {
         toYesNo(app, true);
         ws.state = 3, ws.timer = 4;
     } else
@@ -5549,7 +5561,7 @@ void worldSelectAnswer(App& app, bool yes) { // states 4 (skip?) and 8 (okay?)
     if (!yes) {
         off(app, 8, 140, 0), off(app, 9, 0, 160), off(app, 10, 0, 160);
         on(app, 2, -140, 0), on(app, 4), on(app, 5);
-        if (ws.world == 5) {
+        if (ws.world == lastWorld(ws.pair)) {
             on(app, 6, -480, 0);
             ws.state = 1;
         } else
@@ -5587,7 +5599,7 @@ void drawWorldSelect(App& app) {
     // FontDisp (12, 40) / (40, 58), the board (ComUty_MsgBoardDraw: picture 12) at (0, 220). The
     // iPhone layout: all of it at its screen's offset (16, 32) (o), the lists and Yes / No too;
     // Back is placed as tex2d + (16, 32) already
-    const bool phone = r.phoneLayout();
+    const bool phone = phoneMenus(app); // (Omega: the iPhone layout in both)
     auto ownPlace = [&](bool own) { m.setOffset(own && phone ? 16.0f : 0.0f, own && phone ? 32.0f : 0.0f); };
     const float ox = phone ? 16.0f : 0.0f, oy = phone ? 32.0f : 0.0f;
     // Widescreen: the title, rules and the gate's picture to the screen's left, the lists (with
@@ -5596,8 +5608,9 @@ void drawWorldSelect(App& app) {
     auto ease = [](float t) { return 1 - (1 - t) * (1 - t); };
     auto dx = [&](int w) { return ws.fromX[w] * (1 - ease(ws.win[w])); };
     auto dy = [&](int w) { return ws.fromY[w] * (1 - ease(ws.win[w])); };
-    if (ws.win[1] > 0 && ws.maps[std::clamp(ws.world, 0, 5)].id) // the gate's picture
-        m.imagePiece(ws.maps[std::clamp(ws.world, 0, 5)], dx(1) + ox, dy(1) + 64 + oy, 0, 0, 256, 256, ws.win[1]);
+    const int mapIx = std::clamp(ws.world - wldsel::firstWorld(ws.pair), 0, 6);
+    if (ws.win[1] > 0 && ws.maps[mapIx].id) // the world's picture
+        m.imagePiece(ws.maps[mapIx], dx(1) + ox, dy(1) + 64 + oy, 0, 0, 256, 256, ws.win[1]);
     if (ws.win[0] > 0) m.picture(0, dx(0) + 8 + ox, dy(0) + 4 + oy, ws.win[0]);
     if (ws.win[2] > 0) { // (the labels as the camp's: FontDisp's y the line box's top)
         m.picture(15, dx(2) + ox, dy(2) + 56 + oy, ws.win[2]);
@@ -5619,11 +5632,7 @@ void drawWorldSelect(App& app) {
         ws.top = std::clamp(ws.top, std::max(0, ws.cursor - kRows + 1), ws.cursor);
         for (int i = ws.top; i < std::min(int(ws.worlds.size()), ws.top + kRows); ++i) {
             const int g = ws.worlds[size_t(i)];
-            int pips = -1;
-            if (g < 5) {
-                pips = 0;
-                for (int k = 0; k < 4; ++k) pips |= app.game.flag(kPipFlag[g][k][ws.pair]) ? 1 << k : 0;
-            }
+            const int pips = -1; // (ComUty_ComPlate_Wld: the plain plate)
             const float x = kListX + dx(6), y = kListY + kListStep * float(i - ws.top);
             plate(x, y, ws.state == 1 && i == ws.cursor, sysText(app, 58002 + g), pips, ws.win[6]);
             m.piece(x + 12, y + 8, float(0x3d % 16) * 32, 248 + float(0x3d / 16) * 32, 32, 32, ws.win[6]); // icon 0x3d
@@ -5638,7 +5647,7 @@ void drawWorldSelect(App& app) {
         for (int i = ws.levelTop; i < std::min(ws.levels, ws.levelTop + kRows); ++i)
         {
             const float x = kListX + dx(7), y = kListY + kListStep * float(i - ws.levelTop);
-            plate(x, y, ws.state == 6 && i == ws.levelCursor, sysText(app, 58008 + i), -1, ws.win[7]);
+            plate(x, y, ws.state == 6 && i == ws.levelCursor, sysText(app, 58200 + i), -1, ws.win[7]);
             m.piece(x + 12, y + 8, float(0x3d % 16) * 32, 248 + float(0x3d / 16) * 32, 32, 32, ws.win[7]);
         }
         scrollBar(m, dx(7), ws.levelTop, ws.levels, ws.win[7]);
@@ -5651,8 +5660,8 @@ void drawWorldSelect(App& app) {
         m.picture(12, ox, y, a);
         std::vector<std::string> lines;
         if (ws.asking) lines = {sysText(app, 57000 + 0x40)};
-        else if (ws.world == 5) lines = {sysText(app, 58002 + ws.world), sysText(app, 58018)};
-        else lines = {sysText(app, 58002 + ws.world), sysText(app, 58008 + ws.level), sysText(app, 58018)};
+        else if (ws.world == wldsel::lastWorld(ws.pair)) lines = {sysText(app, 58002 + ws.world), sysText(app, 58018)};
+        else lines = {sysText(app, 58002 + ws.world), sysText(app, 58200 + ws.level), sysText(app, 58018)};
         for (size_t k = 0; k < lines.size(); ++k) m.text(lines[k], 24 + ox, y + 14 + 16 * float(k), false, a, 15);
     }
     r.setOrigin(wideRight(app));
@@ -5695,7 +5704,7 @@ void worldSelectClick(App& app, float px, float py) {
     menuPointAt(app, lx, ly, wideRight(app), mx, my); // (widescreen: the lists and Yes / No on the right)
     auto in = [&](float x, float y, float w, float h) { return mx >= x && mx < x + w && my >= y && my < y + h; };
     if (ws.state == 1 || ws.state == 6) {
-        const bool phone = app.renderer.phoneLayout(); // (Back: tex2d + (16, 32) already, see drawWorldSelect)
+        const bool phone = phoneMenus(app); // (Back: tex2d + (16, 32) already, see drawWorldSelect)
         if (in(kBackX - (phone ? 16 : 0), kBackY - (phone ? 32 : 0), 232, 24)) {
             if (ws.state == 1) worldSelectChoose(app, -1);
             else worldSelectLevel(app, -1);
@@ -9400,8 +9409,8 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     rules.strike = start.strike;
     rules.escapeBlocked = flags != 0;
     rules.setupParty(app.game, app.itemTable, route);
-    const std::string ev = app.area >= 0 && app.area < cr::kNumAreas ? cr::kAreaEventFile[app.area] : "";
-    const int band = ev.size() > 7 && ev[5] == 'd' && ev[6] == '0' ? ev[7] - '1' : 0;
+    // btl_enemy_init_lv: the scenario's level byte (the band the World Select chose)
+    const int band = app.game.bands[size_t(std::clamp(app.game.scenario, 0, cr::kScenarios - 1))];
     rules.setupSpecial(app.game, app.itemTable, start.group, route); // the story battles' line-ups
     rules.setupEnemies(app.battleData, ids, band);
     for (int k = 0; k < 2; ++k) // Uty_Btl_ParamUp01 / 02 called before this battle began

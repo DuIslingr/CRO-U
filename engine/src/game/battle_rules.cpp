@@ -141,7 +141,7 @@ int BattleRules::leaderLevel() const {
 void BattleRules::setupEnemies(const BattleData& data, const std::array<int, 3>& ids, int band) {
     const int L = leaderLevel();
     const int hi = L > 198 ? 200 : L + 2, lo = L < 6 ? 1 : L - 5;
-    band = std::clamp(band, 0, 9);
+    band = std::clamp(band, 0, 19);
     for (int k = 0; k < 3; ++k) {
         Fighter& x = f[size_t(2 + k)];
         x = Fighter();

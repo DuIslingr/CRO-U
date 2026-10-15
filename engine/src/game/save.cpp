@@ -35,7 +35,7 @@ bool writeSave(const std::string& path, const SaveData& s) {
     o << "\noz " << s.game.oz;
     o << "\nscenario " << s.game.scenario << ' ' << s.game.pairs[0][0] << ' ' << s.game.pairs[0][1] << ' '
       << s.game.pairs[1][0] << ' ' << s.game.pairs[1][1] << ' ' << s.game.leaders[0] << ' ' << s.game.leaders[1] << ' '
-      << s.game.otherOz;
+      << s.game.otherOz << ' ' << s.game.bands[0] << ' ' << s.game.bands[1];
     o << "\notherbag";
     std::map<int, int> other(s.game.otherBag.begin(), s.game.otherBag.end());
     for (auto& [k, v] : other) o << ' ' << k << '=' << v;
@@ -93,6 +93,9 @@ bool readSave(const std::string& path, SaveData& s, std::string* error) {
             GameState& g = out.game;
             l >> g.scenario >> g.pairs[0][0] >> g.pairs[0][1] >> g.pairs[1][0] >> g.pairs[1][1] >> g.leaders[0] >> g.leaders[1] >>
                 g.otherOz;
+            for (int& b : g.bands)
+                if (!(l >> b)) b = 0;
+                else b = std::clamp(b, 0, 19);
             g.scenario = std::clamp(g.scenario, 0, kScenarios - 1);
             for (auto& pr : g.pairs)
                 for (int& c : pr) c = std::clamp(c, -1, kCharacters - 1);
