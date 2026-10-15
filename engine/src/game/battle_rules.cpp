@@ -400,7 +400,7 @@ BattleHit BattleRules::physical(const BattleActionDef& a, const int actors[2], i
     if (h.type != kHitGuard) dmg = dmg * elementScale(a, actors[0], target, h.type) / 100;
     if (dmg >= 1) dmg = resist(a, actors, target, dmg, false, h.type);
     if (dmg >= 1 && h.type != kHitKill) dmg = zoku(dmg, a, actors[0], target, false);
-    if (dodgeHit_) dmg = 0, h.type = kHitMiss;
+    if (dodgeHit_) dmg = 0, h.type = kHitMiss, note_ = 57061; // "Neutralized physical damage!"
     h.amount = dmg;
     return h;
 }
@@ -429,7 +429,7 @@ BattleHit BattleRules::magical(const BattleActionDef& a, const int actors[2], in
     dmg = resist(a, actors, target, dmg, true, h.type); // (0406: even at 0)
     if (dmg >= 1 && h.type != kHitKill) dmg = zoku(dmg, a, actors[0], target, true);
     if (a.id == 241) dmg = 99999, h.type = 0; // (0xf1, 435's quick form) all of it, unblockable
-    else if (dodgeGene_) dmg = 0, h.type = kHitMiss;
+    else if (dodgeGene_) dmg = 0, h.type = kHitMiss, note_ = 57062; // "... magical damage!"
     h.amount = dmg;
     return h;
 }
@@ -752,7 +752,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                 if (k >= 0) f[size_t(k)].mp -= cost;
         }
         int counterBy = -1;
-        const std::vector<int> hitList = resolveTargets(*a, e);
+        std::vector<int> hitList = resolveTargets(*a, e);
         firstTarget_ = hitList.empty() ? -1 : hitList.front(); // btlcalc_critical reads G+0x7a
         // btlque_make_que: each target's 131 / 136 (20% holding the Break, else 10) and Omega's 189
         // (5%, a dodgeable action, and the dodger answers it) - one success fends off the whole
@@ -767,6 +767,30 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             }
         }
         if (a->sureGene) dodgeGene_ = false;
+        // btlact_gene / btlact_item: a hostile gene or item meeting a barrier on any target takes
+        // every target's barrier and comes back (0x1004 / 0x100e) - on its users, or with scope 5
+        // on all of their side standing - its users' power as before; the Break counts it for the
+        // barrier's side, and what it fells leaves no item or gene (+0xaf)
+        int breakBy = e.actors[0];
+        bool reflected = false;
+        if (a->hostile && (e.kind == kCmdGene || e.kind == kCmdItem) && e.actors[0] >= 0) {
+            for (int t : hitList)
+                if (f[size_t(t)].status[kStatusBarrier]) f[size_t(t)].status[kStatusBarrier] = 0, reflected = true;
+            if (reflected) {
+                breakBy = hitList.front();
+                out.barriers = hitList;
+                hitList.clear();
+                const bool party = e.actors[0] < 2;
+                if (a->scope == 5) {
+                    for (int i = party ? 0 : 2; i < (party ? 2 : 5); ++i)
+                        if (f[size_t(i)].alive()) hitList.push_back(i);
+                } else
+                    for (int k : e.actors)
+                        if (k >= 0 && f[size_t(k)].alive()) hitList.push_back(k);
+                dodgeGene_ = false;
+                out.reflected = true;
+            }
+        }
         int drained = 0;
         auto atkSumOf = [&]() { int s = 0; for (int k : e.actors) if (k >= 0) s += atkOf(k); return s; };
         auto magicBoost = [&](int v) { return has(e.actors[0], 156) ? v + v / 5 : v; };
@@ -776,13 +800,6 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             h.target = t;
             int calc = a->calc;
             Fighter& tx = f[size_t(t)];
-            if (a->hostile && calc != 12 && tx.status[kStatusBarrier] && e.kind == kCmdGene) { // the barrier takes it
-                tx.status[kStatusBarrier] = 0;
-                h.type = kHitNoEffect;
-                out.message = 57062;
-                out.hits.push_back(h);
-                continue;
-            }
             switch (calc) {
             case 2: h.amount = a->power * 100 / std::max<int>(1, int(hitList.size())); break; // btlcalc_0407: shared
             case 3: h.amount = a->power * 100; break;                                           // 0408: fixed
@@ -799,7 +816,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                 if (calc == 7) { base = 0; for (int k : e.actors) if (k >= 0) base += std::max(0, f[size_t(k)].hp - 1); }
                 if (calc == 8) base = atkSumOf();
                 h.amount = magicBoost(zoku(a->power * base / 100, *a, e.actors[0], t, true));
-                if (dodgeGene_) h.amount = 0, h.type = kHitMiss;
+                if (dodgeGene_) h.amount = 0, h.type = kHitMiss, note_ = 57062;
                 if (calc == 8) drained += h.amount;
                 break;
             }
@@ -1010,13 +1027,13 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             if (h.amount > 0 && tf.status[kStatusInvincible]) h.amount = 0, h.type = kHitNoEffect; // Is_invincible
             h.amount = floored(t, h.amount); // chk_karaok_dmg_hp
             if (calc == 0 && round > 3 && h.amount >= 1 && a->id == 18) lateAttack = true; // btlcalc_0404: +0xa50
-            if (h.amount > 0) breakEvent(e.actors[0], 2, t);
+            if (h.amount > 0) breakEvent(breakBy, 2, t);
             tf.hp = std::clamp(tf.hp - h.amount, 0, tf.hpMax);
             if (tf.hp == 0 && before > 0 && tf.status[kStatusEndure]) {
                 tf.status[kStatusEndure] = 0;
                 tf.hp = 1;
             }
-            if (h.type == kHitCritical) breakEvent(e.actors[0], 8, t);
+            if (h.type == kHitCritical) breakEvent(breakBy, 8, t);
             if (before > 0 && tf.hp == 0) { // btlcalc_chk_dead
                 h.fell = true;
                 for (int& s : tf.status) s = 0;
@@ -1029,10 +1046,10 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                     expGained += tf.exp + (expUp ? tf.exp / 5 : 0);
                     ozGained += tf.oz + (ozUp ? tf.oz / 5 : 0) + tf.stolen; // what it stole comes back
                     tf.stolen = 0;
-                    fallRewards(t, e.actors);
+                    fallRewards(t, e.actors, !reflected);
                 }
                 if (t < 2) pair = false; // a fallen member ends pair mode
-                breakEvent(e.actors[0], 0x10, t);
+                breakEvent(breakBy, 0x10, t);
             }
             if (h.amount > 0 && tf.hp > 0 && (t < 2) != (e.actors[0] < 2)) {
                 // 153: at a quarter of the HP or less the target may start guarding
@@ -1180,7 +1197,7 @@ bool BattleRules::knows(int item) const {
 }
 
 // btlcalc_0505 / 0506 / chk_dead: what a fallen monster leaves
-void BattleRules::fallRewards(int enemy, const int actors[2]) {
+void BattleRules::fallRewards(int enemy, const int actors[2], bool itemsAndGenes) {
     const Fighter& x = f[size_t(enemy)];
     if (!x.def) return;
     int sum = 0, n = 0;
@@ -1188,7 +1205,7 @@ void BattleRules::fallRewards(int enemy, const int actors[2]) {
         if (actors[k] >= 0) sum += f[size_t(actors[k])].level, ++n;
     const int avg = n ? sum / n : 1, lv = x.level;
     auto row = [&](int off) { return monsterField(x, off); };
-    if (row(0xc8) + row(0xca) + row(0xcc) + row(0xce) + row(0xd0) != 0) { // btlcalc_0505: an item - the roll, then which
+    if (itemsAndGenes && row(0xc8) + row(0xca) + row(0xcc) + row(0xce) + row(0xd0) != 0) { // btlcalc_0505: an item - the roll, then which
         int d = avg + 10 - lv;
         const int chance = d < -4 ? 20 : d < 1 ? 30 : d < 6 ? 40 : 50;
         if (random(100) < chance) {
@@ -1196,7 +1213,7 @@ void BattleRules::fallRewards(int enemy, const int actors[2]) {
             if (item > 0 && !((item >= 81 && item <= 191) && knows(item))) drops.push_back(item); // (steal_item_add: 81..191 learned)
         }
     }
-    if (row(0xbc) != 0) { // a gene
+    if (itemsAndGenes && row(0xbc) != 0) { // a gene
         bool more = false; // 158: Get More Genes
         for (int k = 0; k < 2; ++k) more |= actors[k] >= 0 && has(actors[k], 158);
         const int d = avg - (more ? 15 : 0) - lv;

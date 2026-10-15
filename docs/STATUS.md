@@ -128,3 +128,9 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
       first (CR1's +19998); skill 153's guard also rolled as each round starts
       (`_btlord_enemy_rand`), and group 0x297's two enemies never act as a pair; the AI's lists,
       weights and targets checked against `_btlai_make` / `_btlai_prc` (unchanged)
+- [x] the barrier (calc 26) reflects, as `_btlact_gene` / `_btlact_item`'s states 0x1004 / 0x100e
+      have it (CR1's too): a hostile gene or item meeting one on any target takes every target's
+      barrier and comes back on its users (scope 5: on all of their side), the barriers lighting up
+      (effect 0x3a, sound 0x5b); the Break counts it for the barrier's side and what it fells
+      leaves no item or gene (+0xaf) - it was absorbed. A dodge shows its line once (57061
+      physical / 57062 genes, 0404 / 0406 / 0410 / 0412 / 0413), which the barrier had borrowed
