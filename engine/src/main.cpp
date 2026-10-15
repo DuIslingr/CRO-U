@@ -224,6 +224,7 @@ struct App {
     std::vector<int> voiceEntries;         // bank entries marked as voice (sound test, T)
     cr::Hud optionsHud;
     cr::Texture windowTex;                 // window.mct (chk_hd_name: window_ipad on the iPad): the UI atlas
+    cr::Texture cutinTex;                  // window_cutin.mct (tex2d slot 0x2b on the iPad): the talk parchment
     cr::Texture titleArt[2];               // __menuu_TitleSet: title1.mct (MuCom slot 0x11), chaos.mct (0x12)
     float footPrev = 0;                    // player's animation time last frame (footsteps)
     std::vector<uint32_t> soundLog;        // every sound started (self-test)
@@ -8803,6 +8804,18 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         app.dialogueHud.setTint(0.12f, 0.10f, 0.08f);
         textX = 2.0f * 36 + 32;
         textY = 2.0f * (pr[0] + pr[1]) + 64;
+    } else if (app.cutinTex.id) { // Omega's iPad (PutWin): window_cutin's (0, 112, 512, 144) at tex2d (x - 16,
+        // y + 32) - the screen's bottom 288; PutMsg: the name at tex2d (24, 222), the lines at x 36
+        // from y + text y + 18, the "next" mark at y 328
+        const short* pr = kRect[app.msgLines == 1];
+        app.renderer.drawQuadUV(app.cutinTex, left, 2.0f * (pr[0] + 32 - 32) + 128, width, 288, 0, 112, 512, 144);
+        if (!speaker.empty()) {
+            app.nameHud.setTint(1, 1, 1);
+            app.nameHud.drawAt(r, {speaker}, 2.0f * 24 + 32, 2.0f * 222 + 64 - 14, 2.0f, 0, 0, 0.0f);
+        }
+        app.dialogueHud.setTint(0.12f, 0.10f, 0.08f); // ink
+        textX = 2.0f * 36 + 32;
+        textY = 2.0f * (pr[0] + pr[1] + 18) + 64;
     } else if (true) { // the parchment (style 2, and the default)
         drawWinPiece(app, kWinParchment, left, H - 280, width, 280);
         if (!speaker.empty()) {
@@ -16031,6 +16044,8 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     {
         cr::Image wi;
         if (loadImage(*app, "window.mct", wi)) app->windowTex = app->renderer.upload(wi);
+        cr::Image ci;
+        if (loadImage(*app, "window_cutin.mct", ci)) app->cutinTex = app->renderer.upload(ci);
     }
     std::sort(app->textures.begin(), app->textures.end());
     std::sort(app->models.begin(), app->models.end());
