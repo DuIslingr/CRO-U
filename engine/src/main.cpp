@@ -4591,10 +4591,12 @@ std::vector<int> campItems(const App& app, int category) {
 // What can go in member c's slot: the bag's items of the slot's kind that c may wear
 std::vector<int> campEquipList(const App& app, int c, int slot) {
     std::vector<int> out;
-    if (slot >= 3) { // gene plates: the bag's, but not one either member wears already (Omega: all four slots)
+    if (slot >= 3) { // gene plates: the bag's, but not one either member wears already - MuComMakeGenePlate:
+        // the Human Genes slot the characters' own (kind 13: 474..480), the others the rest (481..)
         const cr::PartyMember& pm = app.game.party[size_t(c)];
-        if (pm.genes[slot - 3] > 0) out.push_back(0); // take it off
-        for (int p = cr::kFirstPlate; p < cr::kFirstPlate + cr::kPlates; ++p) {
+        if (slot > 3 && pm.genes[slot - 3] > 0) out.push_back(0); // take it off
+        const int from = slot == 3 ? cr::kFirstPlate : cr::kFirstPlate + 7, to = slot == 3 ? cr::kFirstPlate + 7 : cr::kFirstPlate + cr::kPlates;
+        for (int p = from; p < to; ++p) {
             if (ownedCount(app, p) <= 0) continue;
             bool worn = false;
             for (int k = 0; k < 2; ++k)
