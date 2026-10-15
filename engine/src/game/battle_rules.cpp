@@ -469,6 +469,7 @@ void BattleRules::enemyChoice(int enemy, bool asPair, Entry& e, const BattleActi
         }
         r -= c.weight;
     }
+    if (const int sp = specialAction(enemy)) e.action = sp; // (btlai_prc)
     if (forceAction > 0 && enemy == 2) e.action = forceAction;
     const BattleActionDef* a = actions.get(e.action);
     if (!a) {
@@ -481,6 +482,41 @@ void BattleRules::enemyChoice(int enemy, bool asPair, Entry& e, const BattleActi
                                          : kCmdGene;
     e.target = aiTarget(*a, enemy);
     if (!exclude) e.repeats = std::max(1, int(x.def ? x.def->raw[0x3e] : 1));
+}
+
+int BattleRules::specialAction(int enemy) const {
+    const int m = enemy >= 2 && enemy < 5 ? f[size_t(enemy)].monster : 0;
+    if (scenario == 0)
+        switch (group) {
+        case 650: return round == 2 ? 430 : 0;                 // (0x28a) Particle Cannon
+        case 655: return round == 4 ? 437 : 0;
+        case 656: return round == 4 || round == 6 ? 437 : 0;
+        case 657: return round == 2 ? 437 : 0;
+        default: return 0;
+        }
+    switch (group) {
+    case 663: case 665: // (0x297 / 0x299)
+        if (round == 1) return m == 21 ? 243 : 0;
+        if (round == 2) return m == 19 ? 242 : 0;
+        return 0;
+    case 664: // (0x298) monster 21: 486, 487, 488, then 241 on
+        if (m != 21 || round < 1) return 0;
+        return round <= 3 ? 485 + round : 241;
+    case 668: // (0x29c)
+        if (round == 1) return m == 22 ? 243 : 0;
+        if (round == 2) return m == 20 ? 242 : 0;
+        if (round == 3) return m == 22 ? 240 : 0;
+        return 0;
+    case 674: // (0x2a2)
+        if (round >= 1 && round <= 3) return 106;
+        if (round == 4) return m == 22 ? 243 : 0;
+        if (round == 5) return m == 20 ? 242 : 0;
+        if (round == 6) return m == 22 ? 240 : 0;
+        return 0;
+    case 676: return round == 1 ? 509 : round == 2 ? 508 : 0; // (0x2a4)
+    case 677: return round == 1 ? 511 : round == 2 ? 510 : 0; // (0x2a5)
+    default: return 0;
+    }
 }
 
 int BattleRules::aiTarget(const BattleActionDef& a, int user) {

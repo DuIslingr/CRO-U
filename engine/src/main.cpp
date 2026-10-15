@@ -522,9 +522,14 @@ struct App {
             float from = 0, to = 0, alpha = 0; // 0..255
             int at = 0, total = 1;         // 50 a frame
         } flash;
-        int stageAction = 0;               // a boss's staged action playing (btlact_430..436), 0 none
+        int stageAction = 0;               // a boss's staged action playing (its btlact_430..509), 0 none
         int stageCams = 0;                 // its cameras so far (+0x2c)
         int stageWait = 0;                 // its frames after the hit
+        int stageEnd = 0;                  // the later ones: the motion and the wait (0: hit + stageWait)
+        int stageMotionEnd = 0;            // ... the motion's length (then the formation's camera)
+        int stageChain = 0;                // ... the first of the cameras chained (is_btlcamera), 0 none
+        int stageSkip = 0;                 // 241's counter starts at 100 (btlact_435_init)
+        float fov = 28.5f;                 // gac + 0x104: some of them widen it
     } battle;
     Battle::Quake fieldQuake;              // the field's (FieldCamera::setOffset: the view moves by it)
     std::vector<uint8_t> effBin;           // eff.bin: 100 effect packages (read when an effect is first needed)
@@ -9800,6 +9805,8 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     rules.useRandom(&app.rng); // the one stream, as the original's
     rules.strike = start.strike;
     rules.stage = start.stage;
+    rules.group = start.group;
+    rules.scenario = std::clamp(app.game.scenario, 0, cr::kScenarios - 1);
     rules.escapeBlocked = flags != 0;
     rules.setupParty(app.game, app.itemTable, route);
     // btl_enemy_init_lv: the scenario's level byte (the band the World Select chose)
@@ -10238,11 +10245,27 @@ void stepFlash(App& app) {
     }
 }
 
-// ---- The bosses' staged actions (btlact_430..436) ----
+// ---- The bosses' staged actions (btlact_main's kinds 10..22: btlact_430..443, 509) ----
 // Each runs its own timeline instead of the gene's: the user's motion, a run of cameras (the
-// next set as the last one ends), effects at points or on the targets, sounds, quakes and
-// flashes at fixed frames, the hit (btlcalc_prc) at the end of it, then a wait.
-bool isStagedAction(int action) { return action == 430 || (action >= 432 && action <= 436); }
+// next as the last one ends), effects on the user, the targets or a point, sounds, quakes and
+// flashes at fixed frames, the hit (btlcalc_prc), then a wait. btlai_prc gives an action its
+// kind (the set moves _btlque_special picks among them); the older five (430..436) hit and then
+// wait, the later ones (437..) play the motion to its end - the hit somewhere in it - then go to
+// the formation's camera. Effects and sounds are Omega's own numbers.
+int stagedKind(int action) {
+    switch (action) {
+    case 430: case 503: return 430;
+    case 432: case 505: return 432;
+    case 434: case 507: return 434;
+    case 435: case 241: return 435;
+    case 436: return 436;
+    case 437: return 437;
+    case 439: case 440: case 441: case 442: case 443: return action;
+    case 509: case 511: return 509;
+    default: return 0;
+    }
+}
+bool isStagedAction(int action) { return stagedKind(action) != 0; }
 
 bool cameraDone(const App& app) { // btlcamera_prc clears G+0x9e0 when its frames are over
     const cr::BattleCamera* c = app.battleData.camera(app.battle.cam);
@@ -10262,78 +10285,134 @@ void startStaged(App& app, const cr::BattleActionDef* a) {
     const int user = t.actors[0];
     App::Battle::Actor* u = battleActor(app, user);
     const int cls = a ? a->cls : 8;
-    b.stageAction = t.action;
+    const int kind = stagedKind(t.action);
+    b.stageAction = kind;
     b.stageCams = 0;
     b.stageWait = 40;
+    b.stageEnd = 0;
+    b.stageChain = 0;
     if (u && !t.hits.empty()) faceFighter(app, *u, t.hits[0].target);
-    switch (t.action) {
-    case 430: // Particle Cannon: the charge, the shot, two flashes
+    // The later ones: the slot played once (mdl_set_act_motion_nextanm), its length the motion's
+    // (btlanm_get_max_frm), the cameras chained from `base` while the next exists
+    auto played = [&](int base, int after) {
+        if (u) playSlot(app, *u, cls, btlui::kSlotIdle);
+        const int len = u ? std::max(1, int(actorDuration(app, *u))) : 60;
+        b.stageMotionEnd = len;
+        b.stageEnd = len + after;
+        b.stageChain = base;
+        setBattleCamera(app, base);
+    };
+    switch (kind) {
+    case 430: // the charge (effect 13 on the user), the shot, two flashes
         if (u) playSlot(app, *u, cls, btlui::kSlotIdle);
         b.hitFrame = 140;
-        spawnEffectAt(app, 0x59, {500, -4, 500});
-        app.sound.play(0x7b);
+        spawnEffect(app, 0xd, user);
+        app.sound.play(0x5e);
         setBattleCamera(app, 0x207);
         break;
     case 432: { // the slot's loop, 45 frames past its start
+        app.sound.play(0xb8);
         if (u) playSlot(app, *u, cls, -1);
         const cr::BattleAnim an = app.battleData.anim(u ? u->modelId : 0, cls);
         b.hitFrame = an.loopStart + 45;
-        app.sound.play(0xbd);
         setBattleCamera(app, 0x1fe);
         break;
     }
-    case 433: // the item cameras, frames 82..83 held
-        if (u) playSlot(app, *u, cls, -1), u->loopFrom = 82, u->loopTo = 83;
-        b.hitFrame = 112;
-        if (user < 2) setBattleCamera(app, b.rules.pair ? 0x55 : user + 0x53);
-        else if (monsterSize(app, user) == 1) setBattleCamera(app, b.rules.enemyPair ? 0x58 : user + 0x54, user);
-        else setBattleCamera(app, monsterSize(app, user) + 0x57, user);
-        spawnEffect(app, effects::kCast, user);
+    case 435: { // 435 itself: frames 103..113 looped, its cameras; 241: the slot's loop, a quick one
+        const bool own = t.action == 435;
+        if (own) app.sound.play(0xeb);
+        app.sound.play(0xec);
+        if (u) {
+            playSlot(app, *u, cls, -1);
+            const cr::BattleAnim an = app.battleData.anim(u->modelId, cls);
+            u->loopFrom = own ? 103 : an.loopStart;
+            u->loopTo = own ? 113 : an.loopEnd;
+        }
+        b.stageSkip = own ? 0 : 100; // (the counter starts at 100: the same frames, 100 sooner)
+        b.hitFrame = 163 - b.stageSkip;
+        b.stageWait = own ? 100 + 40 : 102 + 40; // (to 263 / 265 on the counter, then 40)
+        if (own) setBattleCamera(app, 0x215);
+        else setBattleCamera(app, b.formation + 12);
         break;
+    }
     case 434:
         if (u) playSlot(app, *u, cls, btlui::kSlotIdle);
         b.hitFrame = 130;
         b.stageWait = 65;
-        spawnEffect(app, 0x1e, user);
-        app.sound.play(0x62);
+        spawnEffect(app, 0xe, user);
+        app.sound.play(0x45);
         setBattleCamera(app, 0x20c);
         break;
-    case 435: // frames 103..113 looped
-        if (u) playSlot(app, *u, cls, -1), u->loopFrom = 103, u->loopTo = 113;
-        b.hitFrame = 163;
-        app.sound.play(0xf0);
-        app.sound.play(0xf1);
-        setBattleCamera(app, 0x215);
-        break;
     case 436:
+        app.sound.play(0x66);
+        app.sound.play(0xeb);
         if (u) playSlot(app, *u, cls, btlui::kSlotIdle);
         b.hitFrame = 61;
         b.stageWait = 50;
-        app.sound.play(0x83);
-        app.sound.play(0xf0);
         setBattleCamera(app, 0x210);
+        break;
+    case 437: // the charge on the user (0x26); hit at 215
+        spawnEffect(app, 0x26, user);
+        played(0x229, 10);
+        b.hitFrame = 0xd7;
+        break;
+    case 439: played(0x233, 40); b.hitFrame = 0x62; break;
+    case 440: played(0x23d, 40); b.hitFrame = 0x97; b.fov = 50; break;
+    case 441: // its motion phase is 120 frames, whatever the slot's length
+        spawnEffect(app, 0x1e, user);
+        played(0x247, 40);
+        b.stageMotionEnd = 120, b.stageEnd = 120 + 40;
+        b.hitFrame = 0x52;
+        b.fov = 40;
+        break;
+    case 442: played(0x251, 40); b.hitFrame = 0x9b; b.fov = 40; break;
+    case 443: { // the item cameras, the hit as the motion ends (btlact_433's way)
+        if (user < 2) setBattleCamera(app, b.rules.pair ? 0x55 : user + 0x53);
+        else if (monsterSize(app, user) == 1) setBattleCamera(app, b.rules.enemyPair ? 0x58 : user + 0x54, user);
+        else setBattleCamera(app, monsterSize(app, user) + 0x57, user);
+        if (u) playSlot(app, *u, cls, btlui::kSlotIdle);
+        b.hitFrame = u ? std::max(1, int(actorDuration(app, *u))) : 60;
+        break;
+    }
+    case 509:
+        if (t.action == 509) { // 511: the cameras and the motion, the hit as it ends
+            spawnEffect(app, 0x19, user);
+            played(0x25b, 40);
+            b.hitFrame = 0x87;
+            b.fov = 50;
+        } else {
+            played(0x25b, 40);
+            b.hitFrame = b.stageMotionEnd;
+            b.stageEnd = 0; // (hit, then the 40)
+        }
         break;
     default: break;
     }
 }
 
-// One frame of it before the hit (b.turnFrame already counted)
+// One frame of it (b.turnFrame already counted)
 void stepStaged(App& app) {
     App::Battle& b = app.battle;
     const cr::BattleTurn& t = b.turn;
-    const int f = b.turnFrame, user = t.actors[0];
+    const int f = b.turnFrame + b.stageSkip, user = t.actors[0];
     auto nextCamera = [&](int most, int first) {
         if (b.stageCams < most && cameraDone(app)) setBattleCamera(app, first + ++b.stageCams);
     };
     auto onTargets = [&](int id) {
         for (int k : turnTargets(t)) spawnEffect(app, id, k);
     };
+    if (b.stageChain && cameraDone(app) && b.turnFrame < b.stageMotionEnd &&
+        app.battleData.camera(b.stageChain + b.stageCams + 1)) // (is_btlcamera)
+        setBattleCamera(app, b.stageChain + ++b.stageCams);
+    if (b.stageEnd && b.turnFrame == b.stageMotionEnd) { // the motion's over: the formation's view
+        setBattleCamera(app, b.formation + 12);
+        b.fov = 28.5f;
+    }
     switch (b.stageAction) {
     case 430:
         nextCamera(3, 0x207);
         if (f == 70) {
-            spawnEffectAt(app, 0x5a, {500, -2, 500});
-            app.sound.play(0x7c);
+            app.sound.play(0x5f);
             startQuake(app, 3, 0, 100, 2, true);
         }
         if (f == 133) endQuake(app, 3, 100, 0, 2);
@@ -10343,34 +10422,95 @@ void stepStaged(App& app) {
         if (f == 130) setFlash(app, 255, 0, 500);
         break;
     case 432:
-        if (f == 14) app.sound.play(0xc2);
+        if (f == 14) app.sound.play(0xbd);
         if (f == 36) {
-            if (const App::Battle::Actor* u = battleActor(app, user)) spawnEffectAt(app, 0x19, actorPoint(app, *u, 1206));
-            onTargets(0x5b);
-            app.sound.play(0x7d);
+            if (const App::Battle::Actor* u = battleActor(app, user)) spawnEffectAt(app, 5, actorPoint(app, *u, 1206));
+            onTargets(0x16);
+            app.sound.play(0x60);
         }
         break;
     case 434:
         nextCamera(2, 0x20c);
-        if (f == 84) app.sound.play(0xd4);
+        if (f == 84) app.sound.play(0xcf);
         if (f == 86) setFlash(app, 0, 255, 150);
         if (f == 89) setFlash(app, 255, 0, 150);
         if (f == 100) {
-            onTargets(0x22);
-            app.sound.play(0x6d);
+            onTargets(0x12);
+            app.sound.play(0x50);
             startQuake(app, 5, 0, 100, 2, true);
         }
         if (f == 128) endQuake(app, 5, 100, 0, 2);
         break;
     case 435:
         if (f == 103) {
-            spawnEffectAt(app, 0x21, {500, 0, 523});
-            app.sound.play(0x65);
+            spawnEffectAt(app, 0x11, {500, 0, 523});
+            app.sound.play(0x48);
             setFlash(app, 0, 255, 150);
         }
         if (f == 106) setFlash(app, 255, 0, 150);
         if (f == 133) setFlash(app, 0, 255, 1500);
         if (f == 163) setFlash(app, 255, 0, 500);
+        break;
+    case 437:
+        if (f == 1) app.sound.play(0x81);
+        if (f == 0x7a) app.sound.stop(0x81), app.sound.play(0x82);
+        if (f == 0xd6) app.sound.play(0x4a), app.sound.play(0x8f);
+        if (f == 0x78) setFlash(app, 0, 255, 150);
+        if (f == 0x7b) setFlash(app, 255, 0, 150);
+        if (f == 0xfa) setFlash(app, 0, 255, 500);
+        if (f == b.stageEnd) setFlash(app, 255, 0, 500); // (9999)
+        break;
+    case 439:
+        if (f == 1) app.sound.play(0x110), app.sound.play(0x83);
+        if (f == 0x3e) app.sound.play(0x84);
+        if (f == 0x46) spawnEffectAt(app, 9, {500, 0, 430});
+        if (f == 0x5d) {
+            app.sound.play(0x114), app.sound.play(0xd4);
+            startQuake(app, 3, 0, 100, 2, true);
+            setFlash(app, 0, 255, 150);
+        }
+        if (f == 0x60) app.sound.play(0x111), setFlash(app, 255, 0, 150);
+        if (f == 0x96) endQuake(app, 3, 100, 0, 2);
+        break;
+    case 440:
+        if (f == 1) app.sound.play(0x85);
+        if (f == 0x3d) spawnEffectAt(app, 0x1b, {500, 0, 465});
+        if (f == 0x5a) startQuake(app, 5, 0, 100, 2, true);
+        if (f == 0x68) endQuake(app, 5, 100, 0, 0x43);
+        if (f == 0x74) app.sound.play(0x86), spawnEffectAt(app, 0x1c, {500, 0, 465});
+        if (f == 0xa3) setFlash(app, 0, 255, 250);
+        if (b.stageMotionEnd && f == b.stageMotionEnd + 5) setFlash(app, 255, 0, 150);
+        break;
+    case 441:
+        if (f == 0x1f) startQuake(app, 2, 0, 100, 0x20, true), app.sound.play(0x8b);
+        if (f == 0x24) app.sound.play(0x10d);
+        if (f == 0x45) {
+            spawnEffect(app, 0x1f, user);
+            app.sound.play(0x8c), app.sound.play(0xd4);
+            endQuake(app, 5, 100, 0, 0x33);
+        }
+        break;
+    case 442:
+        if (f == 10) app.sound.play(0x89);
+        if (f == 0x46) spawnEffect(app, 0x20, user);
+        if (f == 0x47) startQuake(app, 2, 0, 100, 0x2c, true);
+        if (f == 0x6e) app.sound.play(0x8a);
+        if (f == 0x74) startQuake(app, 3, 100, 100, 2, true);
+        if (f == 0x92) endQuake(app, 5, 60, 100, 0x4a);
+        if (f == 0xb9) setFlash(app, 0, 255, 1000);
+        if (f == 0xd7) setFlash(app, 255, 0, 750);
+        break;
+    case 509:
+        if (t.action != 509) break;
+        if (f == 1) app.sound.play(0x87);
+        if (f == 0x78) app.sound.play(0x88), setFlash(app, 255, 0, 150);
+        if (f == 0x69) setFlash(app, 0, 255, 500);
+        if (f == 0x10) startQuake(app, 2, 0, 100, 0x31, true);
+        if (f == 0x4a) endQuake(app, 4, 100, 0, 0x2e);
+        if (f == 0x87) endQuake(app, 5, 100, 0, 10);
+        if (f == 0x88) spawnEffect(app, 0x1a, user);
+        if (f == 0xa3) setFlash(app, 0, 255, 250);
+        if (b.stageMotionEnd && f == b.stageMotionEnd + 5) setFlash(app, 255, 0, 150);
         break;
     default: break;
     }
@@ -10385,7 +10525,8 @@ void stepStagedCameras(App& app) {
         const int target = b.turn.hits.empty() ? 0 : std::clamp(b.turn.hits[0].target, 0, 1);
         setBattleCamera(app, b.stageCams < 5 ? 0x1fe + b.stageCams : b.rules.pair ? 0x205 : target + 0x203);
     }
-    if (b.stageAction == 435 && b.stageCams < 5 && cameraDone(app)) setBattleCamera(app, 0x215 + ++b.stageCams);
+    if (b.stageAction == 435 && b.turn.action == 435 && b.stageCams < 5 && cameraDone(app))
+        setBattleCamera(app, 0x215 + ++b.stageCams);
     if (b.stageAction == 436 && b.stageCams < 4 && cameraDone(app)) setBattleCamera(app, 0x210 + ++b.stageCams);
 }
 
@@ -10395,15 +10536,18 @@ void stagedHit(App& app) {
     App::Battle::Actor* u = battleActor(app, b.turn.actors[0]);
     switch (b.stageAction) {
     case 432:
-        for (int k : turnTargets(b.turn)) spawnEffect(app, 0x5c, k);
-        app.sound.play(0x7e);
+        for (int k : turnTargets(b.turn)) spawnEffect(app, 0x17, k);
+        app.sound.play(0x61);
         if (u) u->then = btlui::kSlotIdle; // mdl_set_act_nextanm: the loop plays out, then stands
         break;
-    case 433: setBattleCamera(app, b.formation + 12); break;
     case 435:
         if (u) u->then = btlui::kSlotIdle;
         break;
     case 436: startQuake(app, 10, 100, 0, 10, false); break;
+    case 443: setBattleCamera(app, b.formation + 12); break;
+    case 509:
+        if (b.turn.action != 509) setBattleCamera(app, b.formation + 12);
+        break;
     default: break;
     }
 }
@@ -11041,7 +11185,7 @@ void stepBattle(App& app) {
         ++b.turnFrame;
         if (b.stageAction) {
             stepStagedCameras(app);
-            if (!b.hitsShown) stepStaged(app);
+            stepStaged(app);
         }
         if (!b.hitsShown && b.turnFrame >= b.hitFrame) {
             showHits(app);
@@ -11053,12 +11197,13 @@ void stepBattle(App& app) {
                 if (const App::Battle::Actor* u = b.turn.actors[k] >= 0 ? battleActor(app, b.turn.actors[k]) : nullptr)
                     busy |= u->then >= 0 && u->slot != btlui::kSlotHit;
             const bool over = b.turn.kind == cr::kCmdEscape ? b.turnFrame >= (b.turn.escaped ? 30 + 40 : 40)
+                              : b.stageAction && b.stageEnd ? b.turnFrame >= std::max(b.stageEnd, b.hitFrame + 1)
                               : b.stageAction ? b.turnFrame >= b.hitFrame + b.stageWait // the staged ones' wait
                                               : (!busy && b.turnFrame >= b.hitFrame + 24) || b.turnFrame > 400;
             if (over) {
-                if (b.stageAction == 433) // 9999: mdl_set_act_motion(0), it stands
-                    if (App::Battle::Actor* u = battleActor(app, b.turn.actors[0])) playSlot(app, *u, btlui::kSlotIdle);
                 b.stageAction = 0;
+                b.stageSkip = 0;
+                b.fov = 28.5f;
                 b.turnOn = false;
                 // btlord_chk: a side lost the Break - its effect first (btl_main 0x5dc)
                 if (b.rules.breakChanging()) startBreakFx(app);
@@ -11113,7 +11258,7 @@ void drawBattle(App& app, float dt) {
     proj.m[9] -= 2.0f * b.quake.off[1] / H;
     const cr::Mat4 vp = proj * cr::Mat4::lookAt(eye, target, {0, 1, 0});
     b.vp = vp;
-    r.setCamera(9.0f, 2000.0f, 28.5f * 3.14159265f / 180.0f);
+    r.setCamera(9.0f, 2000.0f, app.battle.fov * 3.14159265f / 180.0f);
     r.begin3DRect(0, 0, W, H);
     drawLoaded(app, b.stage, vp);
     for (const App::Battle::Actor& a : b.actors) {
@@ -12629,16 +12774,24 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
             glErrors += ferrs;
         }
 
-        // The bosses' staged actions (btlact_430..436): each plays its own slot (the boss models'
-        // 14th / 15th, read past the usual 13), steps through its cameras, flashes and shakes
-        // where it has them, hits at its frame and ends after its wait; hits shake the screen;
-        // and the effects' textures scroll with their materials' actions
+        // The bosses' staged actions (btlact_main's kinds 10..22): each plays its own slot (the boss
+        // models' 14th / 15th, read past the usual 13), steps through its cameras, flashes and
+        // shakes where it has them, hits at its frame and ends after its wait (the later ones: as
+        // their motion ends, plus theirs); hits shake the screen; and the effects' textures scroll
+        // with their materials' actions
         {
-            // quake: one before the hit; after: the strongest from the hit on (3 = the calc's own, when a hit lands)
+            // hit -1: the slot's loop + 45, -2: the motion's end; wait -1: the motion's end + the
+            // action's own; cams -1: chained, as many as there are; quake: one before the hit;
+            // after: the strongest from the hit on (3 = the calc's own, when a hit lands; -1 not checked)
             struct Want { int action, group, hit, wait, cams; bool flash, quake; float after; };
-            const Want wants[] = {{430, 340, 140, 40, 3, true, true, 3},    {432, 348, -1, 40, 5, false, false, 0},
-                                  {433, 352, 112, 40, 0, false, false, 0}, {434, 352, 130, 65, 2, true, true, 3},
-                                  {435, 356, 163, 40, 5, true, false, 3},   {436, 356, 61, 50, 4, false, false, 10}};
+            const Want wants[] = {{430, 340, 140, 40, 3, true, true, 3},     {432, 348, -1, 40, 5, false, false, 0},
+                                  {434, 352, 130, 65, 2, true, true, 3},     {435, 356, 163, 140, 5, true, false, 3},
+                                  {436, 356, 61, 50, 4, false, false, 10},   {503, 666, 140, 40, 3, true, true, 3},
+                                  {505, 716, -1, 40, 5, false, false, 0},    {507, 667, 130, 65, 2, true, true, 3},
+                                  {437, 655, 0xd7, -1, -1, true, false, 3},  {439, 659, 0x62, -1, -1, true, true, -1},
+                                  {440, 658, 0x97, -1, -1, true, true, -1},  {441, 660, 0x52, -1, -1, false, true, -1},
+                                  {442, 660, 0x9b, -1, -1, true, true, -1},  {511, 677, -2, 40, -1, false, false, -1}};
+            constexpr int kWants = int(sizeof wants / sizeof wants[0]);
             int sbad = 0, rerrs = 0, ran = 0, hitQuakes = 0;
             const cr::GameState saved = app.game;
             for (const Want& w : wants) {
@@ -12648,7 +12801,7 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 const cr::BattleActionDef* def = app.battleActions.get(w.action);
                 if (!b.active || !def) { ++sbad; continue; }
                 b.rules.forceAction = w.action;
-                int hitAt = -1, endAt = -1, cams = 0, slot = -1;
+                int hitAt = -1, endAt = -1, cams = 0, slot = -1, stageEnd = 0, motionEnd = 0;
                 float flash = 0, quake = 0, after = 0;
                 bool started = false, landed = false;
                 for (int f = 0; f < 8000 && b.active && endAt < 0; ++f) {
@@ -12663,6 +12816,8 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                     if (on && !started) {
                         started = true;
                         if (const App::Battle::Actor* u = battleActor(app, b.turn.actors[0])) slot = u->slot;
+                        stageEnd = b.stageEnd;
+                        motionEnd = b.hitFrame;
                     }
                     if (on) {
                         cams = std::max(cams, b.stageCams);
@@ -12683,9 +12838,12 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                     if (was && !b.turnOn) endAt = b.turnFrame;
                 }
                 const float wantAfter = w.after > 3 ? w.after : w.after > 0 && landed ? 3.0f : 0.0f;
-                const int wantHit = w.hit >= 0 ? w.hit : app.battleData.anim(battleActor(app, 2)->modelId, def->cls).loopStart + 45;
-                const int bad = !started + (slot != def->cls) + (hitAt != wantHit) + (endAt != wantHit + w.wait) +
-                                (cams != w.cams) + (w.flash != (flash >= 254)) + (w.quake != (quake > 0.5f)) + (after != wantAfter);
+                const int wantHit = w.hit >= 0 ? w.hit : w.hit == -2 ? motionEnd
+                                  : app.battleData.anim(battleActor(app, 2)->modelId, def->cls).loopStart + 45;
+                const int wantEnd = w.wait >= 0 ? wantHit + w.wait : std::max(stageEnd, wantHit + 1);
+                const int bad = !started + (slot != def->cls) + (hitAt != wantHit) + (endAt != wantEnd) + (w.wait < 0 && stageEnd <= 0) +
+                                (w.cams >= 0 && cams != w.cams) + (w.flash != (flash >= 254)) + (w.quake != (quake > 0.5f)) +
+                                (w.after >= 0 && after != wantAfter);
                 if (bad)
                     std::printf("  staged %d: slot %d (cls %d), hit at %d (want %d), ended at %d, %d cameras, flash %.0f, "
                                 "quake %.1f, after the hit %.0f\n", w.action, slot, def->cls, hitAt, wantHit, endAt, cams, flash,
@@ -12728,10 +12886,10 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
             app.runner.stop();
             app.game = saved;
             const int boss15 = app.battleData.anim(9, 14).loopEnd > 0 || app.battleData.anim(9, 14).hit > 0;
-            std::printf("battle staging: %d of 6 boss actions staged, hit quake %s, effect 48: %d of %d scrolling materials move, "
-                        "boss slots past 13 %s; %d problems, %d render API errors\n", ran, hitQuakes ? "yes" : "no", moved,
+            std::printf("battle staging: %d of %d boss actions staged, hit quake %s, effect 48: %d of %d scrolling materials move, "
+                        "boss slots past 13 %s; %d problems, %d render API errors\n", ran, kWants, hitQuakes ? "yes" : "no", moved,
                         scrolling, boss15 ? "read" : "missing", sbad, rerrs);
-            problems += sbad + rerrs + (ran != 6) + !hitQuakes + (scrolling == 0 || moved == 0);
+            problems += sbad + rerrs + (ran != kWants) + !hitQuakes + (scrolling == 0 || moved == 0);
             glErrors += rerrs;
         }
 

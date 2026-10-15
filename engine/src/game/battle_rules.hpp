@@ -216,6 +216,11 @@ public:
     int allyCounter = 0;         // +0x17c
     int stage = -1;              // the battle stage (btlflrname index: +0x8a53d)
     int forceAction = 0;         // tests (--battle-view stage<n>): enemy 2 always chooses this action
+    int group = 0;               // the encounter group (gac + 0x8a538: _btlque_special's)
+    int scenario = 0;            // Select Scenario's (_prty + 8)
+    // _btlque_special: the story battles' set moves - by group, round and monster, what an enemy
+    // does instead of its own choice (0 its own)
+    int specialAction(int enemy) const;
     int expGained = 0, ozGained = 0;
     int purse = 0;               // the party's Oz at the start (calc 10 takes from it)
     int ozStolen = 0;            // what the enemies took
