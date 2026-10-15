@@ -255,6 +255,10 @@ struct App {
     // x right and y up; ScrollAutoCtl's slide (FrmAdjCam / FrmPanCam) from -> to over `frames`
     struct FieldScroll {
         float offX = 0, offY = 0;
+        // The scroll the scripts set (GetScroll / SetScroll's): not held to the painting - only what is
+        // shown is (offX / offY) - so FrmPanCam there and back again over its edge comes back where it was
+        float curX = 0, curY = 0;
+        bool scripted = false;
         bool sliding = false;
         float fromX = 0, fromY = 0, toX = 0, toY = 0;
         int t = 0, frames = 0;
@@ -2089,6 +2093,7 @@ void scrollFieldTo(App& app, float vx, float vy, float rate) {
 // FieldCamera::setScrollPlayer, every frame while the camera follows the player
 void followPlayerScroll(App& app) {
     if (!scrollingField(app) || app.cam.free || !app.havePlayer) return;
+    app.scroll.scripted = false;
     const cr::Vec3 head = app.walker.pos + cr::Vec3{0, 7.0f + float(app.stageCam.lookHeight), 0};
     float vx, vy;
     if (fieldViewPoint(app, head, vx, vy)) scrollFieldTo(app, vx, vy, 1.0f);
@@ -2106,6 +2111,7 @@ void stepFieldScroll(App& app) {
     ++fs.t;
     const float k = fs.frames > 0 ? std::min(1.0f, float(fs.t) / float(fs.frames)) : 1.0f;
     const float x = fs.fromX + (fs.toX - fs.fromX) * k, y = fs.fromY + (fs.toY - fs.fromY) * k;
+    fs.curX = x, fs.curY = y;
     fs.offX = fs.offY = 0;
     scrollFieldTo(app, fieldViewW(app) / 2 - x, fieldViewH(app) / 2 + y, 1.0f);
     if (fs.t >= fs.frames) fs.sliding = false;
@@ -2116,12 +2122,14 @@ void scriptFieldScroll(App& app, float x, float y, int frames) {
     App::FieldScroll& fs = app.scroll;
     if (frames <= 0) {
         fs.sliding = false;
+        fs.curX = x, fs.curY = y, fs.scripted = true;
         fs.offX = fs.offY = 0;
         scrollFieldTo(app, fieldViewW(app) / 2 - x, fieldViewH(app) / 2 + y, 1.0f);
         return;
     }
-    fs.fromX = fs.offX;
-    fs.fromY = fs.offY;
+    fs.fromX = fs.scripted ? fs.curX : fs.offX;
+    fs.fromY = fs.scripted ? fs.curY : fs.offY;
+    fs.scripted = true;
     fs.toX = x;
     fs.toY = y;
     fs.t = 0;
@@ -2388,7 +2396,15 @@ struct ViewerHost : cr::EventHost {
     }
     void panCamera(const float* d, int frames) override {
         if (scrollingField(app)) { // FrmPanCam's 2D path: twice the deltas on the iPad
-            if (app.cam.free) scriptFieldScroll(app, app.scroll.offX + 2 * d[0], app.scroll.offY + 2 * d[1], std::max(frames, 1));
+            if (app.cam.free) { // (from GetScroll's value: past the painting's edge, as the script left it)
+                const App::FieldScroll& fs = app.scroll;
+                const float x = fs.scripted ? (fs.sliding ? fs.toX : fs.curX) : fs.offX;
+                const float y = fs.scripted ? (fs.sliding ? fs.toY : fs.curY) : fs.offY;
+                // (FrmPanCam moves the camera, as its 3D path does - + y up -, and this scroll is the
+                // painting's offset, the other way: the opening's 0, 600 then 0, -600 over 300 frames
+                // goes up to the sky and slowly back down to the player, as the reference video shows)
+                scriptFieldScroll(app, x - 2 * d[0], y - 2 * d[1], std::max(frames, 1));
+            }
             return;
         }
         if (paintedField(app)) return;
@@ -15078,6 +15094,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             lastWhere = where;
         }
         animateNpcs(app, 1.0f / 30.0f);
+        followPlayerScroll(app); // (drawFrame's, every frame the game shows: a capture draws only its last)
         if (f % 45 == 44 && f + 1 < app.captureFrames) {
             if (app.choiceFlag >= 0) answerChoice(app, true);
             else if (app.worldChoiceOpen) answerWorldChoice(app, 0);
@@ -15139,6 +15156,11 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                     "fade %.0f%%\n", app.captureFrames, app.area, app.mapNumber,
                     app.runner.running() ? app.runner.where().c_str() : "scripts done", app.dialogue.size(), mi.nameId,
                     mi.side, shown, screenFadeAlpha(app) * 100);
+        std::printf("field: %s, background %dx%d, %zu stage cameras (%s), scroll (%.0f, %.0f)%s\n",
+                    app.mapIndex >= 0 && app.mapIndex < int(app.maps.size()) ? app.maps[size_t(app.mapIndex)].c_str() : "?",
+                    app.background.width, app.background.height, app.stageCams.size(),
+                    scrollingField(app) ? "a scrolling painting" : paintedField(app) ? "a painting shown whole" : "3D",
+                    app.scroll.offX, app.scroll.offY, app.cam.free ? ", camera free" : "");
         if (SDL_getenv("CR_CAPTURE_TRACE")) {
             const cr::StageCamera& sc = app.stageCam;
             std::printf("camera: stage %s fov %.1f view %dx%d; script %s eye (%.1f %.1f %.1f) target (%.1f %.1f %.1f)\n",
