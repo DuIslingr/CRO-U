@@ -10779,7 +10779,8 @@ void drawBattleRow(App& app, cr::MenuPainter& m, int k, bool dimmed, float a) {
     const bool phone = app.renderer.phoneLayout(); // 2.2.0: (+16, -32), into the iPhone's corner
     const float dx = (k == 0 ? 40 : 0) + (phone ? 16 : 0), dy = (k == 0 ? -24 : 0) + (phone ? -32 : 0);
     const float c = dimmed ? 0.25f : 1.0f;
-    m.piece((k == 0 ? 52 : 0) + (phone ? 16 : 0), 328 + dy, float(f.character * 48), 440, 48, 48, a, c, c, c);
+    const int face = f.character == 0 && viegIsOlgar(app) ? 4 : f.character; // __menub_mainPut: record 0 as Olgar is face 4
+    m.piece((k == 0 ? 52 : 0) + (phone ? 16 : 0), 328 + dy, float(face * 48), 440, 48, 48, a, c, c, c);
     m.piece(2 + dx, 370 + dy, 0, 14, 22, 10, a); // "HP"
     m.piece(86 + dx, 370 + dy, 22, 14, 22, 10, a); // "MP"
     drawBattleNumber(m, b.shownHp[k], 24 + dx, 364 + dy, 5, b.shownHp[k] <= f.hpMax / 4, a);
@@ -15020,17 +15021,16 @@ int runSelfTest(App& app) {
     return glErrors ? 1 : 0;
 }
 
-// A new game (route 1): the Ark's hall (j001_t01, map 97) with only the new-game flag set; its
-// script 0 plays the opening.
+// A new game (scenario 0) without the title: prty_init, prty_init_new(0), then the opening's
+// field (j001_d05's map 69, the planet) as the title's New reaches it.
 void startNewGame(App& app) {
     app.game = cr::GameState();
-    // Set by the title's new-game path: t01's script 0 tests it to play the opening (event 201's
-    // scene, gosub 0x5f98) instead of treating the opening as seen
-    app.game.setFlag(4089, true);
-    cr::giveStartingItems(app.game, app.itemTable); // prty_init_new: the Human Genes, 3 Emergency Exits, 2 Chocolates
+    app.game.setFlag(4089, true); // (CR1's new-game flag; the boot script's own)
+    cr::giveStartingItems(app.game, app.itemTable); // prty_init
+    newPairParty(app, 1, false);                     // Uty_LoadPrty(1, 2)
     app.treasureBoxes.clear();
     app.entryArea = -1;
-    const int area = 7, map = 97;
+    const int area = 6, map = 69;
     const auto it = std::find(app.maps.begin(), app.maps.end(), std::string(cr::kMapCollisionFile[map]));
     if (it != app.maps.end()) showMap(app, int(it - app.maps.begin()), map, area);
 }
@@ -15059,6 +15059,7 @@ void bootTitle(App& app) {
         p = App::Portrait();
     }
     app.game = cr::GameState();
+    cr::giveStartingItems(app.game, app.itemTable); // gameapp_init: prty_init (a load replaces it)
     app.treasureBoxes.clear();
     app.mode = Mode::Maps;
     app.showBackground = true;
@@ -15438,6 +15439,15 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                     "fade %.0f%%\n", app.captureFrames, app.area, app.mapNumber,
                     app.runner.running() ? app.runner.where().c_str() : "scripts done", app.dialogue.size(), mi.nameId,
                     mi.side, shown, screenFadeAlpha(app) * 100);
+        {
+            const cr::GameState& g = app.game;
+            std::printf("party: scenario %d, pairs (%d %d) (%d %d), leaders %d %d, solo flags %d %d, levels", g.scenario,
+                        g.pairs[0][0], g.pairs[0][1], g.pairs[1][0], g.pairs[1][1], g.leaders[0], g.leaders[1], g.flag(0xfed),
+                        g.flag(0xfee));
+            for (const cr::PartyMember& m : g.party) std::printf(" %d", m.level);
+            std::printf(", %zu + %zu bag entries, %d / %d Oz, %d battles\n", g.items.size(), g.otherBag.size(), g.oz, g.otherOz,
+                        app.battlesFought);
+        }
         std::printf("field: %s, background %dx%d, %zu stage cameras (%s), scroll (%.0f, %.0f)%s\n",
                     app.mapIndex >= 0 && app.mapIndex < int(app.maps.size()) ? app.maps[size_t(app.mapIndex)].c_str() : "?",
                     app.background.width, app.background.height, app.stageCams.size(),
@@ -16143,6 +16153,13 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
             for (const char* f : {"--viewer", "--map", "--model", "--models", "--maps"})
                 viewer = viewer || SDL_strcmp(argv[i], f) == 0;
         if (!viewer) bootTitle(*app);
+    }
+    if (SDL_getenv("CR_TRACE_NATIVES")) { // debugging: every native Call, its id and the last args pushed
+        App* ap = app;
+        cr::setNativeTrace([ap](int id, const int32_t* a) {
+            std::printf("native %d (%d %d %d) area %d map %d, var 0 %d var 1 %d\n", id, a[0], a[1], a[2], ap->area, ap->mapNumber,
+                        ap->game.vars.count(0) ? ap->game.vars[0] : 0, ap->game.vars.count(1) ? ap->game.vars[1] : 0);
+        });
     }
 
     return SDL_APP_CONTINUE;
