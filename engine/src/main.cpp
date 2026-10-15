@@ -1265,8 +1265,9 @@ void showMap(App& app, int index, int forcedMap, int forcedArea) {
     }
     };
     tryCandidates();
-    if (app.stageCams.empty()) {
-        // e.g. p0002/p0004/p0006-8: puzzle-room variants with no record of their own
+    if (app.stageCams.empty() && name[0] == 'p') {
+        // e.g. p0002/p0004/p0006-8: puzzle-room variants with no record of their own (only those: a
+        // scripted 3D room such as Omega's d0550 has no fixed camera, and must not take another room's)
         candidates.clear();
         for (int mapNo = 0; mapNo < cr::kNumMaps; ++mapNo)
             if (name.compare(0, 2, cr::kMapCollisionFile[mapNo], 2) == 0 && name != cr::kMapCollisionFile[mapNo])
@@ -1281,7 +1282,7 @@ void showMap(App& app, int index, int forcedMap, int forcedArea) {
     if (app.haveStageCam) app.stageCam = app.stageCams[app.stageCamIndex];
     // fldread_prc: the painting and its overlay as the stage record names them (Tex2d's image list) -
     // d0530's are -b00b00 / -b00b01 - in place of the names guessed from the field's
-    if (app.haveStageCam && app.stageCam.background >= 0 && app.stageCam.background < cr::kNumTex2dImages) {
+    if (app.haveStageCam && !app.stageCamBorrowed && app.stageCam.background >= 0 && app.stageCam.background < cr::kNumTex2dImages) {
         cr::Texture keep[2] = {app.background, app.foreground};
         app.background = app.foreground = cr::Texture();
         loadLayer(cr::kTex2dImage[app.stageCam.background], app.background);
@@ -8373,10 +8374,12 @@ void buildNpcDraws(App& app) {
         const cr::FieldNpc& n = app.npcs[i];
         if (n.model < 0 || n.model >= cr::kNumNpcModels || !npcDrawn(app, i)) continue;
         // Cutscene actor slots wait parked at y 995..1000 or at the origin until a scene places
-        // them (FrmSetc2)
-        if ((n.pos[1] >= 900.0f || (n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) && !app.placedNpcs.count(n.id))
-            continue;
+        // them (FrmSetc2) - but not a stage model (Omega's scenes bring a battle stage in as an
+        // actor at the origin: d0550's deck is NPC 517, t0155bt)
         const std::string file = cr::kNpcModelFile[n.model];
+        const bool stageModel = file.size() > 6 && file.compare(file.size() - 6, 6, "bt.bin") == 0;
+        if (!stageModel && (n.pos[1] >= 900.0f || (n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) && !app.placedNpcs.count(n.id))
+            continue;
         auto it = app.npcModels.find(file);
         if (it == app.npcModels.end()) {
             LoadedModel lm;
@@ -15226,7 +15229,26 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
     }
     const bool traceRunner = SDL_getenv("CR_CAPTURE_TRACE") != nullptr; // the script's state each frame it changes
     std::string lastWhere;
+    // CR_CAPTURE_EVENTS="frame:script,...": from that frame on, once nothing runs, start the room's
+    // script (as the player touching its trigger would) - to play on past the free walks
+    std::vector<std::pair<int, int>> touches;
+    if (const char* ev = SDL_getenv("CR_CAPTURE_EVENTS"))
+        for (const char* p = ev; *p;) {
+            int fr = 0, sc = 0, used = 0;
+            if (std::sscanf(p, "%d:%d%n", &fr, &sc, &used) != 2) break;
+            touches.push_back({fr, sc});
+            p += used;
+            if (*p == ',') ++p;
+        }
     for (int f = 0; f < app.captureFrames; ++f) { // --frames: play the scripts, reading each page for 45 frames
+        if (!touches.empty() && f >= touches.front().first && !app.runner.running() && app.dialogue.empty()) {
+            const int sc = touches.front().second;
+            touches.erase(touches.begin());
+            if (app.runner.start(app.events, sc, app.game, app.area, app.mapNumber)) {
+                app.runnerWhat = "touched " + std::to_string(sc);
+                if (traceRunner) std::printf("frame %d: touched script %d on map %d\n", f, sc, app.mapNumber);
+            }
+        }
         if (app.battle.active && app.captureWinBattles) { // its talks play; then it's won
             stepBattle(app);
             if (traceRunner && f % 100 == 0)
