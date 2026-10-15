@@ -62,6 +62,9 @@ public:
     // As drawQuad, showing only the texture's pixel rectangle (sx, sy, sw, sh).
     void drawQuadUV(const Texture& tex, float x, float y, float w, float h, float sx, float sy, float sw, float sh,
                     float r = 1, float g = 1, float b = 1, float a = 1);
+    // ... w x h centred on (cx, cy), turned by `angle` radians (tex2d_add's rotation)
+    void drawQuadUVRotated(const Texture& tex, float cx, float cy, float w, float h, float sx, float sy, float sw,
+                           float sh, float angle, float a = 1);
     // Solid-colour rectangle in logical space.
     void fillRect(float x, float y, float w, float h, float r, float g, float b, float a);
 

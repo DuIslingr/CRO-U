@@ -364,6 +364,12 @@ struct App {
         int cardLoaded = -1;
         cr::GameState flags;               // the title's: every save's flags together
     } scc;
+    struct Collection { // the Camp's Collection (__menuu_Collection*)
+        bool open = false;
+        int anim = 0;
+        float clock = 0, spin = 0;
+        cr::Texture tex;               // collection_rate
+    } collection;
     bool manualOpen = false;               // Options > Instruction Manual
     int manualCursor = 0, manualTop = 0, manualAnim = 0;
     bool charSelectOpen = false;
@@ -554,6 +560,7 @@ struct App {
     int captureEvent = -1;                 // --event n: start the area's script n in the room first
     int captureArea = -1;                  // --area n: the event file for the map (routes share maps)
     std::vector<int> captureFlags;         // --set-flags a,b,...: story flags set before the map loads
+    std::vector<std::pair<int, int>> captureItems; // --give-items a-b,c,...: one of each in the bag
     bool captureWinBattles = false;        // --win-battles: a battle the scripts start is won at once
     bool testNoTutorials = false;          // self-test: battles don't stop for their tutorials (EvrStart 2)
     int captureTalk = -1;                  // --talk-portrait n: (new game) the n-th hall conversation showing a portrait
@@ -1184,6 +1191,7 @@ bool keyHints(const App& app);
 void openManual(App& app);
 void openScenarios(App& app);
 void openScenarios(App& app, int mode);
+void openCollection(App& app);
 void openShop(App& app);
 void startBattle(App& app, const cr::BattleStart& start, int flags);
 int partyLevel(const App& app);
@@ -4853,7 +4861,8 @@ void campKey(App& app, SDL_Keycode key) {
     switch (c.page) {
     case App::Camp::Main:
         if (step) { c.cursor = (c.cursor + step + campEntries(app)) % campEntries(app); menuSound(app, se::kCursor); }
-        else if (key == SDLK_Q) { menuSound(app, se::kChoose); openScenarios(app, 1); } // (keys: the Scenarios picture)
+        else if (key == SDLK_Q || key == SDLK_PAGEUP) { menuSound(app, se::kChoose); openScenarios(app, 1); } // (keys, L: the Scenarios picture)
+        else if (key == SDLK_C || key == SDLK_PAGEDOWN) { menuSound(app, se::kChoose); openCollection(app); } // (R: Collection)
         return;
     case App::Camp::Items:
     case App::Camp::Equip:
@@ -4911,6 +4920,8 @@ void campClick(App& app, float px, float py) {
             if (in(kPlateX, kPlateY + kPlateStep * float(i), 136, 40)) { c.cursor = i; campChoose(app); return; }
         const short* sp = cr::kMenuPicture[162]; // __menuu_CampMainPut's Scenarios picture (CampMainPrc case 5)
         if (inAt(lx0, 12, 236, sp[2], sp[3])) { menuSound(app, se::kChoose); openScenarios(app, 1); }
+        const short* cp = cr::kMenuPicture[161]; // ... and Collection (case 6)
+        if (inAt(lx0, 84, 236, cp[2], cp[3])) { menuSound(app, se::kChoose); openCollection(app); }
         return;
     }
     default: break;
@@ -7019,6 +7030,151 @@ void scenariosDrag(App& app, float dx, float dy) {
     if (s.card < 0 || s.zoom <= bingo::kZoomMin || s.zoomDir) return;
     s.panX = std::clamp(s.panX + dx, -bingo::kPanX, bingo::kPanX);
     s.panY = std::clamp(s.panY + dy, bingo::kPanUp, bingo::kPanDown);
+}
+
+// ---- Collection (__menuu_CollectionSet / Put / Prc, collection_rate.mct) ----
+// How much of each character's weapons and armor, and the jewels, the bag has seen
+// (_anItemFlagTb: 171 in all), the rate's rank (every 20%: the statues and Bronze .. Platinum),
+// over a turning dial. Window 5 (the rows) slides in from the left, 6 (the rank) from the right.
+// Positions are the iPhone screen's, the pictures _gkastCollectionMct's (the SD sheet's units)
+namespace collection {
+constexpr short kPict[29][4] = {
+    {240, 372, 212, 32}, {392, 204, 120, 120}, {0, 160, 232, 232}, {392, 160, 72, 44}, {232, 300, 80, 72},
+    {232, 160, 160, 140}, {0, 440, 128, 28}, {0, 0, 92, 160}, {92, 0, 92, 160}, {184, 0, 92, 160},
+    {276, 0, 92, 160}, {368, 0, 144, 160}, {0, 392, 12, 20}, {0, 412, 16, 28}, {160, 412, 20, 20},
+    {0, 496, 12, 12}, {88, 468, 92, 24}, {180, 464, 80, 28}, {260, 464, 56, 28}, {128, 440, 112, 24},
+    {120, 392, 68, 20}, {188, 392, 52, 16}, {188, 408, 44, 16}, {0, 468, 88, 28}, {316, 460, 56, 52},
+    {372, 460, 56, 52}, {428, 460, 56, 52}, {316, 408, 56, 52}, {12, 504, 124, 4}};
+constexpr short kRange[7][2] = {{201, 224}, {285, 309}, {229, 252}, {313, 336}, {257, 280}, {341, 364}, {369, 394}};
+constexpr int kTotal = 171;
+// The rows (__Collection_ParamDraw): y, kind (0 weapon, 1 armor, 2 jewel)
+constexpr short kRow[7][2] = {{56, 0}, {84, 1}, {116, 0}, {144, 1}, {176, 0}, {204, 1}, {239, 2}};
+constexpr short kRankWordAt[4][2] = {{300, 76}, {300, 72}, {300, 72}, {300, 76}}; // _anPos: Bronze .. Platinum
+
+int have(const App& app, int row) {
+    int n = 0;
+    for (int i = kRange[row][0]; i <= kRange[row][1]; ++i) n += ownedCount(app, i) > 0;
+    return n;
+}
+int percent(const App& app) {
+    int n = 0;
+    for (int r = 0; r < 7; ++r) n += have(app, r);
+    return n * 100 / kTotal;
+}
+} // namespace collection
+
+void openCollection(App& app) {
+    App::Collection& c = app.collection;
+    c.open = true;
+    c.anim = 0;
+    if (!c.tex.id) {
+        cr::Image img;
+        if (loadImage(app, "collection_rate.mct", img)) c.tex = app.renderer.upload(img);
+    }
+}
+
+void closeCollection(App& app) {
+    app.collection.open = false;
+    app.renderer.destroy(app.collection.tex);
+}
+
+void stepCollection(App& app) {
+    App::Collection& c = app.collection;
+    ++c.anim;
+    c.spin += 0.005f; // (Prc state 3: the dial a turn every 200 frames)
+    if (c.spin >= 1) c.spin -= 1;
+}
+
+void drawCollection(App& app) {
+    using namespace collection;
+    App::Collection& c = app.collection;
+    cr::Renderer& r = app.renderer;
+    cr::MenuPainter& m = app.menu;
+    r.setOrigin(0);
+    r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 1);
+    r.setOrigin(r.uiX());
+    m.begin(r, app.windowTex, &app.font);
+    const PhoneMenu pm(app, m);
+    const float t = std::min(1.0f, float(c.anim) / 8.0f), ease = 1 - (1 - t) * (1 - t);
+    const float k = c.tex.width >= 1024 ? 2.0f : 1.0f;
+    auto pict = [&](int p, float x, float y, float a, bool flipU = false, bool flipV = false) {
+        const short* q = kPict[p];
+        const float u = (q[0] + (flipU ? q[2] : 0)) * k, v = (q[1] + (flipV ? q[3] : 0)) * k;
+        m.imagePieceTo(c.tex, x, y, q[2], q[3], u, v, (flipU ? -q[2] : q[2]) * k, (flipV ? -q[3] : q[3]) * k, a);
+    };
+    auto digits = [&](int p, int value, int n, float x, float y, float step, float a) { // leading zeros left out
+        const short* q = kPict[p];
+        for (int i = 0; i < n; ++i) {
+            int pow = 1;
+            for (int j = i + 1; j < n; ++j) pow *= 10;
+            if (i + 1 < n && value < pow) continue;
+            const int d = value / pow % 10;
+            m.imagePieceTo(c.tex, x + step * float(i), y, q[2], q[3], (q[0] + q[2] * d) * k, q[1] * k, q[2] * k, q[3] * k, a);
+        }
+    };
+    for (int i = 0; i < 8; ++i) pict(1, 120.0f * float(i % 4), 48 + 120.0f * float(i / 4), t);
+    if (c.tex.id) { // the dial (tex2d_add, turned by DAT_e6410 - a turn = 1)
+        const short* q = kPict[2];
+        r.drawQuadUVRotated(c.tex, 2 * (16 + 124 + q[2] / 2.0f), 2 * (32 + 50 + q[3] / 2.0f), 2.0f * q[2], 2.0f * q[3], q[0] * k,
+                            q[1] * k, q[2] * k, q[3] * k, c.spin * 6.2831853f, t);
+    }
+    pict(3, 99, 49, t);
+    pict(3, 309, 49, t, true);
+    pict(3, 99, 239, t, false, true);
+    pict(3, 309, 239, t, true, true);
+    // The bands (window 2; ours the whole screen's edges)
+    r.setOrigin(0);
+    const float T = 2 * (48 + 32), B = 2 * (284 + 32);
+    r.fillRect(0, 0, r.screenW(), T, 0, 0, 0, 1);
+    r.fillRect(0, B, r.screenW(), cr::Renderer::kLogicalH - B, 0, 0, 0, 1);
+    r.fillRect(0, T, r.uiX() + 32, B - T, 0, 0, 0, 1);
+    r.fillRect(r.uiX() + 2 * (480 + 16), T, r.screenW(), B - T, 0, 0, 0, 1);
+    r.setOrigin(r.uiX());
+    pict(0, 8, 4, t);
+    drawClockAndOz(app, m, t);
+    { // window 5, from the left
+        const float dx = -120 * (1 - ease);
+        for (int i = 0; i < 4; ++i) pict(24 + i, 1 + dx, 51 + 60.0f * float(i), t);
+        for (int row = 0; row < 7; ++row) {
+            const float x = 58 + dx, y = kRow[row][0];
+            const int n = have(app, row), all = kRange[row][1] - kRange[row][0] + 1;
+            pict(20 + kRow[row][1], x, y, t);
+            if (n < all) {
+                digits(12, n, 2, x + 138, y + 4, 12, t);
+                digits(12, all, 2, x + 174, y + 4, 12, t);
+                pict(15, x + 162, y + 12, t);
+            } else pict(23, x + 128, y, t);
+            pict(28, x + 2, y + 20, t);
+            const float fill[4] = {0x17 / 255.0f, 0xe8 / 255.0f, 1, t};
+            if (n > 0) m.quad(x + 6, y + 21, float(n * 116 / all), 2, fill, fill);
+        }
+    }
+    { // window 6, from the right
+        const float dx = 120 * (1 - ease);
+        const int pct = percent(app), rank = pct / 20;
+        if (rank > 1) pict(4, 275 + dx, 53, t);
+        if (rank != 0) pict(5, 320 + dx, 88, t);
+        pict(4, 389 + dx, 209, t);
+        if (rank != 0) pict(rank + 6, (rank == 5 ? 332 : 362) + dx, rank == 5 ? 85 : 78, t);
+        if (rank > 1) pict(rank + 14, kRankWordAt[rank - 2][0] + dx, kRankWordAt[rank - 2][1], t);
+        pict(6, 304 + dx, 204, t);
+        if (pct == 100) pict(23, 308 + dx, 236, t);
+        digits(13, pct, 3, 396 + dx, 232, 16, t);
+        pict(14, 444 + dx, 240, t);
+    }
+    m.backBar(192, 288, false, t);
+}
+
+void collectionKey(App& app, SDL_Keycode key) {
+    if (key == SDLK_ESCAPE || key == SDLK_BACKSPACE || key == SDLK_AC_BACK || key == SDLK_RETURN || key == SDLK_KP_ENTER ||
+        key == SDLK_SPACE || key == SDLK_E) {
+        menuSound(app, se::kBack);
+        closeCollection(app);
+    }
+}
+
+void collectionClick(App& app, float mx, float my) { // BackButtonProc(1)
+    if (mx >= 192 && mx < 448 && my >= 286 && my < 320) collectionKey(app, SDLK_ESCAPE);
 }
 
 // ---- The Instruction Manual (Options; MuScrList + MsgUty: the topics, then the page) ----
@@ -11762,7 +11918,7 @@ void drawFrame(App& app, bool present = true) {
     }
     if (app.mode == Mode::Maps && app.battle.active) drawBattleHud(app, W, H);
     if (app.mode == Mode::Maps && app.titleOpen && !app.optionsOpen && !app.saveScreen.open && !app.resumePrompt &&
-        !app.charSelectOpen && !app.scc.open && !app.manualOpen)
+        !app.charSelectOpen && !app.scc.open && !app.collection.open && !app.manualOpen)
         drawTitleMenu(app);
     if (app.optionsOpen) {
         for (app.optionsClock += dt; app.optionsClock >= 1.0f / kFramesPerSecond; app.optionsClock -= 1.0f / kFramesPerSecond)
@@ -11822,7 +11978,12 @@ void drawFrame(App& app, bool present = true) {
             stepScenarios(app);
         if (app.scc.open) drawScenarios(app);
     }
-    if (app.campOpen && !app.optionsOpen && !app.scc.open) {
+    if (app.collection.open) {
+        for (app.collection.clock += dt; app.collection.clock >= 1.0f / kFramesPerSecond; app.collection.clock -= 1.0f / kFramesPerSecond)
+            stepCollection(app);
+        if (app.collection.open) drawCollection(app);
+    }
+    if (app.campOpen && !app.optionsOpen && !app.scc.open && !app.collection.open) {
         ++app.camp.anim;
         drawCamp(app);
     }
@@ -13558,10 +13719,22 @@ int runSelfTest(App& app) {
             bingoProblems += app.scc.card != -1 || !app.scc.open;
             scenariosKey(app, SDLK_ESCAPE);
             bingoProblems += app.scc.open;
+            // The Collection: R on the Camp's first page; the rate over _anItemFlagTb's 171
+            app.game.items.clear();
+            for (int i = 201; i <= 224; ++i) app.game.items[i] = 1; // Vieg's weapons: 24 of 171
+            openCamp(app);
+            campKey(app, SDLK_PAGEDOWN);
+            bingoProblems += !app.collection.open || !app.collection.tex.id || collection::percent(app) != 14 ||
+                             collection::have(app, 0) != 24 || collection::have(app, 1) != 0;
+            app.lastTicks = 0;
+            drawFrame(app, false);
+            collectionKey(app, SDLK_ESCAPE);
+            bingoProblems += app.collection.open || !app.campOpen;
+            app.campOpen = false;
             app.game = keepGame;
         }
         problems += bingoProblems;
-        std::printf("manual: %d topics; scenarios: bingo cards drawn, a cell opened from the Camp %s\n", topics,
+        std::printf("manual: %d topics; scenarios: bingo cards drawn, a cell opened from the Camp, the Collection's rate %s\n", topics,
                     bingoProblems ? "NO" : "yes");
         std::printf("saves: save -> title Start -> load %s (map %d, flags, items, vars, Oz, party, play time, position); "
                     "resume point written, offered at the title and resumed, saved as you go %s; %d problems\n", loaded ? "ok" : "FAILED",
@@ -15668,6 +15841,8 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
     else if (app.newGame) startNewGame(app);
     else {
         for (int f : app.captureFlags) app.game.setFlag(f, true);
+        for (const auto& [from, to] : app.captureItems)
+            for (int i = from; i <= to; ++i) app.game.items[i] = std::max(1, ownedCount(app, i));
         const std::vector<int> numbers = cr::mapNumbersFor(mapName);
         if (app.captureArea >= 0 && !numbers.empty()) showMap(app, idx, numbers[0], app.captureArea);
         else showMap(app, idx);
@@ -16079,6 +16254,10 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         openLastBattle(app);
         for (int f = 0; f < 40 && app.lastBattle.open; ++f) stepLastBattle(app);
     }
+    if (app.captureMenu == 10) { // --collection
+        openCollection(app);
+        for (int f = 0; f < 30; ++f) stepCollection(app);
+    }
     if (app.captureMenu == 5) { // --scenarios [--at card [mode]]
         openScenarios(app, app.captureAt[1] == app.captureAt[1] ? int(app.captureAt[1]) : 0);
         if (app.captureAt[0] == app.captureAt[0] && app.captureAt[0] >= 0) bingo::loadCard(app, std::clamp(int(app.captureAt[0]), 0, 4));
@@ -16368,6 +16547,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         else if (SDL_strcmp(argv[i], "--world-select") == 0) app->captureMenu = 8;
         else if (SDL_strcmp(argv[i], "--last-battle") == 0) app->captureMenu = 9;
         else if (SDL_strcmp(argv[i], "--scenarios") == 0) app->captureMenu = 5;
+        else if (SDL_strcmp(argv[i], "--collection") == 0) app->captureMenu = 10;
         else if (SDL_strcmp(argv[i], "--manual") == 0) app->captureMenu = 6;
         else if (SDL_strcmp(argv[i], "--title") == 0) app->captureTitle = true;
     for (int i = 1; i < argc; ++i) {
@@ -16396,6 +16576,15 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         else if (SDL_strcmp(argv[i], "--settle") == 0) app->captureSettle = std::clamp(SDL_atoi(argv[i + 1]), 0, 1000);
         else if (SDL_strcmp(argv[i], "--event") == 0) app->captureEvent = SDL_atoi(argv[i + 1]);
         else if (SDL_strcmp(argv[i], "--area") == 0) app->captureArea = SDL_atoi(argv[i + 1]);
+        else if (SDL_strcmp(argv[i], "--give-items") == 0)
+            for (const char* p = argv[i + 1]; *p;) {
+                const int a = SDL_atoi(p);
+                while (*p && *p != ',' && *p != '-') ++p;
+                int b = a;
+                if (*p == '-') { b = SDL_atoi(++p); while (*p && *p != ',') ++p; }
+                app->captureItems.push_back({a, b});
+                if (*p == ',') ++p;
+            }
         else if (SDL_strcmp(argv[i], "--set-flags") == 0)
             for (const char* p = argv[i + 1]; *p;) {
                 app->captureFlags.push_back(SDL_atoi(p));
@@ -16537,7 +16726,7 @@ namespace {
 // A screen that takes the cursor keys (else, on the field, the stick walks and the arrows would be
 // the viewer's own keys)
 bool padMenus(const App& app) {
-    return app.optionsOpen || app.manualOpen || app.scc.open || app.saveScreen.open || app.charSelectOpen || app.campOpen ||
+    return app.optionsOpen || app.manualOpen || app.scc.open || app.collection.open || app.saveScreen.open || app.charSelectOpen || app.campOpen ||
            app.lastBattle.open || (app.shop.open && app.shop.phase != App::Shop::Talk) || app.resumePrompt ||
            (app.mode == Mode::Maps && (app.titleOpen || app.battle.active || app.worldChoiceOpen || app.choiceFlag >= 0)) ||
            app.puzzle.pkState == 1;
@@ -16654,6 +16843,10 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         }
         if (app.scc.open) {
             scenariosKey(app, event->key.key);
+            break;
+        }
+        if (app.collection.open) {
+            collectionKey(app, event->key.key);
             break;
         }
         if (app.saveScreen.open) {
@@ -16824,7 +17017,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             if (app.vitaLogo.phase == 2) app.vitaLogo.skip = true;
             break;
         }
-        if (app.manualOpen || app.scc.open) {
+        if (app.manualOpen || app.scc.open || app.collection.open) {
             int ww = 0, wh = 0;
             SDL_GetWindowSize(app.window, &ww, &wh);
             const float kx = ww > 0 ? float(app.renderer.frameWidth()) / float(ww) : 1.0f;
@@ -16836,7 +17029,8 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
                 float mx, my;
                 menuPoint(app, lx, ly, mx, my);
                 App::Scenarios& sc = app.scc;
-                if (sc.card >= 0 && sc.zoom > bingo::kZoomMin && my >= 48 && my < 284) { // a zoomed picture: drag, or tap to zoom out
+                if (app.collection.open) collectionClick(app, mx, my);
+                else if (sc.card >= 0 && sc.zoom > bingo::kZoomMin && my >= 48 && my < 284) { // a zoomed picture: drag, or tap to zoom out
                     app.dragging = true;
                     sc.dragMoved = 0;
                 } else scenariosClick(app, mx, my);

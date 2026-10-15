@@ -1,3 +1,4 @@
+#include <cmath>
 #include "gfx/renderer.hpp"
 
 #include <SDL3/SDL.h>
@@ -271,6 +272,33 @@ void Renderer::drawQuadUV(const Texture& tex, float x, float y, float w, float h
     };
     const float c[4] = {r, g, b, a};
     dev_->drawQuad(tex, v, proj_, c);
+}
+
+void Renderer::drawQuadUVRotated(const Texture& tex, float cx, float cy, float w, float h, float sx, float sy, float sw,
+                                 float sh, float angle, float a) {
+    if (!tex.id || tex.width <= 0 || tex.height <= 0) return;
+    cx += originX_;
+    if (phone_) {
+        layoutToScreen(cx, cy);
+        w *= kPhoneScale, h *= kPhoneScale;
+    }
+    const float c = std::cos(angle), s = std::sin(angle);
+    auto at = [&](float dx, float dy, float* out) {
+        out[0] = cx + dx * c - dy * s;
+        out[1] = cy + dx * s + dy * c;
+    };
+    float p[4][2];
+    at(-w / 2, -h / 2, p[0]);
+    at(w / 2, -h / 2, p[1]);
+    at(w / 2, h / 2, p[2]);
+    at(-w / 2, h / 2, p[3]);
+    const float u0 = sx / tex.width, v0 = sy / tex.height, u1 = (sx + sw) / tex.width, v1 = (sy + sh) / tex.height;
+    const float v[24] = {
+        p[0][0], p[0][1], u0, v0,  p[1][0], p[1][1], u1, v0,  p[2][0], p[2][1], u1, v1,
+        p[0][0], p[0][1], u0, v0,  p[2][0], p[2][1], u1, v1,  p[3][0], p[3][1], u0, v1,
+    };
+    const float col[4] = {1, 1, 1, a};
+    dev_->drawQuad(tex, v, proj_, col);
 }
 
 void Renderer::fillRect(float x, float y, float w, float h, float r, float g, float b, float a) {
