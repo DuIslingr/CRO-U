@@ -134,3 +134,11 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
       (effect 0x3a, sound 0x5b); the Break counts it for the barrier's side and what it fells
       leaves no item or gene (+0xaf) - it was absorbed. A dodge shows its line once (57061
       physical / 57062 genes, 0404 / 0406 / 0410 / 0412 / 0413), which the barrier had borrowed
+- [x] the battle results as `__menuu_MbResultSet` / `Prc` / `Put` run them: the windows sliding in
+      (the boards from the left, the takings from the right, the message board from below), the
+      boards' EXP climbing for (most levels + 1) x 60 frames with the level-up chime and HP filling,
+      EXP Gained / OZ Earned / the purse counting up a sixtieth a frame with the tick, a tap to
+      finish it; then "Victory!" gives way, a tap at a time, to each member's level-up line (57008 /
+      57034) and each item's (57010 / 57035, grouped with how many), and the windows go. A gene
+      learned is said in the battle as it's learned (0506's 57049 / 57050) - it was the port's own
+      static screen with every line at once and an English "Level up!"
