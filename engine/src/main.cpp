@@ -12624,7 +12624,10 @@ int runSelfTest(App& app) {
     mapErrors += battleSelfTest(app, frames, glErrors);
     // The menus' sounds since the last call against the original's __effgo ids (2 choose, 3 back, 4 buzzer /
     // keyboard cursor, 5 page, 11 saved, 12 loaded, 22 paid, 40 SE gauge): 1 if they differ
-    auto expectSounds = [&app](const char* what, std::initializer_list<uint32_t> want) {
+    // (the expected sounds in CR1's numbering of the menus' sounds: Omega's are se::kMenuBase further on)
+    auto expectSounds = [&app](const char* what, std::initializer_list<uint32_t> want0) {
+        std::vector<uint32_t> want;
+        for (uint32_t id : want0) want.push_back(id + se::kMenuBase);
         const bool same = std::equal(app.menuSoundLog.begin(), app.menuSoundLog.end(), want.begin(), want.end());
         if (!same) {
             std::printf("menu sounds, %s:", what);
@@ -14197,7 +14200,10 @@ int runSelfTest(App& app) {
         auto pixel = [&](float lx, float ly, float& px, float& py) {
             px = (lx - l0x) * 1000 / (l1x - l0x), py = (ly - l0y) * 1000 / (l1y - l0y);
         };
-        auto tap = [&](float origin, float mx, float my, float& px, float& py) { pixel(origin + 2 * mx, 2 * my, px, py); };
+        auto tap = [&](float origin, float mx, float my, float& px, float& py) { // (menu units: PhoneMenu's offset)
+            if (phoneMenus(app)) mx += 16, my += 32;
+            pixel(origin + 2 * mx, 2 * my, px, py);
+        };
         float px, py;
         app.game = cr::GameState();
         cr::giveStartingItems(app.game);
@@ -14206,7 +14212,7 @@ int runSelfTest(App& app) {
         app.runner.stop();
         app.fieldMenu = App::FieldMenu();
         app.fieldMenu.fade = 320;
-        tap(wideRight(app), 456 + 20 + 16, -32 + 20 + 32, px, py); // the corner button's box (tex2d + (16, 32))
+        tap(wideRight(app), 456 + 20, -32 + 20, px, py); // the corner button's box (tex2d; tap adds the (16, 32))
         const bool corner = fieldMenuClick(app, px, py) && app.fieldMenu.open;
         app.fieldMenu = App::FieldMenu();
         openCamp(app);
