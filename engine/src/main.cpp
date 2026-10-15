@@ -15263,6 +15263,13 @@ int runExplore(App& app, int maxActions) {
         const Cand* pick = nullptr;
         for (const Cand& c : cands)
             if (!tried.count({app.mapNumber, c.id * 2 + c.examine, key})) { pick = &c; break; }
+        if (!pick && app.puzzle.stage >= 0 && !app.game.flag(3000 + app.puzzle.stage)) {
+            // a puzzle it can't solve: as if its crystal were reached (the clear flag), then on
+            std::printf("     puzzle stage %d taken as solved (flag %d)\n", app.puzzle.stage, 3000 + app.puzzle.stage);
+            app.game.setFlag(3000 + app.puzzle.stage, true);
+            tried.clear();
+            continue;
+        }
         if (!pick) { stuckReason = 1; break; }
         tried.insert({app.mapNumber, pick->id * 2 + pick->examine, key});
         const int fromMap = app.mapNumber, flagsBefore = flagCount(), pagesBefore = pagesRead;
@@ -15295,6 +15302,7 @@ int runExplore(App& app, int maxActions) {
                     extra.c_str());
         if (app.runner.running()) { app.runner.stop(); stuckReason = 2; break; }
     }
+    std::printf("explore: area %d, puzzle stage %d\n", app.area, app.puzzle.stage);
     std::printf("explore: %d actions, %d frames, %d pages, %zu maps seen, %d flags set, ends on map %d (%s)\n", step,
                 totalFrames, pagesRead, mapsSeen.size(), flagCount(), app.mapNumber,
                 stuckReason == 1 ? "nothing new to try" : stuckReason == 2 ? "a script never finished" : "action limit");
