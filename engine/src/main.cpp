@@ -1740,16 +1740,25 @@ void animate(App& app, LoadedModel& lm, float dt) {
 
 void animateModel(App& app, float dt) { animate(app, app.model, dt); }
 
-// Field models of the party (the binary names f001/f003/f005/f007, one per route).
-const char* const kPartyModels[] = {"f001.bin", "f002.bin", "f003.bin", "f004.bin",
-                                    "f005.bin", "f006.bin", "f007.bin", "f008.bin"};
+// The leader's field model (Omega's Set_Prtyno / fldread_prc): leader 0 f009a - f009b in the second
+// scenario (prty + 8) or once flag 0x468 is set (MuCom_GetViegOlgarCheck) -, 1 f010, 2 f011, 3 f009b.
+// (The port's party is still CR1's: the leader is playerChar's 0..3, the scenario chosenPair's.)
+std::string playerModelName(const App& app) {
+    const int leader = app.playerChar & 3, scenario = std::max(0, app.chosenPair - 1);
+    switch (leader) {
+    case 0: return scenario == 1 || (scenario == 0 && app.game.flag(0x468)) ? "f009b.bin" : "f009a.bin";
+    case 1: return "f010.bin";
+    case 2: return "f011.bin";
+    default: return "f009b.bin";
+    }
+}
 
 // Puts the party leader on the current field, where the stage camera's line of sight meets
 // the floor (the real start point comes from the event script, which isn't interpreted yet).
 void placePlayer(App& app) {
     app.havePlayer = false;
     if (!app.showPlayer || app.collisionData.polygons.empty()) return;
-    const std::string name = kPartyModels[app.playerChar];
+    const std::string name = playerModelName(app);
     if (app.playerName != name) {
         unloadLoaded(app, app.player);
         loadModelFile(app, name, app.player, true);
@@ -16095,7 +16104,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             break;
         case SDLK_O:
             if (app.mode == Mode::Maps) {
-                app.playerChar = (app.playerChar + 1) % int(SDL_arraysize(kPartyModels));
+                app.playerChar = (app.playerChar + 1) % 4;
                 const cr::FieldWalker keep = app.walker;
                 const bool had = app.havePlayer;
                 placePlayer(app);
