@@ -192,6 +192,7 @@ struct App {
     int titleCursor = 0;
     int titleAnim = 0;
     bool optionsFromTitle = false;         // ModeOptionMenu(1): Reset Data instead of Return to Title
+    int resetAsk = 0, resetConfirm = 1;    // Reset Data's two questions (OptionPrc 9 / 10: 1, 2), No under the cursor
     bool captureTitle = false;             // --capture ... --title
     // Video. The defaults are the original presentation: a 1024x768 window, 4:3, the paintings at
     // the screen's height, native resolution, no MSAA, vsync
@@ -211,7 +212,7 @@ struct App {
         int smoothModels = 0;              // 0 off, 2 / 3: PN-triangle level for characters and monsters
         int layout = 0;                    // 0 the data's own (2.2.0's iPhone layout for its data), 1 iPad, 2 iPhone
     } video;
-    bool phoneData = false;                // the data is a voiced iPhone release's (voiceevnt.bin: 2.2.0)
+    bool phoneData = false;                // the data is a voiced iPhone release's (voiceevnt.bin, no _ipad art)
     std::string hdDir;                     // HD textures: <save dir>/hd-textures/, or CR_HD_TEXTURES
     int hdLoaded = 0, hdMissing = 0;       // replacements found / not found since startup
     int language = 1;                      // text language (cr::kLanguageName): English by default
@@ -691,6 +692,7 @@ struct App {
     } puzzleBanner;
     std::map<std::string, struct LoadedModel> npcModels; // NPC model cache by file
     std::map<int, std::vector<cr::TreasureBox>> treasureBoxes; // per area: selected boxes and items
+    bool treasureReroll = false;           // gac +0x364 bit 0x40000000: set by the World Select's choice
     bool showPlayer = true;                // P: the party leader walking on the field
     int playerChar = 0;                    // the leader's record (game.leaders[scenario]): its field model
     bool treasureBoxesHidden = false;      // Uty_TBox(0)
@@ -1467,14 +1469,25 @@ void enterMap(App& app) {
         else if (ev.compare(5, 3, "d91") == 0) track = 4;
         if (track >= 0) playBgm(app, uint32_t(track));
     }
-    // Treasure boxes: chosen once per area (randomSelect), flags set per map (setup)
-    if (!app.treasureBoxes.count(app.area)) {
-        // randomSelect: the scenario's tables, at its level byte (the World Select's band, 0..9)
-        const int route = std::clamp(app.game.scenario, 0, cr::kScenarios - 1);
-        const int level = std::clamp(app.game.bands[size_t(route)], 0, 9);
-        app.treasureBoxes[app.area] = cr::selectTreasureBoxes(app.events, uint32_t(app.area) + 1, level, route);
+    // Treasure boxes (TreasureBoxManager): the first four worlds' (areas 2..5) are drawn again each
+    // time the World Select leads into one (fldread_evt_init2 -> _InitDungeon -> randomSelect), the
+    // draw kept with the scenario (the save) and its boxes taken there; flags set per map (setup).
+    // Elsewhere only fixed boxes (their own items and flags)
+    const bool worldBoxes = app.area >= 2 && app.area <= 5;
+    const int scen = std::clamp(app.game.scenario, 0, cr::kScenarios - 1);
+    auto& pick = app.game.treasure[size_t(scen)];
+    if (worldBoxes && (app.treasureReroll || pick.empty())) {
+        pick.clear();
+        for (const cr::TreasureBox& b : cr::selectTreasureBoxesOmega(app.events, [&app](int n) { return n > 0 ? app.rng.below(n) : 0; },
+                                                                    app.game.bands[size_t(scen)], scen))
+            pick.push_back({b.id, b.item});
     }
-    cr::applyTreasureFlags(app.events, app.npcs, app.treasureBoxes[app.area], app.game);
+    app.treasureReroll = false; // (cleared by any area's events loading)
+    std::vector<cr::TreasureBox>& boxes = app.treasureBoxes[app.area];
+    boxes.clear();
+    if (worldBoxes)
+        for (const auto& e : pick) boxes.push_back({e[0], e[1]});
+    cr::applyTreasureFlags(app.events, app.npcs, boxes, app.game, true);
     puzzle::enter(app); // PuzzleScene::init in a puzzle room (stage -1 elsewhere)
     app.puzzleStartPending = app.puzzle.stage >= 0;
     buildNpcDraws(app);
@@ -1566,7 +1579,7 @@ const cr::FieldNpc* interactTarget(const App& app) {
     float bestD = 1e30f;
     for (const cr::FieldNpc& n : app.npcs) {
         if (!(n.kind & 8) || !npcActive(app, n)) continue;
-        if (n.pos[1] >= 900.0f || (n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) continue;
+        if (n.pos[1] >= 900.0f || (n.id >= 400 && n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) continue; // (story actors waiting)
         const float k = n.model <= 1 ? 1.0f : 0.0f;
         const float cx = n.pos[0] + k * n.offset[0] + n.offset[0], cz = n.pos[2] + k * n.offset[2] + n.offset[2];
         const float hx = n.box[0] / 2 + app.walker.radius + 1.5f, hz = n.box[2] / 2 + app.walker.radius + 1.5f;
@@ -3311,9 +3324,9 @@ std::vector<OptRow> optionRows(App& app, int page) {
         manual.act = [&app](int) { openManual(app); };
         rows.push_back(manual);
         OptRow title;
-        if (app.optionsFromTitle) { // ModeOptionMenu(1): erasing the save data (there is none yet)
+        if (app.optionsFromTitle) { // ModeOptionMenu(1): erasing the save data, asked twice
             title.label = sysLabel(app, 58122, "Reset Data");
-            title.enabled = false;
+            title.act = [&app](int) { app.resetAsk = 1, app.resetConfirm = 1; };
         } else {
             title.label = sysLabel(app, 58123, "Return to Title");
             title.enabled = app.mode == Mode::Maps && !app.booting;
@@ -3425,7 +3438,7 @@ float optRowY(int i) { return kOptRowTop + kOptRowPitch * float(i); }
 float optCtrlX(float x) { return kOptCtrlX + (x - kOptCtrlX) * kOptCtrlScale; }
 
 void openOptions(App& app, int page) {
-    if (!app.optionsOpen) app.optionsFromTitle = app.titleOpen;
+    if (!app.optionsOpen) app.optionsFromTitle = app.titleOpen, app.resetAsk = 0;
     app.optionsOpen = true;
     app.optionsPage = (page + kOptionPages) % kOptionPages;
     app.optionsRow = 0;
@@ -3489,7 +3502,7 @@ void drawOptions(App& app, float, float) {
     // The windows slide in: rows from the left, controls from the right (WinDispOn -240 / +240)
     const float t = std::min(1.0f, app.optionsAnim / 8.0f), ease = 1 - (1 - t) * (1 - t);
     const float rowsX = -240 * (1 - ease), ctrlX = 240 * (1 - ease), a = t;
-    m.picture(102, 8, 4); // "Options"
+    m.picture(103, 8, 4); // "Options" (_stMuPictInfo_Option: Omega's 103, CR1's 102)
     m.text(kOptionPageName[app.optionsPage], 236, 14, false, a, 16);
     const std::vector<OptRow> rows = optionRows(app, app.optionsPage);
     for (size_t i = 0; i < rows.size(); ++i) {
@@ -3527,6 +3540,18 @@ void drawOptions(App& app, float, float) {
         m.text(rows[size_t(app.optionsRow)].hint, 20, std::min(optRowY(int(rows.size())) + 2, kOptBackY - 16), false, a * 0.9f, 9);
     if (app.showHud) // (our key hints: off in a Release build, F3)
         m.text("Up/Down  Left/Right  Enter  Q/E or PgUp/PgDn: page  Esc: back", 20, 372, false, a * 0.8f, 9);
+    if (app.resetAsk) { // OptionPrc 9 / 10: the message board (57078, then 57079), Yes / No at (336, 104 / 160)
+        std::vector<std::vector<std::string>> pages;
+        app.systemText.message(app.resetAsk == 1 ? 57078 : 57079, app.language, nullptr, pages, nullptr);
+        r.setOrigin(0); // (the rows' window goes while it asks: WinDispOff(5))
+        r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 0.75f);
+        r.setOrigin(r.uiX());
+        m.picture(12, 0, 220, 1);
+        if (!pages.empty())
+            for (size_t l = 0; l < pages[0].size(); ++l) m.text(pages[0][l], 24, 234 + 16.0f * float(l), false, 1, 14);
+        m.plate(336, 104, 0, 0, app.resetConfirm == 0, 1, false);
+        m.plate(336, 160, 1, 1, app.resetConfirm == 1, 1, false);
+    }
     r.setOrigin(r.uiX());
 }
 
@@ -3539,8 +3564,37 @@ void stepOptions(App& app) {
     if (app.optionsBob >= 5 || app.optionsBob <= 0) app.optionsBobDir = -app.optionsBobDir;
 }
 
+// OptionPrc 10, Yes to both questions: prty_init_all, removeSaveData, removeContData - every pair's
+// save and the resume point go; Yes to the first asks the second (sound 2), No leaves it (2)
+std::string slotPath(const App& app, int pair);
+std::string savePath(const App& app, const char* file);
+void resetAnswer(App& app, bool yes) {
+    if (yes && app.resetAsk == 1) {
+        app.resetAsk = 2, app.resetConfirm = 1;
+        menuSound(app, se::kChoose);
+        return;
+    }
+    app.resetAsk = 0;
+    if (!yes) { menuSound(app, se::kChoose); return; }
+    menuSound(app, 13); // (0x9e on Omega's numbering)
+    for (int pair = 1; pair <= 4; ++pair) SDL_RemovePath(slotPath(app, pair).c_str());
+    SDL_RemovePath(savePath(app, "resume.dat").c_str());
+    app.game = cr::GameState();
+}
+
 // Keys: Up/Down rows (then Back), Left/Right change, Enter activates, Q/E PgUp/PgDn pages
 void optionsKey(App& app, SDL_Keycode key) {
+    if (app.resetAsk) { // Reset Data's question: Yes / No
+        switch (key) {
+        case SDLK_UP: case SDLK_DOWN: case SDLK_LEFT: case SDLK_RIGHT: case SDLK_W: case SDLK_S: case SDLK_A: case SDLK_D:
+            app.resetConfirm ^= 1, menuSound(app, se::kCursor);
+            break;
+        case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: case SDLK_E: resetAnswer(app, app.resetConfirm == 0); break;
+        case SDLK_ESCAPE: case SDLK_BACKSPACE: resetAnswer(app, false); break;
+        default: break;
+        }
+        return;
+    }
     std::vector<OptRow> rows = optionRows(app, app.optionsPage);
     const int n = int(rows.size());
     int& row = app.optionsRow;
@@ -3581,6 +3635,11 @@ void optionsClick(App& app, float px, float py) {
     app.renderer.toLogical(px, py, lx, ly);
     float mx, my;
     menuPointFit(app, lx, ly, mx, my);
+    if (app.resetAsk) { // the Yes / No plates (0x88 x 0x28)
+        if (mx >= 336 && mx < 472 && my >= 104 && my < 144) resetAnswer(app, true);
+        else if (mx >= 336 && mx < 472 && my >= 160 && my < 200) resetAnswer(app, false);
+        return;
+    }
     if (my >= kOptBackY && my < kOptBackY + 24 && mx >= 192 && mx < 424) { app.optionsOpen = false; menuSound(app, se::kBack); return; }
     if (my >= kOptPageY - 4 && my < kOptPageY + 18 && mx >= 16 && mx < 66) { // "n / m": the next page
         openOptions(app, app.optionsPage + 1);
@@ -5659,6 +5718,7 @@ void closeWorldSelect(App& app) { // __menuu_WldChoiceClr
     if (ws.skip) app.game.setFlag(1, true);
     if (app.game.vars[0] == 5) app.game.setFlag(1, false);
     app.game.bands[size_t(ws.pair)] = app.game.vars[1]; // (+0x84340 + scenario)
+    app.treasureReroll = true; // MuCom_BitSet(0x40000000): the next area loaded draws its boxes again
 }
 
 void worldSelectChoose(App& app, int pos) { // state 1: a gate, or Back (-1)
@@ -8798,6 +8858,10 @@ void drawFx(App& app, const cr::Mat4& mvp) {
 } // namespace puzzle
 
 void stepEvents(App& app) {
+    // The later releases' extras (3.1.0's and the Vita's _gameapp_prc set these every frame; 1.0.0
+    // left them for its updates): the present packs - the second scenario's five extra trials and
+    // their presents - open
+    for (int f = 101; f <= 106; ++f) app.game.setFlag(f, true);
     if (app.skipScene) { // fast-forward: every page turns at once (choices still wait for an answer)
         if (!app.runner.running()) app.skipScene = false;
         else if (!app.dialogue.empty()) advanceDialogue(app);
@@ -9113,7 +9177,8 @@ void buildNpcDraws(App& app) {
         // actor at the origin: d0550's deck is NPC 517, t0155bt)
         const std::string file = cr::kNpcModelFile[n.model];
         const bool stageModel = file.size() > 6 && file.compare(file.size() - 6, 6, "bt.bin") == 0;
-        if (!stageModel && (n.pos[1] >= 900.0f || (n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) && !app.placedNpcs.count(n.id))
+        if (!stageModel && (n.pos[1] >= 900.0f || (n.id >= 400 && n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) &&
+            !app.placedNpcs.count(n.id)) // (a table NPC below 400 may stand at a room's origin: c101_d07's 142)
             continue;
         auto it = app.npcModels.find(file);
         if (it == app.npcModels.end()) {
@@ -9143,7 +9208,7 @@ void buildWalkCollision(App& app) {
     for (size_t idx = 0; idx < app.npcs.size(); ++idx) {
         const cr::FieldNpc& n = app.npcs[idx];
         if (!(n.kind & 2) || (n.kind & 4) || !npcVisible(app, idx)) continue;
-        if (n.pos[1] >= 900.0f || (n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) continue;
+        if (n.pos[1] >= 900.0f || (n.id >= 400 && n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) continue; // (story actors waiting)
         if (n.box[0] <= 0 || n.box[2] <= 0) continue;
         const float k = n.model <= 1 ? 1.0f : 0.0f; // npc_setup adds the offset for models 0/1
         const float bx = n.pos[0] + k * n.offset[0], bz = n.pos[2] + k * n.offset[2];
@@ -13775,6 +13840,32 @@ int runSelfTest(App& app) {
         std::printf("gold box 408: item %d - without a key %d, with one %d (keys left %d) %s\n", row.item, gotWithout, gotWith,
                     keysLeft, ok ? "ok" : "WRONG");
         mapErrors += !ok;
+        { // the worlds' boxes (TreasureBoxManager::randomSelect): fifteen from the pools, band 2 on
+            // puts slots 9..14's items into gold boxes, and each World Select entry draws again
+            cr::EventFile d01;
+            int tbad = 0, gold = 0, poolItems = 0;
+            std::set<std::vector<int>> draws;
+            if (d01.load(app.dataDir, 2)) {
+                cr::GameRandom rng(7);
+                for (int k = 0; k < 6; ++k) {
+                    const auto boxes = cr::selectTreasureBoxesOmega(d01, [&rng](int n) { return n > 0 ? rng.below(n) : 0; }, k < 3 ? 0 : 4, 0);
+                    std::vector<int> ids;
+                    for (const cr::TreasureBox& b : boxes) {
+                        ids.push_back(b.id);
+                        gold += b.id >= 800;
+                        tbad += k < 3 && b.id >= 800; // (band 0: none)
+                        cr::NpcRow r;
+                        tbad += !d01.npcRow(b.id, r) || !(r.box & 3);
+                        poolItems += b.item > 0;
+                    }
+                    tbad += boxes.size() != 15;
+                    draws.insert(ids);
+                }
+            } else ++tbad;
+            tbad += gold == 0 || draws.size() < 2 || poolItems != 90;
+            std::printf("world boxes: 6 draws of 15, %d into gold boxes at band 4, %zu different; %d problems\n", gold, draws.size(), tbad);
+            mapErrors += tbad;
+        }
         // exit: walk into trigger 2's box and let the script play
         for (const cr::FieldNpc& n : app.npcs)
             if (n.id == 2 && n.touchTrigger()) {
@@ -14119,6 +14210,32 @@ int runSelfTest(App& app) {
         openOptions(app, 0);
         const std::vector<OptRow> titlePage = optionRows(app, 0);
         problems += titlePage.size() != 8 || titlePage.back().label != sysLabel(app, 58122, "Reset Data");
+        { // Reset Data: asked twice; No keeps the saves, Yes to both removes them (in a test folder)
+            const std::string keepDir = app.saveDirOverride;
+            app.saveDirOverride = userDir() + "selftest-reset/";
+            SDL_CreateDirectory(app.saveDirOverride.c_str());
+            const cr::SaveData sd = captureSave(app);
+            for (int pair = 1; pair <= 2; ++pair) cr::writeSave(slotPath(app, pair), sd);
+            cr::writeSave(savePath(app, "resume.dat"), sd);
+            auto saves = [&] {
+                int n = 0;
+                for (int pair = 1; pair <= 4; ++pair) n += SDL_GetPathInfo(slotPath(app, pair).c_str(), nullptr);
+                return n + int(SDL_GetPathInfo(savePath(app, "resume.dat").c_str(), nullptr));
+            };
+            app.optionsRow = int(titlePage.size()) - 1;
+            optionsKey(app, SDLK_RETURN);                 // "Erase all the data from your game?"
+            int bad = app.resetAsk != 1 || app.resetConfirm != 1;
+            optionsKey(app, SDLK_RETURN);                 // No (under the cursor)
+            bad += app.resetAsk != 0 || saves() != 3;
+            optionsKey(app, SDLK_RETURN);
+            optionsKey(app, SDLK_LEFT), optionsKey(app, SDLK_RETURN); // Yes: "Are you sure ...?"
+            bad += app.resetAsk != 2 || saves() != 3;
+            optionsKey(app, SDLK_LEFT), optionsKey(app, SDLK_RETURN); // Yes
+            bad += app.resetAsk != 0 || saves() != 0;
+            std::printf("reset data: asked twice, No kept 3 saves, Yes removed them: %s\n", bad ? "WRONG" : "ok");
+            problems += bad;
+            app.saveDirOverride = keepDir;
+        }
         optionsKey(app, SDLK_ESCAPE);
         problems += !app.titleOpen; // back on the title menu
         app.menuSoundLog.clear();
@@ -16076,6 +16193,14 @@ int runExplore(App& app, int maxActions, int scenario) {
     app.typeOn = false;
     setMode(app, Mode::Maps);
     startNewGame(app, scenario);
+    auto flagsKey = [&] {
+        uint64_t h = 1469598103934665603ull;
+        for (uint32_t w : app.game.flags) h = (h ^ w) * 1099511628211ull;
+        return h;
+    };
+    std::map<uint64_t, std::set<int>> worldsTaken; // story state -> World Select positions chosen in it
+    int worldCount = 0;
+    uint64_t worldKey = 0;                         // the state the last World Select opened in
     int totalFrames = 0, pagesRead = 0;
     bool worldAsked = false;                  // the last action opened the World Select
     std::set<std::pair<int, int>> deadExits;           // ways that didn't lead where the dry run said
@@ -16091,7 +16216,7 @@ int runExplore(App& app, int maxActions, int scenario) {
             if (app.battle.active) { // its talks play, then it's won at its first command
                 stepBattle(app);
                 if (!battletalk::on(app) && app.battle.phase == App::Battle::Command) {
-                    for (int k = 2; k < 5; ++k) app.battle.rules.f[size_t(k)].hp = 0;
+                    app.battle.rules.defeatEnemies(); // (with its EXP, Oz and drops)
                     std::printf("     battle %d won\n", app.battle.start.group);
                     endBattle(app, true);
                 }
@@ -16101,11 +16226,32 @@ int runExplore(App& app, int maxActions, int scenario) {
             stepEvents(app);
             if (!app.dialogue.empty()) { pagesRead += int(app.dialogue.size()); app.dialogue.clear(); }
             if (app.choiceFlag >= 0) answerChoice(app, true);
-            if (app.worldChoiceOpen) { // the newest world, its first half skipped once done
-                answerWorldChoice(app, int(app.worldSelect.worlds.size()) - 1, true);
+            if (app.worldChoiceOpen) { // the newest world not yet taken in this state (then the newest), its
+                // first half skipped once done
+                const int n = int(app.worldSelect.worlds.size());
+                worldKey = flagsKey();
+                std::set<int>& done = worldsTaken[worldKey];
+                int pos = n - 1;
+                while (pos >= 0 && done.count(pos)) --pos;
+                if (pos < 0) pos = n - 1;
+                done.insert(pos);
+                worldCount = n;
+                answerWorldChoice(app, pos, true);
                 worldAsked = true;
             }
-            if (app.shop.open && !app.shop.talkRunning) closeShop(app); // (it buys nothing)
+            if (app.shop.open && !app.shop.talkRunning) { // keys for the gold boxes (up to 9, as Oz allows), then out
+                const std::vector<int> stock = cr::shopStock(app.game, app.itemTable, shopCharacter(app), 0, app.shop.level);
+                const cr::ItemParam* key = app.itemTable.item(2);
+                if (key && std::find(stock.begin(), stock.end(), 2) != stock.end()) {
+                    const int n = std::min(9 - ownedCount(app, 2), cr::maxPurchase(cr::buyPrice(*key), app.game.oz, ownedCount(app, 2)));
+                    if (n > 0) {
+                        app.game.items[2] += n;
+                        cr::addOz(app.game, -n * cr::buyPrice(*key));
+                        std::printf("     bought %d key%s\n", n, n > 1 ? "s" : "");
+                    }
+                }
+                closeShop(app);
+            }
             if (app.staffRoll.open) { // the ending's credits, fast, the end card tapped away
                 if (!app.staffRoll.fast) std::printf("     staff roll (flags 31 %d, 32 %d)\n", int(app.game.flag(31)), int(app.game.flag(32)));
                 app.staffRoll.fast = true;
@@ -16153,7 +16299,9 @@ int runExplore(App& app, int maxActions, int scenario) {
         for (size_t i = 0; i < app.npcs.size(); ++i) {
             const cr::FieldNpc& n = app.npcs[i];
             if (!npcActive(app, n)) continue;
-            const bool parked = (n.pos[1] >= 900.0f || (n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) &&
+            // (NpcMdlRead's story actors, 400 on, wait at the origin or out of sight; a table NPC may
+            // stand at a room's origin)
+            const bool parked = (n.pos[1] >= 900.0f || (n.id >= 400 && n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) &&
                                 !app.placedNpcs.count(n.id);
             if ((n.kind & 8) && !parked) {
                 lastTarget = -1;
@@ -16245,7 +16393,17 @@ int runExplore(App& app, int maxActions, int scenario) {
                     if (c.id * 2 + c.examine == firstHop[goal]) { pick = &c; break; }
             if (pick) std::printf("     towards map %d\n", goal), hopping = true;
         }
-        if (!pick && app.game.flag(0x642) && !presentsGiven) {
+        auto presentsMissing = [&] {
+            for (int item = 551; item <= 630; ++item)
+                if (ownedCount(app, item) == 0) return true;
+            return false;
+        };
+        if (!pick && app.game.flag(0x642) && !presentsGiven && presentsMissing() && SDL_getenv("CR_EXPLORE_NO_GIFTS")) {
+            std::printf("     out of ideas with presents still missing (CR_EXPLORE_NO_GIFTS: stopping)\n");
+            stuckReason = 1;
+            break;
+        }
+        if (!pick && app.game.flag(0x642) && !presentsGiven && presentsMissing()) {
             // out of ideas with the cards up: the presents (551..630) a full collection would hold,
             // taken as found (the worlds' hunt for them isn't played), once - their cards then fill
             presentsGiven = true;
@@ -16275,10 +16433,12 @@ int runExplore(App& app, int maxActions, int scenario) {
             started = false;
             const float dx = n->box[0] / 2 + app.walker.radius, dz = n->box[2] / 2 + app.walker.radius;
             const float side[4][3] = {{dx, 0, 3.14159265f * 1.5f}, {-dx, 0, 3.14159265f * 0.5f}, {0, dz, 3.14159265f}, {0, -dz, 0}};
-            for (int k = 0; k < 4 && !started; ++k) {
-                app.walker.pos = {n->pos[0] + side[k][0], n->pos[1], n->pos[2] + side[k][1]};
-                if (k) app.walker.heading = side[k][2];
-                started = interact(app);
+            // (only where it's the one in reach: two side by side would answer for each other)
+            for (int k = 0; k < 5 && !started; ++k) {
+                app.walker.pos = k < 4 ? cr::Vec3{n->pos[0] + side[k][0], n->pos[1], n->pos[2] + side[k][1]}
+                                       : cr::Vec3{n->pos[0], n->pos[1], n->pos[2]};
+                if (k && k < 4) app.walker.heading = side[k][2];
+                if (interactTarget(app) == n) started = interact(app);
             }
         } else {
             app.walker.pos = {n->boxCenterX(), n->pos[1], n->boxCenterZ()};
@@ -16288,19 +16448,37 @@ int runExplore(App& app, int maxActions, int scenario) {
         }
         const int frames = settle(20000);
         cr::setEventTrace(nullptr);
-        if (!started) continue;
+        if (!started) {
+            if (pick->examine) std::printf("     %d on map %d: out of reach\n", pick->id, app.mapNumber);
+            continue;
+        }
         if (app.mapNumber != fromMap) ++visits[app.mapNumber];
         mapsSeen.insert(app.mapNumber);
         std::string extra;
         for (size_t u = unsupportedBefore; u < app.unsupported.size(); ++u) extra += ", " + app.unsupported[u];
         if (app.runner.running()) extra += ", STILL RUNNING (" + app.runner.where() + ")";
-        if (worldAsked) worldDoors.insert({pickMap, pickId});
+        if (worldAsked) { // a terminal: tried last, and again while it has worlds not taken in this state
+            worldDoors.insert({pickMap, pickId});
+            if (int(worldsTaken[worldKey].size()) < worldCount) tried.erase({pickMap, hopKey, key});
+        }
         if (hopping && app.mapNumber == pickMap) roomExits[pickMap].erase(hopKey), deadExits.insert({pickMap, hopKey}); // (it didn't lead there: forgotten)
         hopping = false;
         std::printf("%4d map %3d %s %4d: %+d flags, %d pages, %d frames%s%s\n", step, fromMap,
                     pick->examine ? "talk " : "touch", pick->id, flagCount() - flagsBefore, pagesRead - pagesBefore,
                     frames, app.mapNumber != fromMap ? (" -> map " + std::to_string(app.mapNumber)).c_str() : "",
                     extra.c_str());
+        { // keys (2) and presents (551..630) found, taken (a card's cell, a trade)
+            std::string got;
+            for (int item : {2}) {
+                const int d = ownedCount(app, item) - (flagsWere.items.count(item) ? flagsWere.items.at(item) : 0);
+                if (d) got += (d > 0 ? " +" : " ") + std::to_string(d) + " key";
+            }
+            for (int item = 551; item <= 630; ++item) {
+                const int was = flagsWere.items.count(item) ? flagsWere.items.at(item) : 0, now = ownedCount(app, item);
+                if (now != was) got += (now > was ? " +" : " -") + std::to_string(item);
+            }
+            if (!got.empty()) std::printf("     items:%s\n", got.c_str());
+        }
         if (flagCount() != flagsBefore && SDL_getenv("CR_EXPLORE_FLAGS")) { // (debugging: which)
             std::printf("     flags:");
             for (int fl = 0; fl < cr::GameState::kFlagCount; ++fl)
@@ -16313,6 +16491,15 @@ int runExplore(App& app, int maxActions, int scenario) {
     std::printf("explore: %d actions, %d frames, %d pages, %zu maps seen, %d flags set, ends on map %d (%s)\n", step,
                 totalFrames, pagesRead, mapsSeen.size(), flagCount(), app.mapNumber,
                 stuckReason == 1 ? "nothing new to try" : stuckReason == 2 ? "a script never finished" : "action limit");
+    { // the collection (551..630): which presents it found
+        std::string missing;
+        int held = 0;
+        for (int item = 551; item <= 630; ++item)
+            if (ownedCount(app, item) > 0) ++held;
+            else missing += " " + std::to_string(item);
+        std::printf("explore: presents %d / 80%s%s%s\n", held, presentsGiven ? " (some taken as found)" : "",
+                    missing.empty() ? "" : ", missing:", missing.c_str());
+    }
     std::printf("explore: flags set:");
     for (int fl = 0; fl < cr::GameState::kFlagCount; ++fl)
         if (app.game.flag(fl)) std::printf(" %d", fl);
@@ -16945,6 +17132,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         const int page = app.optionsPage;
         openOptions(app, page);
         app.optionsAnim = 100;
+        if (const char* ra = SDL_getenv("CR_CAPTURE_RESET")) app.resetAsk = SDL_atoi(ra); // (Reset Data's question 1 / 2)
     }
     if (app.havePlayer && app.captureAt[0] == app.captureAt[0]) { // --at x z: put the player there
         float y;
@@ -17086,7 +17274,10 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         SDL_PathInfo info;
         return SDL_GetPathInfo(p.c_str(), &info) && info.type == SDL_PATHTYPE_DIRECTORY;
     };
-    app->phoneData = SDL_GetPathInfo((app->dataDir + "voiceevnt.bin").c_str(), nullptr); // 2.2.0's data
+    // A voiced iPhone release's data (its voice banks, no _ipad art); 3.1.0's iPad data has the
+    // voices with its _ipad sheets
+    app->phoneData = SDL_GetPathInfo((app->dataDir + "voiceevnt.bin").c_str(), nullptr) &&
+                     !SDL_GetPathInfo((app->dataDir + "window_ipad.mct").c_str(), nullptr);
     // --vita <PCSG00499 folder | cro.psarc> (or CR_VITA, else settings.ini's vita=; --vita none:
     // without): the Vita release's assets. With no iOS data, the Vita copy alone - also given as
     // --data - is the game (vitaOnly)

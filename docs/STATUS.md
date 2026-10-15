@@ -79,3 +79,20 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
       portraits at full size, the battle over the whole screen)
 - [x] the self-test runs clean on Omega's data (its checks moved onto Omega's rooms, groups,
       scripts and tables)
+- [x] the worlds' treasure boxes as Omega's TreasureBoxManager keeps them: drawn again each time
+      the World Select leads into one of the first four (`__menuu_WldChoiceClr` sets gac +0x364
+      bit 0x40000000, `fldread_evt_init2` -> `_InitDungeon` -> `randomSelect`), the draw kept with
+      the scenario in the save, a box taken there (`setOpened`: its item -1); with the band at 2 or
+      more the items from pool slots 9..14 go into the boxes' gold counterparts (`AddInfoList`:
+      box 100..139 + 700, 140..179 - 80)
+- [x] the present packs (flags 101..106) open, as 3.1.0's and the Vita's `_gameapp_prc` set them
+      every frame: the second scenario's five trials and their presents after its ending
+- [x] Reset Data (the title's Options): asked twice (57078, 57079), Yes to both removes the saves
+      (`OptionPrc` 9 / 10: `prty_init_all`, `removeSaveData`, `removeContData`)
+- [x] 3.1.0's iPad data runs as the iPad's (its `_ipad` art, the iPad layout) with its voices
+- [x] a table NPC below 400 can stand at a room's origin (c101_d07's 142, map 115): only
+      NpcMdlRead's story actors (400 on) wait there hidden
+- [x] Options' header is Omega's picture 103 (`_stMuPictInfo_Option`)
+- [x] `--explore n 1` finds all 80 presents itself (battles won with their EXP, Oz and drops, keys
+      bought for the gold boxes, the World Select's worlds taken in turn); `CR_EXPLORE_NO_GIFTS`
+      stops instead of taking missing presents as found

@@ -37,6 +37,9 @@ struct GameState {
     std::unordered_map<int, int> otherBag;
     int otherOz = 0;
     std::array<int, kScenarios> bands{};       // +0x1544 + s: the World Select's level band (0..19)
+    // TreasureBoxManager's pick for the world in play, per scenario (_prty + 0x14cc + 0x3c s: fifteen
+    // {box id, item}; item -1 once opened), drawn again each time the World Select leads into one
+    std::array<std::vector<std::array<int, 2>>, kScenarios> treasure;
     // Per pair (route 0..3, the save's +0xc18): encounters switched off (skill 170's field button,
     // +0xc1b + route) and the EXP banked by walking (skill 174, +0xac0 + 4 route, paid at a win)
     std::array<bool, 4> noEncounters{};

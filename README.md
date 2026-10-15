@@ -25,6 +25,9 @@ build/chaosrings --data "<path to>/ChaosRingsOmegaHDeng.app/data" --vita "<path 
 build/chaosrings --data "<path to>/PCSG00499"
 ```
 
+Either iPad release works as the game: 1.0.0, or the voiced 3.1.0 (Japanese voices, eight
+languages) with the same layout and art.
+
 The build is CR1:U's (C++17, SDL3, Vulkan or OpenGL; `docs/ENGINE.md`, "Building"). Without
 `--data` it looks for `CR_DATA`, then `dataHD/` beside the executable, then `dataHD/`, `data/`,
 `ChaosRingsOmegaHDeng.app/data/` or `Payload/ChaosRingsOmegaHDeng.app/data/` under the current
@@ -85,8 +88,12 @@ Both scenarios play from the opening to their endings. Checked against Omega's o
   the World Select with its bands, the Scenarios bingo cards and the Collection, save / load
 - **The Vita**: as an add-on or as the game - its scripts and eight languages, voices, music, all
   of its textures, its boot logos and its 960 × 544 screen layout
-- **Testing**: `--selftest` runs clean on Omega's data (iPad, iPad + Vita, Vita alone);
-  `--explore n [scenario]` plays either scenario by itself to its ending and staff roll
+- **The collection**: all 80 presents can be found - the gold boxes (keys from the shop), the
+  maze's trials and its post-game extras (open as 3.1.0 and the Vita have them); the first four
+  worlds' boxes drawn again on every World Select entry, as Omega's TreasureBoxManager does
+- **Testing**: `--selftest` runs clean on Omega's data (iPad 1.0.0 and 3.1.0, iPad + Vita, Vita
+  alone); `--explore n [scenario]` plays either scenario by itself to its ending and staff roll -
+  the second finding all 80 presents on the way
 
 What isn't listed is CR1:U's behaviour still, to be checked against Omega's code.
 

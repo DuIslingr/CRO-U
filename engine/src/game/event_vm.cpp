@@ -360,7 +360,11 @@ bool EventRunner::step(EventHost* host) {
                 state.vars[a0] = n;
                 vm.result = n > 0;
             }
-            else if (id == 2032) state.openedBoxes.push_back(currentArea * 1000 + a0);      // SetOpenedTresureBox
+            else if (id == 2032) { // SetOpenedTresureBox (setOpened: the world's pick marks it taken)
+                state.openedBoxes.push_back(currentArea * 1000 + a0);
+                for (auto& e : state.treasure[size_t(std::clamp(state.scenario, 0, kScenarios - 1))])
+                    if (e[0] == a0) e[1] = -1;
+            }
             else if (id == 2022 && host) host->loadParty(vm.var(0), vm.var(1) == 3);      // LoadPrty: pair, clear data
             // ScnEffect_Init: GetXmpStkData 0 (the last pushed: on / off) and 1 (the effect)
             else if (id == 2009 && host) host->sceneEffect(vm.arg(1) != 0, vm.arg(0));
