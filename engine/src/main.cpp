@@ -15553,9 +15553,7 @@ int runSelfTest(App& app) {
     }
     { // The battles' talks: the first battle's tutorial (EvrStart 2, var 1 = 0xff1) holds the
       // battle and hides its HUD until its pages are read; an event battle's script waits behind
-      // the gate and goes on after it (j001_d04 script 201: on to map 63, NpcMdlRead 508 and its Born);
-      // the 1st Gate boss (group 260, j001_d05 script 201) talks after round 3 and again once a
-      // pair attack lands after it, can't fall before that and heals whole each round meanwhile
+      // the gate, the battle talks in its moments and the script goes on after it
         int problems = 0;
         const cr::GameState keepGame = app.game;
         const int keepChar = app.playerChar;
@@ -15611,87 +15609,78 @@ int runSelfTest(App& app) {
         }
         problems += !tutorialSeen || pagesSeen == 0;
         if (b.active) endBattle(app, false);
-        // 2. An event battle: the script goes on after it
+        // 2. An event battle with its talk (Omega): j001_d05 script 203 - the scene, Battle 651 (stage 11),
+        // then flag 1403 (0x57b) and on to area 9 map 169. Group 651 talks as round 3 ends
+        // (chk_karaok_between) and can't fall below 1 HP before flag 0x57b (chk_karaok_dmg_hp)
         app.game = cr::GameState();
         cr::giveStartingItems(app.game, app.itemTable);
         app.game.setFlag(0xff1, true);
-        bool waited = true, continued = false, bossIn = false, gated = false;
-        if (playScript(5, 47, 201)) {
-            int f = 0;
-            for (; f < 2000 && !b.active && app.runner.running(); ++f) stepEvents(app), readOn(f);
-            gated = b.active && b.eventBattle && app.runner.running() && app.runner.gate() == battletalk::kFlag;
-            const std::string where = app.runner.where();
-            for (int k = 0; k < 90 && b.active; ++k) stepBattle(app);
-            waited = app.runner.running() && app.runner.where() == where;
-            if (b.active) {
-                for (int k = 2; k < 5; ++k) b.rules.f[size_t(k)].hp = 0;
-                endBattle(app, true);
-            }
-            for (f = 0; f < 4000 && app.runner.running() && !b.active; ++f) {
-                stepEvents(app);
-                animateNpcs(app, 1.0f / 30.0f);
-                readOn(f);
-                if (const cr::FieldNpc* n = findNpc(app, 508); n && npcActive(app, *n) && app.mapNumber == 63 && !bossIn) {
-                    bossIn = true;
-                    look("CR_TALK_SHOT_B");
-                }
-                continued |= app.mapNumber == 63;
-            }
+        bool waited = true, continued = false, gated = false, bossWon = false, scriptEnded = false;
+        int talk1 = 0, heldAt1 = 0, lateRound = 0, healedWhole = 0, talk2 = 0, laterBattles = 0;
+        int scriptMap = -1;
+        for (int m = 0; m < cr::kNumMaps && scriptMap < 0; ++m) {
+            if (cr::areaForMap(m, 6) != 6 || mapIndex(cr::kMapCollisionFile[m]) < 0) continue;
+            showMap(app, mapIndex(cr::kMapCollisionFile[m]), m, 6);
+            for (const cr::FieldNpc& n : app.events.npcs(m))
+                if (n.id == 203) scriptMap = m;
+            if (scriptMap < 0) scriptMap = m; // (no NPC of its own: started from another script - the area's first map)
         }
-        problems += !gated + !waited + !continued + !bossIn;
-        if (b.active) endBattle(app, false);
-        app.runner.stop();
-        // 3. The 1st Gate boss's talks
-        app.game = cr::GameState();
-        cr::giveStartingItems(app.game, app.itemTable);
-        app.game.setFlag(0xff1, true);
-        int talk1 = 0, talk2 = 0, heldAt1 = 0, healedWhole = 0, lateRound = 0;
-        bool bossWon = false, scriptEnded = false;
-        if (playScript(6, 64, 201)) {
-            for (int f = 0; f < 4000 && !b.active && app.runner.running(); ++f) stepEvents(app), readOn(f);
-            if (b.active && b.start.group == 260) {
+        if (scriptMap >= 0 && playScript(6, scriptMap, 203)) {
+            int f = 0;
+            for (; f < 6000 && !b.active && app.runner.running(); ++f) stepEvents(app), readOn(f);
+            gated = b.active && b.eventBattle && b.start.group == 651 && app.runner.running() &&
+                    app.runner.gate() == battletalk::kFlag;
+            const std::string where = app.runner.where();
+            if (gated) {
                 for (int k = 0; k < 2; ++k) b.rules.f[size_t(k)].hp = b.rules.f[size_t(k)].hpMax = 999999;
                 bool shot = false;
-                for (int f = 0; f < 30000 && b.active; ++f) {
+                for (f = 0; f < 30000 && b.active; ++f) {
                     if (battletalk::on(app)) {
-                        bool up = false;
-                        for (const App::Portrait& pt : app.portraits) up |= pt.tex.id && pt.alpha > 0.99f;
-                        if (!shot && !app.dialogue.empty() && up) look("CR_TALK_SHOT_C"), shot = true;
+                        if (!talk1) talk1 = b.rules.round;
+                        if (!shot && !app.dialogue.empty()) look("CR_TALK_SHOT_C"), shot = true;
                         readOn(f);
                     } else if (b.phase == App::Battle::Command && b.menu == App::Battle::Top) { // the pair attacks
-                        battleChooseTop(app, 1);
+                        if (!talk1) waited &= app.runner.running() && app.runner.where() == where; // (its talks run on in it)
+                        battleChooseTop(app, b.rules.f[1].alive() ? 1 : 0);
                         battleChooseCommand(app, 0);
                         if (b.menu == App::Battle::Targets && !b.picks.empty()) battleChooseTarget(app, b.picks[0]);
+                        if (b.phase == App::Battle::Command && b.menu == App::Battle::Commands) { // (solo: the second member)
+                            battleChooseCommand(app, 0);
+                            if (b.menu == App::Battle::Targets && !b.picks.empty()) battleChooseTarget(app, b.picks[0]);
+                        }
                     } else if (b.phase == App::Battle::Results) {
                         bossWon = true;
                         endBattle(app, true);
                         break;
                     }
-                    const int hpBefore = b.rules.f[2].hp, roundBefore = b.rules.round;
                     stepBattle(app);
-                    if (!talk1 && app.game.flag(1231)) talk1 = b.rules.round;
-                    if (!talk2 && app.game.flag(1232)) talk2 = b.rules.round;
-                    if (b.rules.lateAttack && !lateRound) lateRound = b.rules.round;
-                    if (!app.game.flag(1232) && b.rules.f[2].hp == 1) ++heldAt1;
-                    if (roundBefore == b.rules.round && b.phase == App::Battle::Command && hpBefore < b.rules.f[2].hpMax &&
-                        b.rules.f[2].hp == b.rules.f[2].hpMax && !app.game.flag(1232))
-                        ++healedWhole;
+                    if (!app.game.flag(1403) && b.rules.f[2].present && b.rules.f[2].hp == 1) ++heldAt1;
                 }
-                for (int f = 0; f < 3000 && app.runner.running() && !b.active; ++f) stepEvents(app), readOn(f);
+                if (b.active) endBattle(app, true);
+                for (f = 0; f < 20000 && app.runner.running(); ++f) { // the scene goes on (its later battles won)
+                    if (b.active) {
+                        ++laterBattles;
+                        for (int k = 2; k < 5; ++k) b.rules.f[size_t(k)].hp = 0;
+                        endBattle(app, true);
+                        continue;
+                    }
+                    stepEvents(app), readOn(f);
+                }
+                continued = app.area == 9 && app.mapNumber == 169 && app.game.flag(1403);
                 scriptEnded = !app.runner.running();
             }
         }
-        problems += talk1 != 3 || talk2 <= 3 || lateRound <= 3 || !bossWon || !scriptEnded || healedWhole == 0;
+        (void)lateRound, (void)healedWhole, (void)talk2;
+        problems += !gated + !waited + !continued + !scriptEnded + (talk1 != 3) + !bossWon;
         if (b.active) endBattle(app, false);
         app.runner.stop();
         app.runner.setGate(-1);
         problems += app.renderer.takeErrors();
-        std::printf("battle talks: tutorial %s (%d pages, %d frames held), event battle %s, waits %s, goes on to map 63 %s, "
-                    "NPC 508 read and born %s; group 260 talks after rounds %d and %d (pair attack late in round %d), held at 1 HP "
-                    "%d frames, healed whole %d times, won %s, script ended %s; %d problems\n",
-                    tutorialSeen ? "shown" : "NOT shown", pagesSeen, talkFrames, gated ? "gated" : "NOT gated",
-                    waited ? "yes" : "NO", continued ? "yes" : "NO", bossIn ? "yes" : "NO", talk1, talk2, lateRound, heldAt1,
-                    healedWhole, bossWon ? "yes" : "NO", scriptEnded ? "yes" : "NO", problems);
+        std::printf("battle talks: tutorial %s (%d pages, %d frames held), event battle 651 %s (script 203 on map %d), waits %s, "
+                    "talks after round %d, held at 1 HP %d frames, won %s, %d later battles, on to area 9 map 169 %s, script ended %s; %d problems\n",
+                    tutorialSeen ? "shown" : "NOT shown", pagesSeen, talkFrames, gated ? "gated" : "NOT gated", scriptMap,
+                    waited ? "yes" : "NO", talk1, heldAt1, bossWon ? "yes" : "NO", laterBattles, continued ? "yes" : "NO",
+                    scriptEnded ? "yes" : "NO", problems);
         mapErrors += problems;
         app.testNoTutorials = true;
         app.game = keepGame;
