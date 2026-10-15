@@ -1,5 +1,5 @@
 #pragma once
-// PSARC archives (the Vita release's cr1.psarc / *.psarc): read-only access by file name.
+// PSARC archives (the Vita releases' cr1.psarc / cro.psarc / *.psarc): read-only access by file name.
 // Header (big-endian): "PSAR", version, compression ("zlib"), TOC length, entry size (30), entry
 // count, block size, flags; entries {md5[16], u32 first block, u40 size, u40 offset}; then one
 // compressed-size per block (2 bytes for 64 KiB blocks). Entry 0 is the manifest: names, one per

@@ -1,5 +1,5 @@
 #pragma once
-// Vita textures (.gxt in cr1.psarc): an "MCT_" wrapper (9 bytes) around a Sony GXT file -
+// Vita textures (.gxt in cr1.psarc / cro.psarc): an "MCT_" wrapper (9 bytes) around a Sony GXT file -
 // "GXT\0", version 0x10000003, texture count, data offset/size, then per texture {data offset,
 // size, palette index, flags, type, format, u16 width, u16 height, ...}. The game's are single
 // swizzled textures (type 0): Morton order with the y bit lowest, square blocks of the smaller

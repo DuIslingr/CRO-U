@@ -111,8 +111,8 @@ struct App {
     cr::Hud hud;
     std::string status;  // what the title bar shows, also drawn on screen
     std::string dataDir;
-    // The Vita release (PCSG00497) as a source of assets (--vita, CR_VITA or settings.ini's vita=):
-    // cr1.psarc's textures, model packages and scripts (every .evt: eight languages, the voice
+    // The Vita release (PCSG00499) as a source of assets (--vita, CR_VITA or settings.ini's vita=):
+    // cro.psarc's textures, model packages and scripts (every .evt: eight languages, the voice
     // cues), its sound/ voices (voiceevnt / voicebtl.psarc) and music (bgm.psarc)
     std::string vitaPath;                  // the setting (applies at the next start)
     std::string vitaLoaded;                // what this run opened
@@ -974,7 +974,7 @@ bool loadOriginalImage(App& app, const std::string& mct, cr::Image& img) {
     return app.vitaOnly && cr::readFile(app.dataDir + mct, data) && cr::decodeMct(data, img); // (the overlay's other names)
 }
 
-// An iOS data file's names in the Vita's cr1.psarc: x.mct -> x.gxt (and x.gxt for x_hd.mct, which
+// An iOS data file's names in the Vita's cro.psarc: x.mct -> x.gxt (and x.gxt for x_hd.mct, which
 // the Vita names without the suffix: EndBack01, i001_C00, syuutyuusen), anything else as it is
 std::vector<std::string> vitaNames(const std::string& name) {
     if (name.size() < 5 || name.compare(name.size() - 4, 4, ".mct") != 0) return {name};
@@ -1004,7 +1004,7 @@ bool openVita(App& app, const std::string& path) {
     }
     app.vitaPath = app.vitaLoaded = path;
     app.vitaRoot = root;
-    if (app.vitaOnly) app.dataDir = root + "/resources/"; // (the folder of cr1.psarc: the data's own paths)
+    if (app.vitaOnly) app.dataDir = root + "/resources/"; // (the folder of cro.psarc: the data's own paths)
     for (const char* sound : {"/sound/", "/../sound/"}) {
         if (app.vitaBgm.open(root + sound + "bgm.psarc")) {
             app.vitaSound = root + sound;
@@ -3319,7 +3319,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
             rows.back().enabled = !app.vitaOnly;
             rows.back().hint = app.vitaOnly ? "Running from the Vita copy alone: " + app.vitaRoot
                                : !app.vitaNote.empty() ? app.vitaNote
-                               : "Enter: your Vita copy's PCSG00497 folder - its textures, voices, music and scripts; Left / Right: none";
+                               : "Enter: your Vita copy's PCSG00499 folder - its textures, voices, music and scripts; Left / Right: none";
         }
         OptRow swap; // the controller's ○ (east) / × (south): Off as on the Vita, ○ confirms
         swap.label = "Swap \u25cb and \u00d7";
@@ -17721,8 +17721,8 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         const std::string msg = "Could not find the original game data (the app's data folder).\n\n"
                                 "Copy data from your ChaosRingsOmegaHDeng.app to:\n" +
                                 cr::defaultDataDirHint() +
-                                "\n\nor run with --data <path-to-dataHD>, or set CR_DATA - or --data / --vita "
-                                "<your Vita copy's PCSG00497 folder>.";
+                                "\n\nor run with --data <path-to-data>, or set CR_DATA - or --data / --vita "
+                                "<your Vita copy's PCSG00499 folder>.";
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Chaos Rings Omega", msg.c_str(), nullptr);
         return SDL_APP_FAILURE;
     }
