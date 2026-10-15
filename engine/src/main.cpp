@@ -8946,7 +8946,11 @@ float actorDuration(App& app, const App::Battle::Actor& a) {
 }
 
 // Where the damage numbers start: over the actor's model
+cr::Vec3 actorPoint(App& app, const App::Battle::Actor& a, int user);
 cr::Vec3 actorHead(App& app, const App::Battle::Actor& a) {
+    // __dmg_set: btlcamera_getpos(actor, 0x44e) - the model's node 1102 (else over its bounds)
+    const cr::Vec3 p = actorPoint(app, a, 1102);
+    if (p.x != a.pos.x || p.y != a.pos.y || p.z != a.pos.z) return p;
     const LoadedModel& lm = app.battle.models[a.model];
     return a.pos + cr::Vec3{0, (lm.center.y + lm.radius * 0.6f) * a.scaleY, 0};
 }
