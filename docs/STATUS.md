@@ -131,7 +131,8 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
 - [x] the barrier (calc 26) reflects, as `_btlact_gene` / `_btlact_item`'s states 0x1004 / 0x100e
       have it (CR1's too): a hostile gene or item meeting one on any target takes every target's
       barrier and comes back on its users (scope 5: on all of their side), the barriers lighting up
-      (effect 0x3a, sound 0x5b); the Break counts it for the barrier's side and what it fells
+      (effect 0x3a, sound 0x5b) as the users stop, and 40 frames on the barrier's side sends it back on
+      them (the camera on each in turn); the Break counts it for the barrier's side and what it fells
       leaves no item or gene (+0xaf) - it was absorbed. A dodge shows its line once (57061
       physical / 57062 genes, 0404 / 0406 / 0410 / 0412 / 0413), which the barrier had borrowed
 - [x] the battle results as `__menuu_MbResultSet` / `Prc` / `Put` run them: the windows sliding in
@@ -160,6 +161,6 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
 - [x] the message codes checked against Omega's `_PrcMsg` (CR1's too): 0x10 clears the window and
       types on from its first line - after a tap (0x12) that is the next page, which had kept an
       empty first line, and after a timed pause (0x1a) the page turns by itself once the pause is
-      out; 0x16 0 / 1 sets the text white or black for the rest of the message (four of
+      out (flag 4075, the page-turn cue, only for a tap's turn, as 0xfeb is); 0x16 0 / 1 sets the text white or black for the rest of the message (four of
       j001_d06's lines and a manual page); 0x11 breaks the line, 0x17 centres one, 0x15 / 0x1c the
       name plate and the speaking side as before
