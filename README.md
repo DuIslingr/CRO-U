@@ -80,14 +80,19 @@ Done so far:
       effects, sounds and camera chains, and the story battles' set moves (`_btlque_special`)
 - [x] Omega's own battle calcs (38..44: the kiss, Down and the Ward, 437's blow, MP / HP x power),
       its stat formula (`btlpcparam_*` with Down / the Ward) and warrior / sorcerer by character
+- [x] level-ups as `pcparam_change_lv` has them (from 20: 10 HP and 1 to each other stat a level;
+      the level-up genes 30 HP / 3 MP / 5), seeds 10 a seed to 9999 (`use_item`,
+      `MuCom_GetUsedItemLimitNum`); group 695's guest takes orders and leaves the enemies' levels to
+      Olgar's; the save screen's load flags (31 / 32) and clear data; gold boxes (`Uty_ChkItem`, key 2)
+- [x] the self-test runs clean on Omega's data (its checks moved onto Omega's rooms, groups,
+      scripts and tables)
 
-Next (the self-test's remaining failures are mostly checks still written for CR1's data):
+Next:
 
 - [ ] the battle stage's own motion during a staged action (440: `mdl_set_act_nextanm2` on the
       stage model - stages are drawn unskinned)
 - [ ] `--explore n 1` (the second scenario) to its end: it gets 61 rooms and 43 battles in (its
       first five worlds) before it runs out of ideas
-- [ ] the rest of the self-test moved onto Omega's data (battle rules, saves, the save screen)
 
 ## Reverse-engineering groundwork
 
