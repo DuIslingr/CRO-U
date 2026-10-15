@@ -28,6 +28,9 @@ public:
     // member (`firstStrikeGene` / `noAmbushGene`) make a first strike 50% / rule out ambushes.
     bool check(const std::function<int(int)>& random, int partyLevel, bool firstStrikeGene, bool noAmbushGene,
                BattleStart& out);
+    // fldencount_encount_debug (the field's battle button, skill 191 Pheromones): the walked
+    // distance set to 1000 and the chance to 105, so the next check is a fight
+    void force() { walked_ = 1000, chance_ = 105; }
     bool active() const { return have_; }
     float walkedDistance() const { return walked_; }
     int chance() const { return chance_; }

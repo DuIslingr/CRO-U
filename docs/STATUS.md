@@ -105,3 +105,13 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
       (`__MuEquip_CategoryChoiceInit`: the title and the character's name) - it was seven rows at
       70% with the slots' names under them
 
+- [x] the field menu as `__menuf_mainPrc` / `Put` have it: the Map button only in areas 2..5 and 8
+      (mask 0x13c), and the battle button at the top left (`__GetBattleDispCondision`: skill 191
+      known, the room's encounters there, flag 4076 clear) that starts a fight
+      (`_fldencount_encount_debug`: the walked distance 1000, the chance 105; G here)
+- [x] the map screen from Omega's `__menuu_MapSet` / `Put` / `Prc` and `ReadMapMenu`: map_D01..D04
+      and map_D07 by area, the pair's marker on Omega's 150 spots (`_gkashMapCharPosTbl`) fading in
+      and out (3 / 6 / 11 / 6 frames), the story's two markers on D01..D04, D03's two and D04's five
+      covers until their flags, and D07's 58 rooms on three pages a tap turns (the warps, the doors
+      and bosses with the count, the items with theirs - `_gkastMapIcon`, `_gkashWarpTbl`, 57111 /
+      57112 with vars 0..3); it was CR1's, by map number, for the first 64 maps only

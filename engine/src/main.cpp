@@ -711,15 +711,17 @@ struct App {
         int fade = 0;                      // +32 a frame (to 320) on the field, -32 while a scene runs
         float clock = 0;
     } fieldMenu;
-    struct MapScreen {                     // __menuu_Map*: the gate's map, where the pair is, where to go
+    struct MapScreen {                     // __menuu_Map*: the world's map, where the pair is, where to go
         bool open = false, closing = false;
         int fade = 0;                      // 4 frames in, 4 out
-        int gate = -1;                     // map_D01..D04 (ReadMapMenu), the one in `tex`
+        int field = -1;                    // ReadMapMenu's _gnFieldNo (0..3 map_D01..D04, 6 map_D07), the one in `tex`
         cr::Texture tex;
         float clock = 0;
         int spot[2] = {-1, -1};            // the pair's marker's top-left (tex2d), -1 none
         int marks[2][2] = {{-1, -1}, {-1, -1}}; // the story's two markers
         int blink = 0;                     // ComUty_PictAnimDraw's counter: 2 frames of 6
+        int page = 0;                      // D07's page (DAT_000e5e0c): warps, doors and boxes, the rest
+        int phase = 2, count = 0, alpha = 0; // the pair's marker's fading (DAT_000e5d80 / 88 / 84)
     } mapScreen;
     struct StaffRoll {                     // __menuu_StaffRoll* (Util 7): the credits over the ending's picture
         bool open = false;
@@ -6139,8 +6141,16 @@ void fieldButtonPos(const App& app, int k, float& x, float& y) {
     y = from[1] + (to[1] - from[1]) * t + fieldDy(app);
 }
 
+// __GetBattleDispCondision: skill 191 (Pheromones) known, the room's encounters table there
+// (fldencount_chk) and flag 4076 clear - its button at the top left, (-8, -20) (the iPhone's
+// (8, 12)), 48 x 32
+bool fieldBattleButton(const App& app) {
+    return app.game.items.count(191) && app.game.items.at(191) > 0 && app.encounters.active() && !app.game.flag(4076);
+}
+
 bool fieldButtonShown(const App& app, int k) {
-    if (k == 2) return app.mapNumber < 64;
+    // Map: only in the worlds the map screen has - areas 2..5 and 8 (__menuf_mainPrc's mask 0x13c)
+    if (k == 2) return app.area >= 0 && app.area < 9 && (0x13c >> app.area & 1);
     if (k == 3) return app.game.items.count(fieldui::kEncounterSkill) && app.game.items.at(fieldui::kEncounterSkill) > 0;
     return true;
 }
@@ -6176,6 +6186,11 @@ void drawFieldMenu(App& app) {
     r.setOrigin(r.uiX());
     const float a = float(std::min(255, f.fade)) / 255.0f;
     if (app.puzzle.stage >= 0) drawPuzzleHud(app, a);
+    if (fieldBattleButton(app)) { // __menuf_mainPut: window piece (656, 400) at tex2d (-8, -20) / (8, 12)
+        r.setOrigin(wideLeft(app));
+        const bool phone = app.renderer.phoneLayout();
+        m.piece(-8 + 16 + (phone ? 16.0f : 0.0f), -20 + 32 + (phone ? 32.0f : 0.0f), 656, 400, 48, 32, a);
+    }
     r.setOrigin(wideRight(app)); // (widescreen: in the screen's corner)
     const bool bar = f.open || f.anim > 0;
     m.piece(460 + 16 + fieldDx(app), -30 + 32 + fieldDy(app), kCornerPiece[bar][0], kCornerPiece[bar][1], 32, 32, a);
@@ -6235,6 +6250,14 @@ bool fieldMenuClick(App& app, float px, float py) {
     float lx, ly;
     app.renderer.toLogical(px, py, lx, ly);
     const float tx = (lx - wideRight(app)) / 2 - 16 - fieldDx(app), ty = ly / 2 - 32 - fieldDy(app); // tex2d
+    if (fieldBattleButton(app)) { // __menuf_mainPrc: the battle button's box, then fldencount_encount_debug
+        const bool phone = app.renderer.phoneLayout();
+        const float bx = (lx - wideLeft(app)) / 2 - 16, by = ly / 2 - 32, x0 = phone ? 8.0f : -8.0f, y0 = phone ? 12.0f : -20.0f;
+        if (bx >= x0 && bx < x0 + 48 && by >= y0 && by < y0 + 32) {
+            app.encounters.force();
+            return true;
+        }
+    }
     if (tx >= 456 && tx < 496 && ty >= -32 && ty < 8) { // _pad_chk_trg_down_box(456, -32, 40, 40) (2.2.0: 440, 0)
         toggleFieldMenu(app);
         return true;
@@ -6252,24 +6275,39 @@ bool fieldMenuClick(App& app, float px, float py) {
 }
 
 // ---- The map screen (__menuu_MapSet / MapPrc / MapPut, ReadMapMenu) ----
-// The gate's map_D0n (slot 0x30, 512 x 512; MuTex group 1 pictures 13 the map 480 x 320 at
-// (0, 0), 14 the pair's marker 48 x 48 at (0, 320), 15 a marker 16 x 16 at (0, 368)), the pair's
-// marker on this field's spot (blinking, 2 frames of 6, the next 48 to the right) and the two
-// markers of the story's step: the first of the pair's 25 flags (2601 + 50 x pair) set. A tap
-// anywhere closes it. Coordinates are tex2d; menu units are + (16, 32).
+// ReadMapMenu by area: 2..5 map_D01..D04 (_gnFieldNo 0..3), 8 map_D07 (6), in slot 0x2f, 512 x
+// 512 - MuTex group 1 pictures 15 the map 480 x 320, 16 the pair's marker (2 frames of 48), 17 a
+// story marker (2 of 16), 18..21 16 x 16 icons. MapSet: the marker on the map's spot
+// (_gkashMapCharPosTbl, the map clamped to 0..149; map 151 none) less (24, 20), blinking; on D01..D04
+// the two markers of the story's step (the first of the scenario's 25 flags set, _kgnMuMapRootFlg)
+// less (8, 16). MapPut: D03's two covers and D04's five (picture 21, 8 higher) until their flags; on
+// D07 its 58 rooms (the spots of maps 92..149, x - 8, y + 10) on three pages a tap turns - the
+// warps (18), the doors and boxes (19 / 20, _gkastMapIcon) and the rest (21), the last two with
+// their legend. A tap closes it (D07: after the third page). Coordinates tex2d, under PhoneMenu.
 namespace mapui {
-// 0xc7b20: each field's spot on its gate's map (s16 x, y; -1 the 3D rooms)
-constexpr short kMapSpot[64][2] = {
+// _gkashMapCharPosTbl (0xcc7d4): each map's spot (s16 x, y; -1 none) - D07's rooms from map 92
+constexpr short kMapSpot[150][2] = {
     {72, 216}, {122, 196}, {82, 172}, {176, 152}, {132, 152}, {188, 108}, {327, 218}, {288, 196},
     {426, 180}, {338, 176}, {386, 155}, {350, 132}, {360, 88}, {-1, -1}, {100, 204}, {144, 204},
     {110, 160}, {66, 160}, {154, 160}, {166, 116}, {284, 228}, {334, 206}, {294, 184}, {308, 140},
-    {262, 140}, {220, 140}, {354, 120}, {402, 120}, {412, 74}, {-1, -1}, {80, 176}, {124, 176},
-    {168, 176}, {38, 176}, {92, 132}, {330, 200}, {292, 180}, {254, 156}, {264, 112}, {304, 136},
-    {380, 180}, {430, 156}, {418, 200}, {392, 136}, {352, 112}, {364, 68}, {-1, -1}, {116, 186},
-    {82, 232}, {160, 188}, {127, 144}, {172, 144}, {322, 212}, {278, 212}, {234, 212}, {334, 168},
-    {288, 168}, {244, 168}, {278, 124}, {430, 132}, {442, 86}, {344, 124}, {356, 78}, {-1, -1},
+    {262, 140}, {220, 140}, {354, 120}, {402, 120}, {412, 74}, {-1, -1}, {-1, -1}, {80, 176},
+    {124, 176}, {168, 176}, {38, 176}, {92, 132}, {330, 200}, {292, 180}, {254, 156}, {264, 112},
+    {304, 136}, {380, 180}, {430, 156}, {418, 200}, {392, 136}, {352, 112}, {364, 68}, {-1, -1},
+    {-1, -1}, {-1, -1}, {116, 186}, {82, 232}, {160, 188}, {127, 144}, {172, 144}, {322, 212},
+    {278, 212}, {234, 212}, {334, 168}, {288, 168}, {244, 168}, {278, 124}, {430, 132}, {442, 86},
+    {344, 124}, {356, 78}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1},
+    {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1},
+    {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1},
+    {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {118, 264}, {138, 264}, {158, 264}, {178, 264},
+    {198, 264}, {185, 244}, {192, 224}, {172, 224}, {180, 204}, {212, 224}, {220, 204}, {227, 184},
+    {207, 184}, {214, 164}, {221, 144}, {229, 124}, {209, 124}, {169, 124}, {161, 144}, {154, 164},
+    {174, 164}, {160, 204}, {140, 204}, {147, 184}, {132, 224}, {187, 184}, {241, 144}, {261, 144},
+    {281, 144}, {301, 144}, {309, 124}, {321, 144}, {274, 164}, {254, 164}, {247, 184}, {240, 204},
+    {260, 204}, {280, 204}, {287, 184}, {272, 224}, {267, 184}, {294, 164}, {334, 164}, {356, 104},
+    {336, 104}, {316, 104}, {344, 84}, {236, 104}, {244, 84}, {250, 64}, {258, 44}, {238, 44},
+    {218, 44}, {265, 24}, {285, 24}, {305, 24}, {325, 24}, {332, 4},
 };
-// 0xc7c30: per gate, per story step (the first of the pair's 25 flags set), two markers (x, y, kind)
+// _kgstMuMapRootPos (0xccad4): per field D01..D04, per story step, two markers (x, y, kind)
 constexpr short kMapMark[4][25][2][3] = {
     {
         {{68, 248, 1}, {-1, -1, 0}},
@@ -6380,60 +6418,151 @@ constexpr short kMapMark[4][25][2][3] = {
         {{-1, -1, -1}, {-1, -1, -1}},
     },
 };
-constexpr int kFlagBase = 2601, kFlagStride = 50, kSteps = 25;
+// _gkastMapIcon (0xd9070): D07's rooms - a box's flag, the door's, the door found, the rest found
+constexpr short kMazeIcon[58][4] = {
+    {1662, -1, -1, -1}, {-1, -1, -1, -1}, {1680, -1, -1, 1715}, {1673, -1, -1, -1}, {-1, -1, -1, -1}, {-1, 1, 1692, -1},
+    {-1, -1, -1, 1719}, {-1, -1, -1, -1}, {1674, 101, 1701, 1722}, {1668, -1, -1, 1724}, {-1, -1, -1, -1}, {-1, -1, -1, 1726},
+    {-1, -1, -1, -1}, {-1, -1, -1, -1}, {-1, -1, -1, 1729}, {1677, -1, -1, 1731}, {-1, -1, -1, -1}, {1678, -1, -1, 1735},
+    {-1, -1, -1, -1}, {-1, -1, -1, -1}, {-1, -1, -1, -1}, {-1, -1, -1, -1}, {1664, -1, -1, 1745}, {1670, 1, 1693, -1},
+    {-1, -1, -1, -1}, {-1, -1, -1, -1}, {-1, -1, -1, -1}, {-1, -1, -1, -1}, {1679, -1, -1, -1}, {-1, -1, -1, -1},
+    {-1, 103, 1700, -1}, {-1, -1, -1, -1}, {-1, -1, -1, -1}, {-1, -1, -1, -1}, {-1, -1, -1, -1}, {-1, -1, -1, -1},
+    {-1, -1, -1, -1}, {-1, -1, -1, -1}, {1666, -1, -1, -1}, {1681, 102, 1703, -1}, {1667, -1, -1, 1777}, {-1, -1, -1, -1},
+    {1675, -1, -1, -1}, {-1, -1, -1, -1}, {1663, -1, -1, -1}, {1671, -1, -1, 1788}, {1665, 1, 1695, -1}, {-1, 1692, 1694, -1},
+    {1672, -1, -1, -1}, {-1, -1, -1, -1}, {-1, -1, -1, -1}, {-1, -1, -1, -1}, {1669, 105, 1702, 1794}, {-1, -1, -1, -1},
+    {1676, -1, -1, -1}, {-1, -1, -1, -1}, {-1, 104, 1704, -1}, {-1, 1694, 1696, -1},
+};
+constexpr short kMazeWarp[6] = {0, 12, 21, 40, 43, 49};                                  // _gkashWarpTbl.13080
+constexpr short kD03Cover[2][2] = {{280, 74}, {402, 276}};                               // flags 0x4b4, 0x4b5
+constexpr short kD04Cover[5][2] = {{32, 252}, {182, 99}, {228, 224}, {268, 78}, {439, 98}}; // _C_36_13066, 0x4c8..
+constexpr short kVerFlag[5][2] = {{101, 1651}, {102, 1652}, {103, 1653}, {104, 1654}, {105, 1655}}; // _gshVerFlagTbl01 / 02
+constexpr int kFlagBase = 2601, kFlagStride = 50, kSteps = 25; // _kgnMuMapRootFlg: 2601 + 50 x scenario
+constexpr int kFirstRoom = 92, kRooms = 58, kMazeField = 6;
+constexpr int kText[2] = {57111, 57112}; // MuComFontFromIdRegist(n, 6, 0x6f + n)
+
+int field(int area) { // ReadMapMenu's _gnFieldNo; -1 no map
+    switch (area) {
+    case 2: return 0;
+    case 3: return 1;
+    case 4: return 2;
+    case 5: return 3;
+    case 8: return kMazeField;
+    default: return -1;
+    }
+}
+// Page 1's icon for a room: 19 its door open (the second flag: 1 always; 101..106 with
+// 0x60e + n too) and the third flag clear, else 20 while the first is clear, else none
+int doorIcon(const App& app, const short* ic) {
+    const int door = ic[1];
+    const bool open = door >= 0 && (door == 1 || ((door < 101 || door > 106 || app.game.flag(door + 0x60e)) && app.game.flag(door)));
+    if (open && !app.game.flag(ic[2])) return 19;
+    if (ic[0] >= 0 && !app.game.flag(ic[0])) return 20;
+    return -1;
+}
 } // namespace mapui
 
-int mapGate(int map) { return map < 13 ? 0 : map < 29 ? 1 : map < 46 ? 2 : 3; } // split by the 3D rooms 13, 29, 46
+void outPicture(cr::MenuPainter& m, const cr::Texture& tex, int pict, float x, float y, float a, int frame = 0);
 
 void openMapScreen(App& app) {
     using namespace mapui;
     App::MapScreen& ms = app.mapScreen;
-    if (app.mapNumber < 0 || app.mapNumber >= 64) return;
-    const int gate = mapGate(app.mapNumber);
-    if (ms.gate != gate || !ms.tex.id) { // ReadMapMenu: only when the gate changes
+    const int fld = field(app.area);
+    if (fld < 0) return;
+    if (ms.field != fld || !ms.tex.id) { // ReadMapMenu
         if (ms.tex.id) app.renderer.destroy(ms.tex);
         cr::Image img;
-        static const char* const kFile[4] = {"map_D01.mct", "map_D02.mct", "map_D03.mct", "map_D04.mct"};
-        if (loadImage(app, kFile[gate], img)) ms.tex = app.renderer.upload(img);
-        ms.gate = gate;
+        static const char* const kFile[7] = {"map_D01.mct", "map_D02.mct", "map_D03.mct", "map_D04.mct", "", "", "map_D07.mct"};
+        if (loadImage(app, kFile[fld], img)) ms.tex = app.renderer.upload(img);
+        ms.field = fld;
     }
-    const short* sp = kMapSpot[app.mapNumber];
-    ms.spot[0] = sp[0] < 0 ? -1 : sp[0] - 24;
-    ms.spot[1] = sp[1] < 0 ? -1 : sp[1] - 20;
+    // (the original draws a map without a spot off the map's corner, at (-25, -21); the port leaves it out)
+    const int map = std::clamp(app.mapNumber, 0, 149);
+    const short* sp = kMapSpot[map];
+    const bool spot = app.mapNumber != 151 && sp[0] >= 0;
+    ms.spot[0] = spot ? sp[0] - 24 : -1;
+    ms.spot[1] = spot ? sp[1] - 20 : -1;
     for (auto& m : ms.marks) m[0] = m[1] = -1;
-    const int base = kFlagBase + kFlagStride * fieldRoute(app);
-    for (int step = 0; step < kSteps; ++step)
-        if (app.game.flag(base + step)) {
-            for (int k = 0; k < 2; ++k) {
-                const short* m = kMapMark[gate][step][k];
-                if (m[0] - 8 > -1 && m[1] - 16 > -1) ms.marks[k][0] = m[0] - 8, ms.marks[k][1] = m[1] - 16;
+    if (fld < 4) {
+        const int base = kFlagBase + kFlagStride * fieldRoute(app);
+        for (int step = 0; step < kSteps; ++step)
+            if (app.game.flag(base + step)) {
+                for (int k = 0; k < 2; ++k) {
+                    const short* m = kMapMark[fld][step][k];
+                    if (m[0] - 8 > -1 && m[1] - 16 > -1) ms.marks[k][0] = m[0] - 8, ms.marks[k][1] = m[1] - 16;
+                }
+                break;
             }
-            break;
-        }
+    }
+    // SetVar 0..3: the boxes and doors found, the five trials passed + 25, the rest found, 12
+    int found = 0, rest = 0, trials = 0;
+    for (const auto& ic : kMazeIcon) {
+        found += (ic[0] >= 0 && app.game.flag(ic[0])) + (ic[2] >= 0 && app.game.flag(ic[2]));
+        rest += ic[3] >= 0 && app.game.flag(ic[3]);
+    }
+    for (const auto& v : kVerFlag) trials += app.game.flag(v[0]) && app.game.flag(v[1]);
+    app.game.vars[0] = found, app.game.vars[1] = trials + 25, app.game.vars[2] = rest, app.game.vars[3] = 12;
     ms.open = true;
     ms.closing = false;
     ms.fade = 0;
     ms.blink = 0;
+    ms.page = 0;
+    ms.phase = 2, ms.count = 0, ms.alpha = 0;
     ms.clock = 0;
 }
 
 void closeMapScreen(App& app) {
     if (!app.mapScreen.open || app.mapScreen.closing) return;
-    menuSound(app, se::kChoose); // __effgo(2)
     app.mapScreen.closing = true;
+    app.mapScreen.alpha = 0, app.mapScreen.count = 0;
+}
+
+// __menuu_MapPrc's tap (_pad_chk_updw_box(0, 0, 480, 320)), once the window is in
+void mapScreenTap(App& app) {
+    App::MapScreen& ms = app.mapScreen;
+    if (!ms.open || ms.closing || ms.fade < 4) return;
+    menuSound(app, se::kChoose); // __effgo(0x93)
+    if (ms.field == mapui::kMazeField && ms.page + 1 < 3) {
+        ++ms.page;
+        return;
+    }
+    closeMapScreen(app);
 }
 
 void stepMapScreen(App& app) {
     App::MapScreen& ms = app.mapScreen;
     if (!ms.open) return;
-    ms.blink = (ms.blink + 1) % 12;
+    ms.blink = (ms.blink + 1) % 12; // ComUty_PictAnimDraw: 2 frames of 6
     if (ms.closing) {
         if (--ms.fade <= 0) ms.open = false, ms.closing = false;
-    } else
-        ms.fade = std::min(4, ms.fade + 1);
+        return;
+    }
+    if (ms.fade < 4) {
+        ++ms.fade;
+        return;
+    }
+    // the pair's marker: unseen 3 frames, up by 51 for 6, held 11, down by 51 for 6
+    switch (ms.phase) {
+    case 0:
+        ms.alpha = 0;
+        if (ms.count >= 3) ms.phase = 1, ms.count = 0;
+        break;
+    case 1:
+        if (ms.count < 6) ms.alpha += 51;
+        else ms.alpha = 255, ms.phase = 2, ms.count = 0;
+        break;
+    case 2:
+        ms.alpha = 255;
+        if (ms.count >= 11) ms.phase = 3, ms.count = 0;
+        break;
+    default:
+        if (ms.count < 6) ms.alpha -= 51;
+        else ms.count = 0, ms.alpha = 0, ms.phase = 0;
+        break;
+    }
+    ms.count = (ms.count + 1) & 0xff;
 }
 
 void drawMapScreen(App& app) {
+    using namespace mapui;
     App::MapScreen& ms = app.mapScreen;
     if (!ms.open) return;
     cr::Renderer& r = app.renderer;
@@ -6444,14 +6573,41 @@ void drawMapScreen(App& app) {
     r.setOrigin(r.uiX());
     m.begin(r, app.windowTex, &app.font);
     if (!ms.tex.id) return;
-    m.imagePiece(ms.tex, 16, 32, 0, 0, 480, 320, a);
+    const PhoneMenu phoneMenu(app, m);
+    const cr::Texture& t = ms.tex;
+    outPicture(m, t, 15, 0, 0, a);
+    if (ms.field == 2)
+        for (int k = 0; k < 2; ++k)
+            if (!app.game.flag(0x4b4 + k)) outPicture(m, t, 21, kD03Cover[k][0], kD03Cover[k][1] - 8, a);
+    if (ms.field == 3)
+        for (int k = 0; k < 5; ++k)
+            if (!app.game.flag(0x4c8 + k)) outPicture(m, t, 21, kD04Cover[k][0], kD04Cover[k][1] - 8, a);
+    if (ms.field == kMazeField) {
+        size_t warp = 0;
+        for (int room = 0; room < kRooms; ++room) {
+            const short* ic = kMazeIcon[room];
+            const float x = float(kMapSpot[kFirstRoom + room][0] - 8), y = float(kMapSpot[kFirstRoom + room][1] + 10);
+            int pict = -1;
+            if (ms.page == 0 && warp < std::size(kMazeWarp) && kMazeWarp[warp] == room) pict = 18, ++warp;
+            if (ms.page == 1) pict = doorIcon(app, ic);
+            if (ms.page == 2 && ic[3] >= 0 && !app.game.flag(ic[3])) pict = 21;
+            if (pict >= 0) outPicture(m, t, pict, x, y, a);
+        }
+        if (ms.page > 0) { // the legend: picture 19 / 21 at (316, 296), its line at (336, 296)
+            outPicture(m, t, ms.page == 1 ? 19 : 21, 316, 296, a);
+            std::vector<std::vector<std::string>> pages;
+            if (app.systemText.message(kText[ms.page - 1], app.language,
+                                       [&](int n) { auto it = app.game.vars.find(n); return it == app.game.vars.end() ? 0 : int(it->second); },
+                                       pages) &&
+                !pages.empty() && !pages[0].empty())
+                m.text(pages[0][0], 336, 296, false, a);
+        }
+    }
     const int frame = ms.blink / 6;
     for (const auto& mk : ms.marks)
-        if (mk[0] >= 0) m.imagePiece(ms.tex, float(mk[0]) + 16, float(mk[1]) + 32, float(16 * frame), 368, 16, 16, a);
-    if (ms.spot[0] >= 0) m.imagePiece(ms.tex, float(ms.spot[0]) + 16, float(ms.spot[1]) + 32, float(48 * frame), 320, 48, 48, a);
+        if (mk[0] >= 0) outPicture(m, t, 17, float(mk[0]), float(mk[1]), a, frame);
+    if (ms.spot[0] >= 0) outPicture(m, t, 16, float(ms.spot[0]), float(ms.spot[1]), a * float(ms.alpha) / 255, frame);
 }
-
-void outPicture(cr::MenuPainter& m, const cr::Texture& tex, int pict, float x, float y, float a);
 
 void drawCamp(App& app) {
     using namespace campui;
@@ -7765,11 +7921,12 @@ bool titleChoiceReady(int) { return true; }
 
 // A group-1 picture (MuTex_GetTexInfo(1, pict), half-scale units) of one of a menu's own sheets
 // at (x, y): the _hd / _ipad sheets (1024 wide and up) hold them at twice those units
-void outPicture(cr::MenuPainter& m, const cr::Texture& tex, int pict, float x, float y, float a) {
+// (`frame`: ComUty_PictAnimDraw's, the next piece to the right)
+void outPicture(cr::MenuPainter& m, const cr::Texture& tex, int pict, float x, float y, float a, int frame) {
     if (!tex.id || pict < 0 || pict >= cr::kNumOutReadPictures) return;
     const short* p = cr::kOutReadPicture[pict];
     const float k = tex.width >= 1024 ? 2.0f : 1.0f;
-    m.imagePieceTo(tex, x, y, p[2], p[3], p[0] * k, p[1] * k, p[2] * k, p[3] * k, a);
+    m.imagePieceTo(tex, x, y, p[2], p[3], float(p[0] + p[2] * frame) * k, p[1] * k, p[2] * k, p[3] * k, a);
 }
 
 void drawTitleMenu(App& app) {
@@ -14773,37 +14930,57 @@ int runSelfTest(App& app) {
             app.runner.stop();
         }
         problems += paid != bank || app.game.walkExp[0] != 0;
-        // The map screen: every field has its spot (the 3D rooms 13 / 29 / 46 / 63 none) and every
-        // marker lies on its gate's 480 x 320 map; map 0 with the story at step 3
-        int spots = 0, offMap = 0;
-        for (int mp = 0; mp < 64; ++mp) {
-            const bool room3d = mp == 13 || mp == 29 || mp == 46 || mp == 63;
-            spots += mapui::kMapSpot[mp][0] >= 0;
-            offMap += room3d != (mapui::kMapSpot[mp][0] < 0) ||
-                      (!room3d && (mapui::kMapSpot[mp][0] - 24 < 0 || mapui::kMapSpot[mp][0] + 24 > 480 ||
-                                   mapui::kMapSpot[mp][1] - 20 < 0 || mapui::kMapSpot[mp][1] + 28 > 320));
+        // The map screen: the button only in areas 2..5 and 8; every spot, D07's rooms' icons and the
+        // story's markers on the 480 x 320 map; area 2's map 0 with the story at step 3; D07's three
+        // pages, a tap each
+        int spots = 0, offMap = 0, mapButton = 0;
+        for (int area = 0; area < cr::kNumAreas; ++area) {
+            const int keepArea = app.area;
+            app.area = area;
+            mapButton |= int(fieldButtonShown(app, 2)) << area;
+            app.area = keepArea;
+        }
+        for (const auto& sp : mapui::kMapSpot)
+            if (sp[0] >= 0) ++spots, offMap += sp[0] > 480 || sp[1] > 320; // (map 149's marker reaches over the top)
+        for (int room = 0; room < mapui::kRooms; ++room) {
+            const short* sp = mapui::kMapSpot[mapui::kFirstRoom + room];
+            offMap += sp[0] < 8 || sp[0] + 8 > 480 || sp[1] + 26 > 320;
         }
         for (const auto& gate : mapui::kMapMark)
             for (const auto& step : gate)
                 for (const auto& mk : step)
                     offMap += mk[0] >= 0 && (mk[0] - 8 < 0 || mk[0] + 8 > 480 || mk[1] - 16 < 0 || mk[1] > 320);
-        const int keepMap = app.mapNumber;
-        app.mapNumber = 0;
+        const int keepMap = app.mapNumber, keepArea = app.area;
+        app.mapNumber = 0, app.area = 2;
         app.game.setFlag(mapui::kFlagBase + 3, true);
         app.menuSoundLog.clear();
         fm.open = true, fm.anim = 0;
         pressFieldButton(app, 2);
         const App::MapScreen& ms = app.mapScreen;
-        problems += !ms.open || ms.gate != 0 || !ms.tex.id || ms.spot[0] != 48 || ms.spot[1] != 196 ||
-                    ms.marks[0][0] != 84 || ms.marks[1][0] != 104;
+        problems += !ms.open || ms.field != 0 || !ms.tex.id || ms.spot[0] != 48 || ms.spot[1] != 196 ||
+                    ms.marks[0][0] != 84 || ms.marks[1][0] != 104 || mapButton != 0x13c;
         for (int f = 0; f < 6; ++f) stepMapScreen(app);
         app.lastTicks = 0;
         drawFrame(app, false);
-        const int mapErrs = app.renderer.takeErrors();
-        closeMapScreen(app);
+        mapScreenTap(app); // closes
         for (int f = 0; f < 4; ++f) stepMapScreen(app);
-        problems += ms.open + mapErrs + expectSounds("map screen", {2, 2}) + offMap + (spots != 60);
-        app.mapNumber = keepMap;
+        problems += ms.open;
+        app.mapNumber = mapui::kFirstRoom, app.area = 8; // D07: three pages
+        openMapScreen(app);
+        problems += !ms.open || ms.field != mapui::kMazeField || !ms.tex.id || ms.spot[0] != 94 || ms.spot[1] != 244 ||
+                    ms.marks[0][0] != -1;
+        int pages = 0;
+        for (int tap = 0; tap < 3; ++tap) {
+            for (int f = 0; f < 4; ++f) stepMapScreen(app);
+            pages += ms.page == tap;
+            app.lastTicks = 0;
+            drawFrame(app, false);
+            mapScreenTap(app);
+        }
+        for (int f = 0; f < 4; ++f) stepMapScreen(app);
+        const int mapErrs = app.renderer.takeErrors();
+        problems += ms.open + mapErrs + expectSounds("map screen", {2, 2, 2, 2, 2}) + offMap + (spots != 118) + (pages != 3);
+        app.mapNumber = keepMap, app.area = keepArea;
         std::printf("field menu: bar slides out and back, encounter switch per scenario (flag 4076 refuses it), skill 174 "
                     "banked %d EXP, %d paid into a win; map screen: %d spots, %d off the map; %d problems\n", bank, paid,
                     spots, offMap, problems);
@@ -16640,8 +16817,12 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         for (const auto& [from, to] : app.captureItems)
             for (int i = from; i <= to; ++i) app.game.items[i] = std::max(1, ownedCount(app, i));
         const std::vector<int> numbers = cr::mapNumbersFor(mapName);
-        if (app.captureArea >= 0 && !numbers.empty()) showMap(app, idx, numbers[0], app.captureArea);
-        else showMap(app, idx);
+        if (app.captureArea >= 0 && !numbers.empty()) { // (the map number of that area's, when it has one)
+            int pick = numbers[0];
+            for (int n : numbers)
+                if (cr::areaForMap(n, app.captureArea) == app.captureArea) { pick = n; break; }
+            showMap(app, idx, pick, app.captureArea);
+        } else showMap(app, idx);
     }
     app.showBackground = true;
     app.hideHud = SDL_getenv("CR_CAPTURE_HUD") == nullptr; // (CR_CAPTURE_HUD=1: as the build shows it)
@@ -16991,12 +17172,13 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         if (v == "known" || v == "off") app.game.items[170] = 1;
         if (v == "off") app.game.noEncounters[size_t(fieldRoute(app))] = true;
         app.fieldMenu.fade = 320;
-        if (v.rfind("map", 0) == 0) { // map[step]: the map screen, the story at that step
+        if (v.rfind("map", 0) == 0) { // map[step][:page]: the map screen, the story at that step
             if (v.size() > 3) app.game.setFlag(mapui::kFlagBase + mapui::kFlagStride * fieldRoute(app) + SDL_atoi(v.c_str() + 3), true);
             openMapScreen(app);
-            app.mapScreen.fade = 4;
+            app.mapScreen.fade = 4, app.mapScreen.alpha = 255;
+            if (const size_t c = v.find(':'); c != std::string::npos) app.mapScreen.page = SDL_atoi(v.c_str() + c + 1); // map[step]:page (D07)
             const App::MapScreen& ms = app.mapScreen;
-            std::printf("map screen: map %d, gate %d, texture %dx%d, spot (%d %d), marks (%d %d) (%d %d)\n", app.mapNumber, ms.gate,
+            std::printf("map screen: map %d, field %d, texture %dx%d, spot (%d %d), marks (%d %d) (%d %d)\n", app.mapNumber, ms.field,
                         ms.tex.width, ms.tex.height, ms.spot[0], ms.spot[1], ms.marks[0][0], ms.marks[0][1], ms.marks[1][0],
                         ms.marks[1][1]);
         }
@@ -17757,10 +17939,11 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             }
             break;
         }
-        if (app.mapScreen.open) { // any of these closes it (the original: a tap anywhere)
+        if (app.mapScreen.open) { // confirm as the original's tap (D07: the next page); cancel closes it
             switch (event->key.key) {
-            case SDLK_ESCAPE: case SDLK_BACKSPACE: case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: case SDLK_E:
-                closeMapScreen(app);
+            case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: case SDLK_E: mapScreenTap(app); break;
+            case SDLK_ESCAPE: case SDLK_BACKSPACE:
+                if (app.mapScreen.fade >= 4 && !app.mapScreen.closing) menuSound(app, se::kChoose), closeMapScreen(app);
                 break;
             default: break;
             }
@@ -17783,8 +17966,10 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             }
             if (dir) { puzzle::pkSend(app, dir); break; }
         }
-        if ((event->key.key == SDLK_R || event->key.key == SDLK_J) && fieldMenuWanted(app) && !fieldSceneRunning(app)) {
+        if ((event->key.key == SDLK_R || event->key.key == SDLK_J || event->key.key == SDLK_G) && fieldMenuWanted(app) &&
+            !fieldSceneRunning(app)) {
             if (event->key.key == SDLK_R) toggleFieldMenu(app); // the corner button
+            else if (event->key.key == SDLK_G) { if (fieldBattleButton(app)) app.encounters.force(); } // the battle button
             else if (fieldButtonShown(app, 3)) { // the encounter switch (skill 170 known), bar open or not
                 const bool was = app.fieldMenu.open;
                 app.fieldMenu.open = true;
@@ -17944,8 +18129,8 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             staffRollTap(app);
             break;
         }
-        if (app.mapScreen.open) { // _pad_chk_updw_box(0, 0, 480, 320): a tap closes it
-            closeMapScreen(app);
+        if (app.mapScreen.open) { // _pad_chk_updw_box(0, 0, 480, 320): a tap (D07: the next page)
+            mapScreenTap(app);
             break;
         }
         if (app.mode == Mode::Maps) { // the field menu's corner button and bar
