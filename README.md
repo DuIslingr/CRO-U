@@ -45,20 +45,31 @@ Done so far:
       1 (a blinking overlay) or additive blending
 - [x] a new game reaches the opening; with Omega's data the self-test loads all 373 models and
       spawns and walks the player on all 125 fields
+- [x] the party as Omega keeps it (`_prty`): ten records (the scenario's three in play, a guest,
+      each scenario's block), two scenarios with their own pair, leader, bag and Oz;
+      `prty_init` / `prty_init_new`, `__prty_chg`, Omega's `_pcparam`, starting gear and 255-level
+      `__exp`
+- [x] battles on Omega's data: its 220-byte monster rows (growth, model scale, AI lists, skills,
+      counters, drops, steals, genes, plates by species from `_btlanmtbl`), the pair and story
+      line-ups of `btl_prty_init`, the party's models and names, cameras on the actors' node 1003;
+      the opening's deck battle (group 737) frames as the reference does
+- [x] native calls 2036..2046 (SetPrtyNo, SetPrtyLv_Add, TBox, SaveEvent, Chk / Chg_BtlFld,
+      Chg_MsgSkip, Chg_char, Add_OMU_ITEM, NpcShadow_onoff, puzzle_teleport_cnt)
+- [x] the Camp's main screen (five plates, Scenarios and Collection, the scenario's boards) and
+      the shop (Omega's levels, stock and sell lists)
+- [x] puzzle rooms' stages (16, maps 153..168) from Omega's `PUZZLE_ROOM_DATA`
+- [x] the story plays by itself (`--explore`) from the opening through its first battles to the
+      Ark and the first dungeon
 
 Next (the CR1 self-test's checks that fail on Omega point at most of these):
 
 - [ ] Select Scenario's second page (flag 31: `serect` / `chara3` sliding in by drag)
-- [ ] the party: Omega's (`prty`, the leader / scenario bytes) in place of CR1's eight characters
-- [ ] the opening's first battle: which group / stage the deck scene starts (the battle system
-      runs on Omega's data, with its characters; 651 on stage 11 is a hall, not the deck)
-- [ ] native calls 2036.. (SetPrtyNo, SetPrtyLv_Add, TBox, SaveEvent, Chk / Chg_BtlFld, Chg_MsgSkip,
-      Chg_char, Add_OMU_ITEM, NpcShadow_onoff, puzzle_teleport_cnt, EquipAcce) and 2015 FireWall:
-      Omega's additions (2001..2035 number as CR1's)
-- [ ] the other menus against Omega's `*Put` / `*Prc` (save / load, Camp, shop, World Select, ...)
-- [ ] `sys.evt`'s data (items, monsters, actions) and the battle rules where Omega changed them
-- [ ] puzzle rooms (Omega's `PuzzleManager`), field cameras, the story's scripts
-- [ ] `c207b.bin` (a model the loader rejects)
+- [ ] the Camp's pages (Items, Equip, Genes, Status) at Omega's positions; Scenarios / Collection
+- [ ] Omega's genes (plates 474.., `chk_gene`) in place of CR1's
+- [ ] native calls 2047 EquipAcce and 2015 FireWall
+- [ ] the puzzles' play against Omega's objects (and the self-test's stages); World Select
+- [ ] the rest of the battle rules where Omega changed them (actions, special commands 10..22)
+- [ ] `c207b.bin` (a model the loader rejects), scene effect 1 and additive blending
 
 ## Reverse-engineering groundwork
 
