@@ -2997,7 +2997,7 @@ void loadVideo(App& app, const char* text) {
     v.hdTextures = keyValue(text, "\nhd_textures=", v.hdTextures) != 0;
     v.smoothModels = keyValue(text, "\nsmooth_models=", v.smoothModels);
     if (v.smoothModels != 2 && v.smoothModels != 3) v.smoothModels = 0;
-    v.layout = std::clamp(keyValue(text, "\nlayout=", v.layout), 0, 2);
+    v.layout = std::clamp(keyValue(text, "\nlayout=", v.layout), 0, 3);
     app.environmentEffects = keyValue(text, "\nenvironment_effects=", app.environmentEffects) != 0;
     app.lockOrientation = keyValue(text, "\nlock_orientation=", app.lockOrientation) != 0;
     if (const char* at = SDL_strstr(text, "\npad_confirm=")) app.padConfirmEast = SDL_strncmp(at + 13, "south", 5) != 0;
@@ -3010,7 +3010,8 @@ void applyVideo(App& app) {
     r.setWidescreen(v.widescreen);
     // 2.2.0's / Omega's iPhone screens (3:2): the iPhone's data, or the Vita's alone - its art is the
     // iPhone's Retina sheets (the Vita ran the iPhone code path) - unless the iPad layout is asked for
-    const bool phone = v.layout == 2 || (v.layout == 0 && (app.phoneData || app.vitaOnly));
+    const bool phone = v.layout == 2 || v.layout == 3 || (v.layout == 0 && (app.phoneData || app.vitaOnly));
+    r.setVitaScreen(v.layout == 3 || (v.layout == 0 && app.vitaOnly)); // (its 960 x 544: the Vita alone's own)
     const bool changed = phone != r.phoneLayout();
     r.setPhoneLayout(phone);
     if (changed && app.rendererReady) { // the UI's sheets again, by chk_hd_name for this layout
@@ -3136,7 +3137,7 @@ void adjustVideo(App& app, int row, int dir) {
     case 9: v.upscaler = (v.upscaler + dir + 3) % 3; break;
     case 10: v.upscaleMode = (v.upscaleMode + dir + 5) % 5; break;
     case 11: v.sharpness = std::clamp(v.sharpness + dir * 5, 0, 100); break;
-    case 14: v.layout = (v.layout + dir + 3) % 3; break;
+    case 14: v.layout = (v.layout + dir + 4) % 4; break;
     case 13: v.smoothModels = (v.smoothModels == 0 ? (dir > 0 ? 2 : 3) : v.smoothModels == 2 ? (dir > 0 ? 3 : 0) : (dir > 0 ? 0 : 2)); break;
     case 12: { // HD textures: what loads from now on (the next room); the UI atlas at once
         v.hdTextures = !v.hdTextures;
@@ -3343,8 +3344,8 @@ std::vector<OptRow> optionRows(App& app, int page) {
         pair("Aspect", "4:3", "Wide", v.widescreen ? 1 : 0, [&app](int i) {
             if (app.video.widescreen != (i == 1)) adjustVideo(app, 2, 1);
         });
-        static const char* const kLayout[] = {"Auto", "iPad", "iPhone"};
-        value("Layout", kLayout[std::clamp(v.layout, 0, 2)], [&app](int dir) { adjustVideo(app, 14, dir ? dir : 1); });
+        static const char* const kLayout[] = {"Auto", "iPad", "iPhone", "Vita"};
+        value("Layout", kLayout[std::clamp(v.layout, 0, 3)], [&app](int dir) { adjustVideo(app, 14, dir ? dir : 1); });
         rows.back().hint = "The screens' layout: the iPad release's (4:3) or the iPhone 2.2.0's (3:2); Auto follows the data";
         static const char* const kPaintings[] = {"Original", "Whole", "Fill Width"};
         value("Painted Rooms", kPaintings[std::clamp(v.paintings, 0, 2)], [&app](int dir) { adjustVideo(app, 3, dir ? dir : 1); });
@@ -11582,7 +11583,8 @@ void drawBattle(App& app, float dt) {
     const cr::Mat4 vp = proj * cr::Mat4::lookAt(eye, target, {0, 1, 0});
     b.vp = vp;
     r.setCamera(9.0f, 2000.0f, app.battle.fov * 3.14159265f / 180.0f);
-    r.begin3DRect(0, 0, W, H);
+    if (r.vitaScreen()) r.begin3D(); // (CRView: the Vita's whole screen)
+    else r.begin3DRect(0, 0, W, H);
     drawLoaded(app, b.stage, vp);
     for (const App::Battle::Actor& a : b.actors) {
         if (a.alpha <= 0.001f) continue;
@@ -12221,6 +12223,7 @@ void drawFrame(App& app, bool present = true) {
         };
         drawSceneBack(app, false); // ScnEffectProc's z -1998 layers (the sky, the shaft, ...): behind the painting
         r.setOrigin(0);
+        r.setLayer(3); // (the Vita's screen: fldread_prc's paintings and the view with them at full size)
         if (app.background.id) drawLayer(app.background);
         r.setOrigin(0);
         if (have3D) {
@@ -12252,6 +12255,7 @@ void drawFrame(App& app, bool present = true) {
             else drawPrompt(app, mvp, vx, vy, vw, vh);
         }
         if (app.foreground.id) drawLayer(app.foreground);
+        r.setLayer(0);
         drawSceneEffects(app);
         r.setOrigin(0);
     } else { // Models and Maps share the 3D path
@@ -12327,6 +12331,7 @@ void drawFrame(App& app, bool present = true) {
                 for (App::Portrait& p : app.portraits)
                     if (p.side) p.shade = (p.side < 0) == (app.dialogueInfo[pi].side == 1) ? 1.0f : 128.0f / 255.0f;
         }
+        r.setLayer(3); // (the Vita's screen: a script's Tex2d images at full size)
         for (const App::Portrait& p : app.portraits) // Tex2d: portraits and title cards (over a battle in its talks)
             if (p.tex.id && p.alpha > 0.001f && (!app.battle.active || battletalk::on(app))) {
                 if (p.flags & 0x8000) { // a full-screen card (tex2d_img_prc): the iPad's sheets hold a
@@ -12352,12 +12357,13 @@ void drawFrame(App& app, bool present = true) {
                 const float w = float(p.tex.width) * p.scale, h = float(p.tex.height) * p.scale; // zooms about its centre
                 // Widescreen: side portraits keep to the screen's edges (as the later widescreen
                 // release does), centre images to the middle
-                const float edge = p.side < 0 ? -r.uiX() : p.side > 0 ? r.uiX() : 0.0f;
+                const float edge = r.vitaScreen() ? 0.0f : p.side < 0 ? -r.uiX() : p.side > 0 ? r.uiX() : 0.0f;
                 const float x = edge + p.x - (w - float(p.tex.width)) / 2, y = p.y - (h - float(p.tex.height)) / 2;
                 r.drawQuadUV(p.tex, x, y, w, h, p.side == 1 ? float(p.tex.width) : 0, 0,
                              p.side == 1 ? -float(p.tex.width) : float(p.tex.width), float(p.tex.height), p.shade,
                              p.shade, p.shade, p.alpha); // right-hand portraits are mirrored (slot +0xe)
             }
+        r.setLayer(0);
         if (app.itemWindowOpen) drawItemWindow(app);
     }
     if (fieldMenuWanted(app)) { // the corner button and its bar
@@ -15303,6 +15309,37 @@ int runSelfTest(App& app) {
         app.runner.stop();
         app.game = keepGame;
     }
+    { // The Vita's screen (layout 3): 960 x 544; the layout's 2D as the iPhone layout's (x 1.2: the Vita's
+      // 0.85 of 960 x 640), its pictures' layer 1 / 0.85 of that - tex2d x 0..480 the screen's whole
+      // width -, 12 Vita pixels up; the picture's centre
+        int problems = 0;
+        app.video.layout = 3;
+        applyVideo(app);
+        cr::Renderer& r = app.renderer;
+        drawFrame(app, false);
+        const float px = cr::Renderer::kLogicalH / 544.0f; // logical units a Vita pixel
+        const bool screen = r.vitaScreen() && std::fabs(r.screenW() - 960 * px) < 0.5f;
+        float ux = 32 + r.uiX(), uy = 64;
+        r.layoutToScreen(ux, uy); // the UI: tex2d (0, 0) 72 Vita px in, 48 above the top (0.85 of 960 x 640)
+        r.setLayer(3);
+        float lx = 32 + r.uiX(), ly = 64, rx = 992 + r.uiX(), ry = 704;
+        r.layoutToScreen(lx, ly);
+        r.layoutToScreen(rx, ry);
+        float bx = 500, by = 300;
+        r.layoutToScreen(bx, by);
+        r.screenToLayout(bx, by);
+        r.setLayer(0);
+        const bool ui = std::fabs(ux - 72 * px) < 0.5f && std::fabs(uy - 0) < 0.5f;
+        const bool pictures = std::fabs(lx) < 0.5f && std::fabs(rx - r.screenW()) < 0.5f && std::fabs(ly + 60 * px) < 0.5f &&
+                              std::fabs(ry - (544 + 36) * px) < 0.5f && std::fabs(bx - 500) < 0.01f && std::fabs(by - 300) < 0.01f;
+        problems += !screen + !ui + !pictures;
+        std::printf("vita screen: %.1f wide %s, the UI's tex2d (0, 0) at (%.1f, %.1f) %s, the pictures' x 0..480 at %.1f..%.1f, y 0..320 at "
+                    "%.1f..%.1f %s; %d problems\n", r.screenW(), screen ? "yes" : "NO", ux, uy, ui ? "yes" : "NO", lx, rx, ly, ry,
+                    pictures ? "yes" : "NO", problems);
+        mapErrors += problems;
+        app.video.layout = 1;
+        applyVideo(app);
+    }
     { // The iPhone layout (2.2.0's screens): a 3:2 screen, the layout's safe area filling it, taps
       // mapped back; the field menu's corner button where 2.2.0 has it, and the converted screens
       // drawing without render API errors
@@ -17004,7 +17041,7 @@ void videoArgs(App& app, int argc, char** argv) {
         else if (SDL_strcmp(a, "--borderless") == 0) v.display = 2;
         else if (SDL_strcmp(a, "--widescreen") == 0) v.widescreen = true;
         else if (SDL_strcmp(a, "--layout") == 0 && i + 1 < argc) // --layout auto | ipad | iphone
-            v.layout = SDL_strcmp(argv[i + 1], "iphone") == 0 ? 2 : SDL_strcmp(argv[i + 1], "ipad") == 0 ? 1 : 0;
+            v.layout = SDL_strcmp(argv[i + 1], "vita") == 0 ? 3 : SDL_strcmp(argv[i + 1], "iphone") == 0 ? 2 : SDL_strcmp(argv[i + 1], "ipad") == 0 ? 1 : 0;
         else if (SDL_strcmp(a, "--zoom-paintings") == 0) v.paintings = 2;
         else if (SDL_strcmp(a, "--whole-paintings") == 0) v.paintings = 1;
         else if (SDL_strcmp(a, "--render-scale") == 0 && next) v.renderScale = std::clamp(SDL_atoi(next), 25, 400);

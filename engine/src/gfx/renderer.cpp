@@ -113,7 +113,7 @@ void Renderer::begin3DRect(float x, float y, float w, float h) {
     x += originX_;
     if (phone_) {
         layoutToScreen(x, y);
-        w *= kPhoneScale, h *= kPhoneScale;
+        w *= layoutScale(), h *= layoutScale();
     }
     dev_->setViewport(offX_ + x * scaleX_, offY_ + y * scaleY_, w * scaleX_, h * scaleY_);
 }
@@ -168,7 +168,7 @@ void Renderer::mapScreen(int drawableW, int drawableH) {
     drawableH_ = drawableH;
     // The logical screen: 768 tall, 4:3 or (widescreen) the window's aspect up to 21:9, fitted
     // inside the frame and centred
-    const float least = phone_ ? 1.5f : 4.0f / 3.0f; // the iPhone's 3:2, the iPad's 4:3
+    const float least = vitaScreen() ? 960.0f / 544.0f : phone_ ? 1.5f : 4.0f / 3.0f; // the Vita's, the iPhone's 3:2, the iPad's 4:3
     const float aspect = widescreen_ ? std::clamp(windowAspect_, least, 21.0f / 9.0f) : least;
     screenW_ = kLogicalH * aspect;
     const float sx = float(frameW_) / screenW_, sy = float(frameH_) / kLogicalH;
@@ -247,7 +247,7 @@ void Renderer::drawQuad(const Texture& tex, float x, float y, float w, float h, 
     x += originX_;
     if (phone_) {
         layoutToScreen(x, y);
-        w *= kPhoneScale, h *= kPhoneScale;
+        w *= layoutScale(), h *= layoutScale();
     }
     const float v[24] = {
         x, y, 0, 0,  x + w, y, 1, 0,  x + w, y + h, 1, 1,
@@ -263,7 +263,7 @@ void Renderer::drawQuadUV(const Texture& tex, float x, float y, float w, float h
     x += originX_;
     if (phone_) {
         layoutToScreen(x, y);
-        w *= kPhoneScale, h *= kPhoneScale;
+        w *= layoutScale(), h *= layoutScale();
     }
     const float u0 = sx / tex.width, v0 = sy / tex.height, u1 = (sx + sw) / tex.width, v1 = (sy + sh) / tex.height;
     const float v[24] = {
@@ -280,7 +280,7 @@ void Renderer::drawQuadUVRotated(const Texture& tex, float cx, float cy, float w
     cx += originX_;
     if (phone_) {
         layoutToScreen(cx, cy);
-        w *= kPhoneScale, h *= kPhoneScale;
+        w *= layoutScale(), h *= layoutScale();
     }
     const float c = std::cos(angle), s = std::sin(angle);
     auto at = [&](float dx, float dy, float* out) {
@@ -311,17 +311,22 @@ void Renderer::toLogical(float px, float py, float& lx, float& ly) const {
     if (phone_) screenToLayout(lx, ly);
 }
 
-// The layout's centre stays the screen's; (·, 64) - tex2d y 0 - goes to the top
+// The layout's centre stays the screen's; (·, 64) - tex2d y 0 - goes to the top (on the Vita's
+// screen the pictures' layer is larger about the centre, and moved: _tex2d_draw's 24 / -96 halves)
 void Renderer::layoutToScreen(float& x, float& y) const {
     if (!phone_) return;
-    x = screenW_ * 0.5f + (x - screenW_ * 0.5f) * kPhoneScale;
-    y = (y - 64.0f) * kPhoneScale;
+    const float k = layoutScale();
+    const float dy = !vitaScreen() ? 0.0f : layer_ == 3 ? -12.0f * kLogicalH / 544.0f : layer_ == 7 ? 48.0f * kLogicalH / 544.0f : 0.0f;
+    x = screenW_ * 0.5f + (x - screenW_ * 0.5f) * k;
+    y = kLogicalH * 0.5f + (y - kLogicalH * 0.5f) * k + dy;
 }
 
 void Renderer::screenToLayout(float& x, float& y) const {
     if (!phone_) return;
-    x = screenW_ * 0.5f + (x - screenW_ * 0.5f) / kPhoneScale;
-    y = y / kPhoneScale + 64.0f;
+    const float k = layoutScale();
+    const float dy = !vitaScreen() ? 0.0f : layer_ == 3 ? -12.0f * kLogicalH / 544.0f : layer_ == 7 ? 48.0f * kLogicalH / 544.0f : 0.0f;
+    x = screenW_ * 0.5f + (x - screenW_ * 0.5f) / k;
+    y = kLogicalH * 0.5f + (y - dy - kLogicalH * 0.5f) / k;
 }
 
 void Renderer::setAdditive(bool on) {

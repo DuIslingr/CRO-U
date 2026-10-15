@@ -102,10 +102,18 @@ public:
     void setPhoneLayout(bool on) { phone_ = on; }
     bool phoneLayout() const { return phone_; }
     static constexpr float kPhoneScale = 1.2f;
+    // The Vita's screen (with the iPhone layout): 960 x 544, the layout's 2D at 0.85 - the iPhone
+    // layout's x 1.2 on a 768-tall screen - but its pictures (setLayer 3: the paintings, a script's
+    // Tex2d images, the portraits) at full size, 12 px up, and the logos (7) 48 down (_tex2d_draw)
+    void setVitaScreen(bool on) { vita_ = on; }
+    bool vitaScreen() const { return vita_ && phone_; }
+    void setLayer(int kind) { layer_ = kind; }
+    int layer() const { return layer_; }
+    float layoutScale() const { return vitaScreen() && (layer_ == 3 || layer_ == 7) ? kPhoneScale / 0.85f : kPhoneScale; }
     void layoutToScreen(float& x, float& y) const;
     // The visible screen's right / top edge in the layout's units (toLogical's)
     float layoutRight() const { return phone_ ? screenW_ * 0.5f + screenW_ * 0.5f / kPhoneScale : screenW_; }
-    float layoutTop() const { return phone_ ? 64.0f : 0.0f; }
+    float layoutTop() const { return phone_ ? 384.0f - 384.0f / kPhoneScale : 0.0f; }
     void screenToLayout(float& x, float& y) const;
     // Frames rendered at `scale` x the window's pixels and with `samples` x MSAA, where the
     // device renders offscreen (Vulkan); the frame is then scaled to the window
@@ -125,7 +133,7 @@ public:
     int frameWidth() const { return drawableW_; }      // the frame being drawn, in pixels
     int frameHeight() const { return drawableH_; }
     // Window pixels per logical pixel (text is rasterised at this density).
-    float pixelScale() const { return phone_ ? scale_ * kPhoneScale : scale_; }
+    float pixelScale() const { return phone_ ? scale_ * layoutScale() : scale_; }
 
 private:
     void mapScreen(int w, int h); // logical screen -> the current target's pixels
@@ -139,6 +147,8 @@ private:
     float scale_ = 1, offX_ = 0, offY_ = 0; // scale_: the frame's pixels per logical pixel
     float scaleX_ = 1, scaleY_ = 1;          // the current target's (the scene's, while in it)
     float screenW_ = kLogicalW, originX_ = 0, renderScale_ = 1;
+    bool vita_ = false;
+    int layer_ = 0;
     bool widescreen_ = false, inScene_ = false, phone_ = false;
     int frameW_ = 0, frameH_ = 0; // the full frame (drawableW_/H_ is the scene's while in it)
     float windowAspect_ = 4.0f / 3.0f;
