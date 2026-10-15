@@ -1022,6 +1022,7 @@ void BattleRules::endRound() {
         x.hp = std::min(x.hpMax, x.hp + hp);
         if (x.status[kStatusPoison] > 0) // poison: 10% a round (through btlcalc_dmg_hp)
             x.hp = std::max(0, x.hp - floored(i, x.hpMax / 10));
+        if (i < 2 && stage == 0x13) x.hp = std::max(0, x.hp - x.hpMax / 20); // Omega: stage 19 wears the pair 5% a round
         if (regenFull[size_t(i)]) x.hp = x.hpMax; // a story boss heals whole until its moment comes
         x.counterStance = false;
         if (has(i, 138)) x.mp = std::min(x.mpMax, x.mp + x.mpMax / 20);

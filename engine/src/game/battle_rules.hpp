@@ -214,6 +214,7 @@ public:
     bool allyAuto = false;       // +0xa4f: member 1 is a guest who acts by itself (btlord_enemy_rand)
     int allyScript = 0;          // its rotation: 1 (group 370), 2 (groups 372 / 373)
     int allyCounter = 0;         // +0x17c
+    int stage = -1;              // the battle stage (btlflrname index: +0x8a53d)
     int forceAction = 0;         // tests (--battle-view stage<n>): enemy 2 always chooses this action
     int expGained = 0, ozGained = 0;
     int purse = 0;               // the party's Oz at the start (calc 10 takes from it)

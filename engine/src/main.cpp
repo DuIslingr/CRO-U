@@ -9463,6 +9463,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     rules = cr::BattleRules();
     rules.useRandom(&app.rng); // the one stream, as the original's
     rules.strike = start.strike;
+    rules.stage = start.stage;
     rules.escapeBlocked = flags != 0;
     rules.setupParty(app.game, app.itemTable, route);
     // btl_enemy_init_lv: the scenario's level byte (the band the World Select chose)
