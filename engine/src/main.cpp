@@ -13494,7 +13494,7 @@ int runSelfTest(App& app) {
     // Entry scripts on a new game: each area's script 0 on its first room, then every room's
     // EvrStart 5, played frame by frame to the end (dialogue paged, taps given)
     {
-        int areasRun = 0, roomsRun = 0, stuck = 0, errors = 0, pages = 0, warps = 0, longest = 0, choices = 0;
+        int areasRun = 0, roomsRun = 0, stuck = 0, errors = 0, pages = 0, warps = 0, longest = 0, choices = 0, battles = 0;
         auto play = [&](const char* what, int area, int map) {
             const int startMap = app.mapNumber;
             int f = 0;
@@ -13506,6 +13506,7 @@ int runSelfTest(App& app) {
                 if (app.worldChoiceOpen) { ++choices; answerWorldChoice(app, 0); }
                 app.tapPending = true;
                 if (app.itemWindowOpen) app.game.setFlag(0, true);
+                if (app.battle.active) { ++battles; endBattle(app, true); } // a script's battle: won (else every room after it runs gated)
             }
             longest = std::max(longest, f);
             if (app.mapNumber != startMap) ++warps;
@@ -13517,6 +13518,13 @@ int runSelfTest(App& app) {
                 ++stuck;
                 std::printf("  %s area %d map %d: still running after %d frames (%s, event %d)\n", what, area, map, f,
                             app.runner.where().c_str(), app.runner.eventNo());
+                if (SDL_getenv("CR_STUCK_TRACE")) { // (debugging) the loop it's in
+                    std::vector<std::pair<size_t, int>> ring;
+                    cr::setEventTrace([&](size_t pc, int op) { if (ring.size() < 64) ring.push_back({pc, op}); });
+                    for (int k = 0; k < 3; ++k) stepEvents(app);
+                    cr::setEventTrace(nullptr);
+                    for (const auto& [pc, op] : ring) std::printf("    %#zx op %d\n", pc, op);
+                }
                 app.runner.stop();
             }
             return f;
@@ -13543,8 +13551,8 @@ int runSelfTest(App& app) {
                 play("room script", area, map);
                 ++roomsRun;
             }
-        std::printf("entry scripts: %d areas, %d rooms; %d dialogue pages, %d choices, %d warped, %d errors, %d stuck, "
-                    "longest %d frames\n", areasRun, roomsRun, pages, choices, warps, errors, stuck, longest);
+        std::printf("entry scripts: %d areas, %d rooms; %d dialogue pages, %d choices, %d battles, %d warped, %d errors, %d stuck, "
+                    "longest %d frames\n", areasRun, roomsRun, pages, choices, battles, warps, errors, stuck, longest);
         mapErrors += errors + stuck;
     }
     // New game: talk to everyone in the Ark's hall, frame by frame (pages turned, choices answered yes)
