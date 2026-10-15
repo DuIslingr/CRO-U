@@ -922,11 +922,9 @@ bool loadImage(App& app, const std::string& mct, cr::Image& img) {
 // given (same sizes; 8 bits per channel where the iPad files use palettes, PVRTC or RGBA4444),
 // else the data folder's .mct.
 bool loadOriginalImage(App& app, const std::string& mct, cr::Image& img) {
-    // Art the Vita redrew for its own screen layout (crtool vita: > 12/255 from the iPad's) keeps
-    // the iPhone / iPad version
-    static const char* const kVitaRedrawn[] = {"MAPtitle_hd.mct", "chaos_hd.mct", "chara1_hd.mct", "chara2_hd.mct",
-                                               "chara3_hd.mct", "daimei01_hd.mct", "daimei02_hd.mct", "title1_hd.mct",
-                                               "title2_hd.mct", "t0107-b00a00.mct"};
+    // Art the Vita redrew (crtool vita: > 12/255 from the iPad's - Omega's: the ending's two
+    // backgrounds and the icon sheets) keeps the iPad's version but for the Vita alone
+    static const char* const kVitaRedrawn[] = {"EndBack01.mct", "EndBack02.mct", "icon.mct", "icon_hd.mct"};
     // chk_hd_name (Omega): a base name loads <base>_ipad.mct on an iPad when the data has one - the
     // iPad's own art (window_ipad, title1_ipad, chara1..3_ipad, ...) -, else <base>_hd.mct, else
     // the name itself; names that already say _hd / _ipad are taken as they are. Each in turn
