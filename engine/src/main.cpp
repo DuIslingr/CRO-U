@@ -5901,7 +5901,7 @@ constexpr float kEncountersOff[2] = {468, 664};
 constexpr int kEncounterSkill = 170;
 } // namespace fieldui
 
-int fieldRoute(const App& app) { return std::clamp(app.playerChar / 2, 0, 3); }
+int fieldRoute(const App& app) { return std::clamp(app.game.scenario, 0, cr::kScenarios - 1); } // (Omega: the scenario)
 
 // 2.2.0's iPhone layout: the bar keeps to the screen's corner, (-16, +32) (its menuf_mainPut /
 // Prc and kganMfMainButtonPosTbl)
@@ -8335,9 +8335,10 @@ void fieldWalked(App& app, float dist) {
 
 void playFootsteps(App& app) {
     // PlayFootstepSE: a step sound when the walk / run animation passes one of its two step
-    // frames, chosen (one of three) by the colour of the floor polygon underfoot, and effect 0 (dust)
+    // frames, chosen (one of three) by the colour of the floor polygon underfoot, and the dust
+    // (Omega: the tables' first set for everyone, effect 0x87)
     if (app.walker.gait != cr::Gait::Stand) {
-        const int route = std::clamp(app.playerChar / 2, 0, 3);
+        const int route = 0;
         const short* frames = app.walker.gait == cr::Gait::Run ? cr::kFootstepFrameRun[route] : cr::kFootstepFrameWalk[route];
         const float prev = app.footPrev, now = app.player.time;
         for (int k = 0; k < 2; ++k) {
@@ -8353,7 +8354,7 @@ void playFootsteps(App& app) {
             for (int t = 0; t < 5; ++t)
                 if (c[0] == kSurface[t][0] && c[1] == kSurface[t][1] && c[2] == kSurface[t][2])
                 {
-                    npcEffect(app, 0, -1); // the dust (eff3d_set_fld 0 on the leader)
+                    npcEffect(app, 0x87, -1); // the dust (eff3d_set_fld 0x87 on the leader)
                     const uint32_t id = uint32_t(cr::kFootstepSound[t][SDL_rand(3)]);
                     app.sound.play(id);
                     app.soundLog.push_back(id);
@@ -8400,9 +8401,10 @@ void updatePlayer(App& app, float dt, float camYaw) {
         if (app.runner.running() || !app.dialogue.empty() || !app.havePlayer) continue;
         cr::BattleStart start; // fldencount_encount
         auto random = [&](int n) { return app.rng.get(n); };
-        const int pr = std::clamp(app.playerChar / 2, 0, 3) * 2; // 171 Preemptive / 172 Alert on either member
-        const bool first = cr::hasSkill(app.game, pr, 171) || cr::hasSkill(app.game, pr + 1, 171);
-        const bool alert = cr::hasSkill(app.game, pr, 172) || cr::hasSkill(app.game, pr + 1, 172);
+        const auto& pr = app.game.pairs[size_t(std::clamp(app.game.scenario, 0, cr::kScenarios - 1))]; // 171 / 172 on either
+        auto has = [&](int c, int sk) { return c >= 0 && c < cr::kCharacters && cr::hasSkill(app.game, c, sk); };
+        const bool first = has(pr[0], 171) || has(pr[1], 171);
+        const bool alert = has(pr[0], 172) || has(pr[1], 172);
         if (app.encounters.check(random, partyLevel(app), first, alert, start)) {
             writeResume(app); // (fldencount_encount: the Progress Tracker at the fight's start)
             app.game.vars[58] = 999; // the usual battle music, victory tune 10
@@ -8865,9 +8867,10 @@ void drawWinPiece(App& app, const float* piece, float x, float y, float w, float
 // ---- Battles (btl_main) ----
 
 // The pair's average level (the encounter tables' minimum levels)
-int partyLevel(const App& app) {
-    const int route = std::clamp(app.playerChar / 2, 0, 3);
-    return (app.game.party[size_t(2 * route)].level + app.game.party[size_t(2 * route + 1)].level) / 2;
+int partyLevel(const App& app) { // fldencount_encount: the scenario pair's two records (even one held back)
+    const auto& pr = app.game.pairs[size_t(std::clamp(app.game.scenario, 0, cr::kScenarios - 1))];
+    auto lv = [&](int c) { return c >= 0 && c < cr::kCharacters ? app.game.party[size_t(c)].level : 1; };
+    return (lv(pr[0]) + lv(pr[1])) / 2;
 }
 
 // A system text's first line (sys.evt ids >= 51000), empty if none; `name` fills string 0
@@ -11274,15 +11277,15 @@ cr::Mat4 scriptCameraView(const App& app, const cr::Vec3& eye, const cr::Vec3& t
 }
 
 // btl_lose (flag 0xffd set by the defeat, btl_main 0x4b1): an ordinary battle lost - back to the
-// pair's Ark (area 7 / 13 / 19 / 25, room 103, or 111 once flag 1881 (route 2) / 2281 (route 3)
-// is set) at (-140, -1, 25) facing 180, a fifth of the Oz gone (the same in 1.0.1 and 2.2.0)
+// scenario's Ark (Omega: area 9, map 175 - 189 once flag 0x4f4 is set -; scenario 1 area 10, map
+// 198) at (-140, -1, 25) facing 180, a fifth of the Oz gone
 void loseToArk(App& app) {
     endBattle(app, false);
-    const int pair = std::clamp(app.playerChar / 2, 0, 3);
+    const bool second = app.game.scenario == 1;
     cr::WarpRequest w;
     w.valid = true;
-    w.area = 7 + 6 * pair;
-    w.map = (pair == 2 && app.game.flag(1881)) || (pair == 3 && app.game.flag(2281)) ? 111 : 103;
+    w.area = second ? 10 : 9;
+    w.map = second ? 198 : app.game.flag(0x4f4) ? 189 : 175;
     w.pos[0] = -140, w.pos[1] = -1, w.pos[2] = 25;
     w.angleDegrees = 180;
     cr::addOz(app.game, -(app.game.oz * 20 / 100));
