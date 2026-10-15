@@ -1725,11 +1725,16 @@ void answerChoice(App& app, bool yes) {
 void closeWorldSelect(App& app);
 // The World Select answered at once (tests, the scripted walks): the gate at list position `pos`
 // (-1 Back), its first level band, no skipping
-void answerWorldChoice(App& app, int pos) {
+// (tests, --explore) the World Select answered at once: world `pos` (else Back), its first band; `skip`
+// answers "Skip the first half?" where the world asks it
+bool worldAsksSkip(const App& app, int world, int pair);
+void answerWorldChoice(App& app, int pos, bool skip = false) {
     if (!app.worldChoiceOpen) return;
     App::WorldSelect& ws = app.worldSelect;
     ws.cancelled = pos < 0 || pos >= int(ws.worlds.size());
-    if (!ws.cancelled) ws.world = ws.worlds[size_t(pos)], ws.level = 0, ws.skip = false;
+    if (!ws.cancelled)
+        ws.world = ws.worlds[size_t(pos)], ws.level = 0,
+        ws.skip = skip && worldAsksSkip(app, ws.world, ws.pair);
     menuSound(app, ws.cancelled ? se::kBack : se::kChoose); // MuScrList: an item, or Back
     closeWorldSelect(app);
 }
@@ -5538,6 +5543,10 @@ void levelList(App& app, float from) {
     ws.state = 6;
 }
 } // namespace wldsel
+
+bool worldAsksSkip(const App& app, int world, int pair) { // (WldChoicePrc: a scenario-0 world below 5 once its flag is set)
+    return pair == 0 && world >= 0 && world < 5 && app.game.flag(wldsel::kSkipFlag[world]);
+}
 
 void openWorldSelect(App& app) {
     using namespace wldsel;
@@ -15702,7 +15711,7 @@ int runExplore(App& app, int maxActions) {
             stepEvents(app);
             if (!app.dialogue.empty()) { pagesRead += int(app.dialogue.size()); app.dialogue.clear(); }
             if (app.choiceFlag >= 0) answerChoice(app, true);
-            if (app.worldChoiceOpen) answerWorldChoice(app, int(app.worldSelect.worlds.size()) - 1); // the newest world
+            if (app.worldChoiceOpen) answerWorldChoice(app, int(app.worldSelect.worlds.size()) - 1, true); // the newest world, its first half skipped once done
             if (app.shop.open && !app.shop.talkRunning) closeShop(app); // (it buys nothing)
             if (app.saveScreen.open && !app.booting) closeSaveScreen(app);
             if (app.itemWindowOpen) app.game.setFlag(0, true);
@@ -15748,6 +15757,13 @@ int runExplore(App& app, int maxActions) {
         std::stable_sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) {
             return a.rank != b.rank ? a.rank < b.rank : (!a.examine && b.examine);
         });
+        if (app.puzzle.stage >= 0 && !app.game.flag(3000 + app.puzzle.stage) && !app.runner.running()) {
+            // a puzzle room it can't play: solved on the spot (its clear flag), so the room's ways on open
+            std::printf("     puzzle stage %d taken as solved (flag %d)\n", app.puzzle.stage, 3000 + app.puzzle.stage);
+            app.game.setFlag(3000 + app.puzzle.stage, true);
+            tried.clear();
+            continue;
+        }
         const uint64_t key = stateKey();
         const Cand* pick = nullptr;
         for (const Cand& c : cands)
