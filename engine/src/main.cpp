@@ -13864,7 +13864,7 @@ int runSelfTest(App& app) {
             openingMap = app.mapNumber;
             app.saveDirOverride = keepDir;
         }
-        problems += app.booting || openingMap != 88 || app.playerChar != 0; // the opening (d0550); 82 would be the last battle
+        problems += app.booting || openingMap != 69 || app.playerChar != 0; // the opening (Omega: map 69, the planet)
         if (problems) std::printf("title flow: map %d, leader %d, booting %d\n", openingMap, app.playerChar, int(app.booting));
         app.runner.stop();
         startNewGame(app); // (the hall, for the in-game Options checks below)
@@ -13990,7 +13990,7 @@ int runSelfTest(App& app) {
             stepEvents(app);
             if (!app.booting && app.mapNumber >= 0) openingMap = app.mapNumber;
         }
-        problems += var1 != 2 || openingMap != 88;
+        problems += var1 != 2 || openingMap != 69;
         app.runner.stop();
         // Every story cleared: the emblems, the Final plate, New asking about the clear data first
         {
