@@ -35,7 +35,7 @@
 //    against the target's luck (< -100: 50%, < -49: 60, < 0: 70, < 50: 80, < 101: 90, else 99;
 //    100 when the action always hits)
 //  - the element triangle (1 beats 3, 2 beats 1, 3 beats 2): x1.5 ("weak"), the other way x0.5
-//  - monsters' resistances (+16 physical, +18 genes, +20/22/24 elements 1-3 (0 counts as 1)):
+//  - monsters' resistances (+16 physical, +18 genes, +20/22/24 elements 1-3, none without one):
 //    1 none (immune), 2 half, 3 x1.5, 4 instant death
 //  - variance: x (100 - v + random(2v + 1)) / 100
 //  - healing: -(bonus + power) x (sum of luck) / 100, bonus party +100 with the Break, +50 when
@@ -121,7 +121,7 @@ enum BattleStatus {
     kStatusLuckUp,     // +0x8e (calc 30)
     kStatusSilence,    // +0x8f: no genes (calc 31)
     kStatusEndure,     // +0x90: the next fatal hit leaves 1 HP (calc 32)
-    kStatusInvincible, // +0x91: no damage, acts first (calc 33, for the next round)
+    kStatusInvincible, // +0x91: no damage (calc 33, for the next round; CR1's acted first too)
     kStatusUnused92,
     kStatusUnused93,
     kStatusUnused94,

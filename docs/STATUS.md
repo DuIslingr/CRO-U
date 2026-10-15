@@ -124,3 +124,7 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
       187 / 188 a 5% kill on a weak hit, 189 a 5% dodge of either kind that answers with a counter
       (actions with +24 clear), 190 a quarter of HP back at a round's end (5%); the round's HP
       changes added up and applied once (`_btlcalc_status_prc`)
+- [x] turn order as Omega's `_btlord_calc_spd` has it: the invincible status no longer acts
+      first (CR1's +19998); skill 153's guard also rolled as each round starts
+      (`_btlord_enemy_rand`), and group 0x297's two enemies never act as a pair; the AI's lists,
+      weights and targets checked against `_btlai_make` / `_btlai_prc` (unchanged)
