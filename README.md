@@ -75,7 +75,8 @@ Next (the CR1 self-test's checks that fail on Omega point at most of these):
 - [ ] Select Scenario's second page sliding in by drag (flag 31: page turn only for now)
 - [ ] the puzzles' play against Omega's objects (WarpCrystal CS / NG / WS) and the self-test's stages
 - [ ] the rest of the battle rules where Omega changed them (special commands 10..22)
-- [ ] `c207b.bin` (a model the loader rejects), scene effect 1 and additive blending
+- [ ] scene effect 1 and additive blending (`c207b.bin`, in the NPC model table, isn't in the data:
+      every package there parses)
 
 ## Reverse-engineering groundwork
 
