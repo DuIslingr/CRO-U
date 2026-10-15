@@ -1,8 +1,9 @@
 > **Inherited from CR1:U.** This is CR1:U's README as of the commit CRO-U started from
-> (github.com/DuIslingr/CR1-U, 133d168): the shared engine's build notes, tools, controls and
-> CR1's own status. Paths and names in it are CR1's (`ChaosRingsHD.app/dataHD`, the
-> `ChaosRingsHD` profile folder, PCSG00497); for Omega see the top-level README. The CR1 status
-> list says what the engine does for CR1 - not yet verified for Omega.
+> (github.com/DuIslingr/CR1-U, 133d168): the shared engine's build notes, tools, the viewer and
+> CR1's own status (CR1:U keeps the current version in its own `docs/ENGINE.md`). Paths and names
+> in it are CR1's (`ChaosRingsHD.app/dataHD`, the `ChaosRingsHD` profile folder, PCSG00497); for
+> Omega see the README and `docs/STATUS.md`. The CR1 status list says what the engine does for CR1 -
+> not yet verified for Omega.
 
 # CR1:U — a Chaos Rings reimplementation
 
