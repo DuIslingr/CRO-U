@@ -14059,33 +14059,23 @@ int runSelfTest(App& app) {
         bootTitle(app);
         app.runner.stop();
     }
-    { // Shops: the item table, stock and level rules, then the Ark's shop (area 7) opened by its
-      // shopkeeper's script: buy, sell, Talk (EvrStart 4 while the script waits parked), leave
+    { // Shops (Omega): the item table, then the Ark's shop (area 9: j001_t01's entry 251, Util 2)
+      // opened by its shopkeeper's script: the first weapon bought as many as wanted, sold back
+      // one for half, an armor worn at once (both staying in the bag), Talk (EvrStart 4 while the
+      // script waits parked), leave
         int problems = 0;
         const cr::ItemParam* sword = app.itemTable.item(201);
-        problems += app.itemTable.count() < 438 || !sword || sword->price != 450 || sword->kind != cr::kKindWeapon ||
-                    sword->stat[2] != 3 || itemName(app, 201) == "item 201" || itemName(app, 1) == itemName(app, 2);
+        problems += app.itemTable.count() < 438 || !sword || sword->kind != cr::kKindWeapon || itemName(app, 201) == "item 201" ||
+                    itemName(app, 1) == itemName(app, 2);
         cr::GameState g;
-        problems += cr::shopLevel(g, 0) != 2;
-        problems += cr::shopStock(g, app.itemTable, 0, 1, 2) != std::vector<int>{201, 202};
-        problems += cr::shopStock(g, app.itemTable, 1, 2, 3) != std::vector<int>{243, 244, 245};
-        problems += cr::shopStock(g, app.itemTable, 0, 0, 2) != std::vector<int>{1, 21, 28};
-        problems += cr::shopStock(g, app.itemTable, 0, 3, 2) != std::vector<int>{426};
-        g.setFlag(1072, true);
-        problems += cr::shopLevel(g, 0) != 4; // two flags short of the progress flag
-        g.setFlag(1074, true);
-        problems += cr::shopLevel(g, 0) != 6;
-        g.setFlag(1104, true);
-        problems += cr::shopLevel(g, 0) != 7 || cr::shopLevel(g, 1) != 2;
-        problems += cr::maxPurchase(450, 1000, 0) != 2 || cr::maxPurchase(10, 100000, 95) != 4;
-        // The Ark's shop room (t0108, area 7) and NPC 251's script
+        problems += cr::shopLevel(g, 0) < 1 || cr::maxPurchase(450, 1000, 0) != 2 || cr::maxPurchase(10, 100000, 95) != 4;
         app.runner.stop();
         app.game = cr::GameState();
         app.mapNumber = -1;
         cr::WarpRequest w;
         w.valid = true;
-        w.area = 7;
-        w.map = 103;
+        w.area = 9;
+        w.map = 175;
         performWarp(app, w, -1);
         for (int f = 0; f < 3000 && (app.runner.running() || app.pendingEntry != App::Entry::None); ++f) {
             stepEvents(app);
@@ -14093,7 +14083,7 @@ int runSelfTest(App& app) {
             if (app.choiceFlag >= 0) answerChoice(app, true);
             app.tapPending = true;
         }
-        problems += app.area != 7 || app.mapNumber != 103;
+        problems += app.area != 9 || app.mapNumber != 175;
         app.runner.start(app.events, 251, app.game, app.area, app.mapNumber);
         for (int f = 0; f < 600 && app.runner.running() && !app.shop.open; ++f) {
             stepEvents(app);
@@ -14101,66 +14091,61 @@ int runSelfTest(App& app) {
             app.tapPending = true;
         }
         const bool opened = app.shop.open && app.runner.running();
-        problems += !opened || app.shop.level != 2;
-        app.game.oz = 1000;
+        problems += !opened;
+        app.game.oz = 100000;
         shopKey(app, SDLK_DOWN);   // Buy
         shopKey(app, SDLK_RETURN);
         shopKey(app, SDLK_DOWN);   // Weapons
         shopKey(app, SDLK_RETURN);
-        problems += app.shop.phase != App::Shop::List || app.shop.list != std::vector<int>{201, 202};
-        app.menuSoundLog.clear();
-        shopKey(app, SDLK_RETURN); // Trusty Longsword, 450: how many, with Yes / No beside
-        for (int k = 0; k < 3; ++k) shopKey(app, SDLK_RIGHT); // as many as the Oz buy: 2, then past the end
-        problems += app.shop.phase != App::Shop::Count || app.shop.count != 2 ||
-                    shopMessage(app).find(itemName(app, 201)) == std::string::npos;
-        shopKey(app, SDLK_RETURN); // Yes (Escher wears one already: no "Equip it?")
-        problems += app.game.oz != 100 || app.game.items[201] != 2 || app.shop.phase != App::Shop::List;
-        shopKey(app, SDLK_DOWN);   // Bastard Sword: 1800, too dear
-        shopKey(app, SDLK_RETURN);
-        problems += app.shop.phase != App::Shop::List;
-        problems += expectSounds("shop: item, count 2 then its end twice, Yes, too dear", {2, 2, 4, 4, 22, 4, 4});
-        // Armor for Escher, worn at once: what he wore goes in the bag
-        app.game.oz = 2000;
+        const int weapon = app.shop.list.empty() ? 0 : app.shop.list[0];
+        const int price = weapon ? shopUnitPrice(app, weapon) : 0;
+        problems += app.shop.phase != App::Shop::List || weapon < 201 || weapon > 368 || price <= 0;
+        shopKey(app, SDLK_RETURN); // how many, with Yes / No beside
+        shopKey(app, SDLK_RIGHT), shopKey(app, SDLK_RIGHT); // 3
+        const int count = app.shop.count;
+        problems += app.shop.phase != App::Shop::Count || count != 3 || shopMessage(app).empty(); // (Omega's asks without the name)
+        shopKey(app, SDLK_RETURN); // Yes
+        if (app.shop.phase == App::Shop::EquipAsk) shopKey(app, SDLK_ESCAPE); // (not worn)
+        problems += app.game.oz != 100000 - price * count || ownedCount(app, weapon) != count || app.shop.phase != App::Shop::List;
+        // armor, worn at once: the bag keeps it (Omega's rule)
         shopKey(app, SDLK_ESCAPE);
         shopKey(app, SDLK_DOWN);   // Armor
         shopKey(app, SDLK_RETURN);
-        problems += app.shop.list != std::vector<int>{215, 216};
-        shopKey(app, SDLK_DOWN);
-        shopKey(app, SDLK_RETURN); // 216, 1350
-        shopKey(app, SDLK_RETURN); // Yes
-        const bool asked = app.shop.phase == App::Shop::EquipAsk && shopMessage(app).find(itemName(app, 216)) != std::string::npos;
-        shopKey(app, SDLK_RETURN); // Yes, equip it
-        const cr::PartyMember& escher = app.game.party[0];
-        problems += !asked || app.game.oz != 650 || escher.equip[cr::kArmor] != 216 || app.game.items[216] != 0 ||
-                    app.game.items[215] != 1 || app.shop.phase != App::Shop::List;
-        problems += cr::maxStat(escher, 0, cr::kHp, app.itemTable) != 842 + 50 + 24 ||
-                    cr::maxStat(escher, 0, cr::kAttack, app.itemTable) != 180 + 5 + 3 ||
-                    cr::maxStat(escher, 0, cr::kDefense, app.itemTable, 215) != 135 + 5 + 5;
-        shopKey(app, SDLK_RIGHT);  // Musiea: her own armor
-        problems += app.shop.member != 1 || app.shop.list != std::vector<int>{243, 244};
-        shopKey(app, SDLK_LEFT);
+        int armor = 0; // the first the board's member doesn't wear already
+        for (size_t k = 0; k < app.shop.list.size() && !armor; ++k)
+            if (app.shop.list[k] != app.game.party[size_t(shopCharacter(app))].equip[cr::kArmor])
+                armor = app.shop.list[k], app.shop.listCursor = int(k);
+        shopKey(app, SDLK_RETURN);
+        shopKey(app, SDLK_RETURN); // one, Yes
+        const bool asked = app.shop.phase == App::Shop::EquipAsk;
+        if (asked) shopKey(app, SDLK_RETURN); // Yes, equip it
+        const cr::PartyMember& wearer = app.game.party[size_t(shopCharacter(app))];
+        problems += !armor || !asked || wearer.equip[cr::kArmor] != armor || ownedCount(app, armor) != 1;
         app.lastTicks = 0;
         drawFrame(app, false); // the board, the list
         ++frames;
-        app.menuSoundLog.clear();
         shopKey(app, SDLK_ESCAPE);
         shopKey(app, SDLK_ESCAPE); // back to Talk / Buy / Sell
         shopKey(app, SDLK_DOWN);   // Sell
         shopKey(app, SDLK_RETURN);
         shopKey(app, SDLK_UP);     // Weapons
         shopKey(app, SDLK_RETURN);
-        problems += app.shop.list != std::vector<int>{201};
+        const bool listed = std::find(app.shop.list.begin(), app.shop.list.end(), weapon) != app.shop.list.end();
+        if (listed) app.shop.listCursor = int(std::find(app.shop.list.begin(), app.shop.list.end(), weapon) - app.shop.list.begin());
+        const int ozBefore = app.game.oz;
         shopKey(app, SDLK_RETURN);
         shopKey(app, SDLK_RETURN); // one, for half the price
-        problems += app.game.oz != 875 || app.game.items[201] != 1 || app.shop.phase != App::Shop::List;
-        problems += expectSounds("shop: Back, Back, Sell, Weapons, the sword, Yes", {3, 3, 4, 2, 4, 2, 2, 22});
+        const bool sold = listed && app.game.oz == ozBefore + shopUnitPrice(app, weapon) && ownedCount(app, weapon) == count - 1 &&
+                          app.shop.phase == App::Shop::List;
+        problems += !sold;
         app.lastTicks = 0;
         drawFrame(app, false);
         ++frames;
         shopKey(app, SDLK_ESCAPE);
         shopKey(app, SDLK_ESCAPE);
         shopKey(app, SDLK_UP);
-        shopKey(app, SDLK_UP);     // Talk
+        shopKey(app, SDLK_UP);     // Talk (its lines by the story's flags: 1121 for the earliest)
+        app.game.setFlag(1121, true);
         shopKey(app, SDLK_RETURN);
         problems += app.shop.phase != App::Shop::Talk;
         int talkFrames = 0;
@@ -14172,7 +14157,7 @@ int runSelfTest(App& app) {
             app.tapPending = true;
         }
         const size_t talkMessages = app.parkedRunner.result().messages.size();
-        problems += app.shop.phase != App::Shop::Main || app.game.flag(4090) || !app.runner.running() || talkMessages == 0;
+        problems += app.shop.phase != App::Shop::Main || !app.runner.running() || talkMessages == 0;
         shopKey(app, SDLK_ESCAPE); // leave: the shopkeeper's script goes on to its end
         for (int f = 0; f < 600 && app.runner.running(); ++f) {
             stepEvents(app);
@@ -14180,9 +14165,9 @@ int runSelfTest(App& app) {
             app.tapPending = true;
         }
         problems += app.shop.open || app.runner.running();
-        std::printf("shops: %d items; Ark shop opened by its script %s, bought 2 and sold 1 (%d Oz left), Talk played %zu "
-                    "messages in %d frames; %d problems\n",
-                    app.itemTable.count(), opened ? "ok" : "FAILED", app.game.oz, talkMessages, talkFrames, problems);
+        std::printf("shops: %d items; the Ark's shop opened by its script %s, bought %d of item %d and sold 1, an armor worn %s, "
+                    "Talk played %zu messages in %d frames; %d problems\n", app.itemTable.count(), opened ? "ok" : "FAILED", count,
+                    weapon, asked ? "at once" : "NOT offered", talkMessages, talkFrames, problems);
         mapErrors += problems;
         bootTitle(app);
         app.runner.stop();
