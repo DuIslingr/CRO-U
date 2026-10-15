@@ -92,6 +92,8 @@ struct BattleActionDef {
     int variance = 0, motion = 0, element = 0;
     bool affinity = false;
     bool hostile = false;   // +23 == 0: a barrier (calc 26) neutralizes it
+    bool sureGene = false;  // +20 == 1: no gene dodge (btlque_make_que clears its +0xa5)
+    bool dodgeable = false; // Omega's +24 == 0: skill 189 may dodge it
     // The voiced releases' records (2.2.0: 38 bytes, these six s16 at +10, the rest 12 later):
     // the battle-voice situations a turn's actor says - the party's for its three variants, then
     // a monster's (_btlvoice_turn); -1 none
@@ -145,7 +147,7 @@ struct Fighter {
     bool rewarded = false;
     bool guest = false;            // prty_init_special: not in the save
     bool robbed = false;           // +0xa0: Steal Item took its item already
-    std::array<bool, 56> skills{}; // 131..186
+    std::array<bool, 68> skills{}; // 131..198 (Omega's skills)
     bool firstAttack = true;       // skill 135's
     bool gone = false;             // fled the battle (calc 11, +0x93)
     bool counterStance = false;    // calc 34 (+0x94): answers every physical hit this round
@@ -343,7 +345,9 @@ private:
     void fallRewards(int enemy, const int actors[2]);
     int zoku(int amount, const BattleActionDef& a, int user, int target, bool magic) const;
     bool holdsBreak(int i) const { return i < 2 ? breakGauge > 0 : breakGauge < 0; }
-    bool blocked(int target, int skill);
+    // btlque_make_que's que +0xa4 / +0xa5: the action fended off by a target's skill (131 hits,
+    // 136 genes, Omega's 189 both)
+    bool dodgeHit_ = false, dodgeGene_ = false;
     bool knows(int item) const;
     int levelBand(int lv);
 
@@ -352,7 +356,7 @@ private:
     // record's slot + 8: Vieg's and Olgar's slots and the guest's warriors, Vahti's - 10 - the sorceress)
     bool fighterKind(int i, bool sorcerer) const;
     int elementScale(const BattleActionDef& a, int user, int target, int& type) const;
-    int resist(const BattleActionDef& a, int user, int target, int amount, bool magic, int& type) const;
+    int resist(const BattleActionDef& a, const int actors[2], int target, int amount, bool magic, int& type);
     void enemyChoice(int enemy, bool asPair, Entry& e, const BattleActionTable& actions, int exclude = 0);
     int aiTarget(const BattleActionDef& a, int user);
     std::vector<int> resolveTargets(const BattleActionDef& a, const Entry& e);

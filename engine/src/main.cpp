@@ -13323,6 +13323,58 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 }
                 std::printf("calcs: fixed, split by targets, to 1, %%HP, MP, Oz stolen, Apples, barrier, revive, poison: %d problems\n", cbad);
                 sbad += cbad;
+                { // btlcalc_zoku_0203: resistance 1 is immune, no element no element resistance; Omega's
+                  // 187 / 188 kill on a weak hit (5%, not a +0x1c monster); status_prc: 190 a quarter
+                  // back (5%), the round's changes added up (133 + poison at full HP: 95)
+                    int zbad = 0;
+                    cr::MonsterDef md;
+                    cr::BattleRules q;
+                    const auto reset = [&] {
+                        for (cr::Fighter& x : q.f) x = cr::Fighter();
+                        q.f[0].present = q.f[2].present = true;
+                        q.f[0].atk = 200, q.f[0].spd = 100, q.f[0].level = q.f[2].level = 1, q.f[0].hp = q.f[0].hpMax = 100;
+                        q.f[2].grd = 0, q.f[2].hp = q.f[2].hpMax = 10000, q.f[2].enemy = true, q.f[2].def = &md;
+                    };
+                    cr::BattleActionDef hit;
+                    hit.id = 10, hit.power = 150, hit.calc = 0, hit.alwaysHits = true, hit.scope = 4, hit.side = 3, hit.affinity = true;
+                    const int who[2] = {0, -1};
+                    md.raw[0x10] = 1; // immune to blows
+                    reset(), q.seed(3);
+                    zbad += q.physical(hit, who, 2).amount != 0;
+                    md.raw[0x10] = 0, md.raw[0x14] = 1; // immune to element 1, the attacker without one
+                    reset(), q.seed(3);
+                    zbad += q.physical(hit, who, 2).amount == 0;
+                    md.raw[0x14] = 0;
+                    int kills = 0, guarded = 0;
+                    for (uint32_t seed = 1; seed <= 1000; ++seed) {
+                        for (int row1c : {0, 1}) {
+                            md.raw[0x1c] = uint8_t(row1c);
+                            reset();
+                            q.f[0].element = 1, q.f[2].element = 3, q.f[0].skills[187 - 131] = true;
+                            q.seed(seed);
+                            const bool kill = q.physical(hit, who, 2).type == cr::kHitKill;
+                            (row1c ? guarded : kills) += kill;
+                        }
+                    }
+                    md.raw[0x1c] = 0;
+                    zbad += kills < 25 || kills > 80 || guarded != 0;
+                    int healed = 0;
+                    for (uint32_t seed = 1; seed <= 1000; ++seed) {
+                        reset();
+                        q.f[0].hp = 100, q.f[0].hpMax = 400, q.f[0].skills[190 - 131] = true;
+                        q.seed(seed);
+                        q.endRound();
+                        healed += q.f[0].hp == 200;
+                    }
+                    zbad += healed < 25 || healed > 80;
+                    reset();
+                    q.f[0].skills[133 - 131] = true, q.f[0].status[cr::kStatusPoison] = 3;
+                    q.endRound();
+                    zbad += q.f[0].hp != 95 || q.f[0].status[cr::kStatusPoison] != 2;
+                    std::printf("resistances and Omega's skills 187..190: %d kills in 1000 weak hits, %d heals in 1000 rounds; %d problems\n",
+                                kills, healed, zbad);
+                    sbad += zbad;
+                }
                 std::printf("skills: resistance, attack, pierce, boost critical, first attack, MP 1/2, recovery, regen, "
                             "Gate +%d, boosts: %d problems\n", gate ? gate->stat[cr::kAttack] : 0, sbad);
                 bad += sbad;

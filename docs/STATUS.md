@@ -115,3 +115,12 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
       covers until their flags, and D07's 58 rooms on three pages a tap turns (the warps, the doors
       and bosses with the count, the items with theirs - `_gkastMapIcon`, `_gkashWarpTbl`, 57111 /
       57112 with vars 0..3); it was CR1's, by map number, for the first 64 maps only
+- [x] the battle rules' remaining differences from Omega's `btlcalc_*` / `btlque_make_que`:
+      monsters' resistance 1 makes them immune (it halved) and an attacker without an element
+      meets no element resistance (it counted as element 1), as `_btlcalc_zoku_0203` has it; a
+      gene's resistance applies even at 0 damage (0406); the dodge skills (131 blows, 136 genes)
+      roll once a target as the action is queued, one success fending off the whole action, and
+      the actions with +20 set can't be dodged as genes; Omega's skills 187..198 count in battle -
+      187 / 188 a 5% kill on a weak hit, 189 a 5% dodge of either kind that answers with a counter
+      (actions with +24 clear), 190 a quarter of HP back at a round's end (5%); the round's HP
+      changes added up and applied once (`_btlcalc_status_prc`)

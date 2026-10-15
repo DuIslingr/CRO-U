@@ -59,8 +59,10 @@ bool BattleActionTable::load(const std::string& dataDir) {
         a.variance = int8_t(r[16]);
         a.motion = r[17];
         a.element = int8_t(r[18]);
+        a.sureGene = r[20] == 1;
         a.affinity = r[22] == 1;
         a.hostile = r[23] == 0;
+        a.dodgeable = voiced && r[24] == 0;
         actions_.push_back(a);
     }
     return !actions_.empty();
@@ -76,7 +78,7 @@ void BattleRules::setupParty(const GameState& gs, const ItemTable& items, int) {
     known_.clear();
     purse = gs.oz;
     for (const auto& [item, count] : gs.items)
-        if (count > 0 && ((item >= 81 && item <= 186) || (item >= 474 && item <= 500))) known_.push_back(item);
+        if (count > 0 && ((item >= kFirstAbility && item <= kLastSkill) || (item >= 474 && item <= 500))) known_.push_back(item);
     // btl_prty_init: the scenario's pair (records 0..2), the second away while flag 0xfed + s holds
     const int s = std::clamp(gs.scenario, 0, kScenarios - 1);
     for (int k = 0; k < 2; ++k) {
@@ -102,7 +104,7 @@ void BattleRules::member(const GameState& gs, const ItemTable& items, int k, int
     x.grd = memberStat(gs, c, kDefense, items);
     x.spd = memberStat(gs, c, kSpeed, items);
     x.lck = memberStat(gs, c, kLuck, items);
-    for (int sk = 131; sk <= 186; ++sk) x.skills[size_t(sk - 131)] = hasSkill(gs, c, sk);
+    for (int sk = kFirstSkill; sk <= kLastSkill; ++sk) x.skills[size_t(sk - kFirstSkill)] = hasSkill(gs, c, sk);
 }
 
 void BattleRules::setupSpecial(const GameState& gs, const ItemTable& items, int group, int) {
@@ -175,7 +177,7 @@ void BattleRules::setupEnemies(const BattleData& data, const std::array<int, 3>&
         x.oz = int(m->genePointsAt(x.level));
         if (x.level >= 20) // chk_skill_btl: a monster's skills (+0xae, five) count from level 20
             for (int k = 0; k < 5; ++k)
-                if (const int s = monsterField(x, 0xae + 2 * k); s >= 131 && s <= 186) x.skills[size_t(s - 131)] = true;
+                if (const int s = monsterField(x, 0xae + 2 * k); isSkill(s)) x.skills[size_t(s - kFirstSkill)] = true;
     }
 }
 
@@ -204,18 +206,13 @@ int BattleRules::attackAction(int fighter) const {
 }
 
 bool BattleRules::has(int i, int skill) const {
-    if (i < 0 || i > 4 || skill < 131 || skill > 186) return false;
-    if (f[size_t(i)].skills[size_t(skill - 131)]) return true;
-    return i < 2 && pair && f[size_t(1 - i)].skills[size_t(skill - 131)];
+    if (i < 0 || i > 4 || !isSkill(skill)) return false;
+    if (f[size_t(i)].skills[size_t(skill - kFirstSkill)]) return true;
+    return i < 2 && pair && f[size_t(1 - i)].skills[size_t(skill - kFirstSkill)];
 }
 
 int BattleRules::geneCost(const BattleActionDef& a, int user) const {
     return user < 2 && has(user, 132) ? a.mp / 2 : a.mp;
-}
-
-// skills 131 / 136: the target fends the whole hit off ("Miss!")
-bool BattleRules::blocked(int target, int skill) {
-    return has(target, skill) && random(100) < (holdsBreak(target) ? 20 : 10);
 }
 
 // btlcalc_zoku_0204: the skills' scaling of a hit
@@ -331,24 +328,30 @@ int BattleRules::elementScale(const BattleActionDef& a, int user, int target, in
     return 50;
 }
 
-// A monster's resistances (+0x10 physical / +0x12 genes, +0x14.. by the user's element). Returns
-// the amount; `type` becomes kHitKill for instant death, kHitNoEffect when immune
-int BattleRules::resist(const BattleActionDef&, int user, int target, int amount, bool magic, int& type) const {
-    if (target < 2 || amount < 1) return amount;
+// btlcalc_zoku_0203: a monster's resistances - +0x10 physical / +0x12 genes, then +0x14 / 16 / 18
+// by the user's element (none without one): 1 immune (0, the hit's type as it was), 2 half, 3
+// x1.5, 4 instant death (`type` kHitKill, the amount its HP). Omega: then skill 187 or 188 on an
+// attacker makes a weak hit (the triangle's) a kill 5% of the time, unless the row's +0x1c is set
+int BattleRules::resist(const BattleActionDef&, const int actors[2], int target, int amount, bool magic, int& type) {
+    if (target < 2) return amount;
     const Fighter& t = f[size_t(target)];
-    switch (monsterField(t, magic ? 0x12 : 0x10)) {
-    case 1: case 2: amount /= 2; break;
-    case 3: amount = amount * 150 / 100; break;
-    default: break;
+    const int e = f[size_t(actors[0])].element;
+    for (int off : {magic ? 0x12 : 0x10, e >= 1 && e <= 3 ? 0x12 + 2 * e : -1}) {
+        if (off < 0) break;
+        switch (monsterField(t, off)) {
+        case 1: return 0;
+        case 2: amount /= 2; break;
+        case 3: amount = amount * 150 / 100; break;
+        case 4: type = kHitKill; return t.hp;
+        default: break;
+        }
     }
-    const int e = f[size_t(user)].element;
-    switch (monsterField(t, e <= 1 ? 0x14 : e == 2 ? 0x16 : 0x18)) {
-    case 1: type = kHitNoEffect; return 0;
-    case 2: amount /= 2; break;
-    case 3: amount = amount * 150 / 100; break;
-    case 4: type = kHitKill; return t.hp;
-    default: break;
-    }
+    if (!monsterField(t, 0x1c))
+        for (int k = 0; k < 2; ++k)
+            if (actors[k] >= 0 && type == kHitWeak && (has(actors[k], 187) || has(actors[k], 188)) && random(100) < 5) {
+                type = kHitKill;
+                return t.hp;
+            }
     return amount;
 }
 
@@ -395,9 +398,9 @@ BattleHit BattleRules::physical(const BattleActionDef& a, const int actors[2], i
     if (scenario == 0 && group == 693 && (a.id == 27 || a.id == 28)) dmg = 0, h.type = 0; // (0x2b5: the story's)
     dmg = std::max(dmg, 0);
     if (h.type != kHitGuard) dmg = dmg * elementScale(a, actors[0], target, h.type) / 100;
-    if (dmg >= 1) dmg = resist(a, actors[0], target, dmg, false, h.type);
+    if (dmg >= 1) dmg = resist(a, actors, target, dmg, false, h.type);
     if (dmg >= 1 && h.type != kHitKill) dmg = zoku(dmg, a, actors[0], target, false);
-    if (blocked(target, 131)) dmg = 0, h.type = kHitMiss;
+    if (dodgeHit_) dmg = 0, h.type = kHitMiss;
     h.amount = dmg;
     return h;
 }
@@ -423,10 +426,10 @@ BattleHit BattleRules::magical(const BattleActionDef& a, const int actors[2], in
             if (actors[k] >= 0) f[size_t(actors[k])].element = a.element, elementTaken = true;
     dmg = std::max(dmg, 0);
     dmg = dmg * elementScale(a, actors[0], target, h.type) / 100;
-    if (dmg >= 1) dmg = resist(a, actors[0], target, dmg, true, h.type);
+    dmg = resist(a, actors, target, dmg, true, h.type); // (0406: even at 0)
     if (dmg >= 1 && h.type != kHitKill) dmg = zoku(dmg, a, actors[0], target, true);
     if (a.id == 241) dmg = 99999, h.type = 0; // (0xf1, 435's quick form) all of it, unblockable
-    else if (blocked(target, 136)) dmg = 0, h.type = kHitMiss;
+    else if (dodgeGene_) dmg = 0, h.type = kHitMiss;
     h.amount = dmg;
     return h;
 }
@@ -742,6 +745,19 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
         int counterBy = -1;
         const std::vector<int> hitList = resolveTargets(*a, e);
         firstTarget_ = hitList.empty() ? -1 : hitList.front(); // btlcalc_critical reads G+0x7a
+        // btlque_make_que: each target's 131 / 136 (20% holding the Break, else 10) and Omega's 189
+        // (5%, a dodgeable action, and the dodger answers it) - one success fends off the whole
+        // action ("Miss!" on every target); +20 rules the gene dodge out
+        dodgeHit_ = dodgeGene_ = false;
+        for (int t : hitList) {
+            if (has(t, 131) && !dodgeHit_ && random(100) < (holdsBreak(t) ? 20 : 10)) dodgeHit_ = true;
+            if (has(t, 136) && !dodgeGene_ && random(100) < (holdsBreak(t) ? 20 : 10)) dodgeGene_ = true;
+            if (has(t, 189) && a->dodgeable && random(100) < 5) {
+                dodgeHit_ = dodgeGene_ = true;
+                if (counterBy < 0 && !e.counter && e.actors[0] >= 0 && (t < 2) != (e.actors[0] < 2)) counterBy = t;
+            }
+        }
+        if (a->sureGene) dodgeGene_ = false;
         int drained = 0;
         auto atkSumOf = [&]() { int s = 0; for (int k : e.actors) if (k >= 0) s += atkOf(k); return s; };
         auto magicBoost = [&](int v) { return has(e.actors[0], 156) ? v + v / 5 : v; };
@@ -774,7 +790,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                 if (calc == 7) { base = 0; for (int k : e.actors) if (k >= 0) base += std::max(0, f[size_t(k)].hp - 1); }
                 if (calc == 8) base = atkSumOf();
                 h.amount = magicBoost(zoku(a->power * base / 100, *a, e.actors[0], t, true));
-                if (blocked(t, 136)) h.amount = 0, h.type = kHitMiss;
+                if (dodgeGene_) h.amount = 0, h.type = kHitMiss;
                 if (calc == 8) drained += h.amount;
                 break;
             }
@@ -1113,22 +1129,31 @@ void BattleRules::endRound() {
     // btlord_chk: the holder wasn't hit all round
     if (outcome() == 0 && !(breakFlags & 0x400) && (breakFlags & 0x8000)) breakEvent(breakGauge < 1 ? 2 : 0, 0x40, -1);
     catchUpBreak();
-    for (int i = 0; i < 5; ++i) { // btlcalc_status_prc: the regen status (10%) and skills 133 / 138 (5%)
+    // btlcalc_status_prc, each fighter standing: its statuses' rounds counted down (not Endure's or
+    // the Ward's), then one change of HP - skill 190 a quarter back (5%; the pair's one roll in pair
+    // mode), 133 a twentieth back, poison a tenth off, stage 19 a twentieth off the pair (Omega), a
+    // story boss whole again - through btlcalc_dmg_hp (its floors; the Break left alone, +0xa76);
+    // skill 138 a twentieth of MP back
+    const bool pairRegen = pair && has(0, 190) && random(100) <= 4;
+    for (int i = 0; i < 5; ++i) {
         Fighter& x = f[size_t(i)];
         if (!x.alive()) continue;
-        int hp = has(i, 133) ? x.hpMax / 20 : 0;
-        x.hp = std::min(x.hpMax, x.hp + hp);
-        if (x.status[kStatusPoison] > 0) // poison: 10% a round (through btlcalc_dmg_hp)
-            x.hp = std::max(0, x.hp - floored(i, x.hpMax / 10));
-        if (i < 2 && stage == 0x13) x.hp = std::max(0, x.hp - x.hpMax / 20); // Omega: stage 19 wears the pair 5% a round
-        if (regenFull[size_t(i)]) x.hp = x.hpMax; // a story boss heals whole until its moment comes
         x.counterStance = false;
-        if (has(i, 138)) x.mp = std::min(x.mpMax, x.mp + x.mpMax / 20);
-    }
-    for (Fighter& x : f) {
         x.guarding = false;
+        int d = 0;
+        if (has(i, 190)) {
+            const int roll = random(100);
+            if (i < 2 && pair ? pairRegen : roll <= 4) d = -(x.hpMax / 4);
+        }
+        if (has(i, 133)) d -= x.hpMax / 20;
+        if (has(i, 138)) x.mp = std::min(x.mpMax, x.mp + x.mpMax / 20);
+        if (x.status[kStatusPoison] > 0) d += x.hpMax / 10;
         for (int k = 0; k < kStatusCount; ++k)
             if (k != kStatusEndure && k != kStatusWard && x.status[k] > 0) --x.status[k];
+        if (i < 2 && stage == 0x13) d += x.hpMax / 20;
+        if (regenFull[size_t(i)]) d = x.hp - x.hpMax; // (group 0x293's, until flag 0x58c)
+        if (d > 0) d = floored(i, d);
+        x.hp = std::clamp(x.hp - d, 0, x.hpMax);
     }
 }
 
@@ -1159,7 +1184,7 @@ void BattleRules::fallRewards(int enemy, const int actors[2]) {
         const int chance = d < -4 ? 20 : d < 1 ? 30 : d < 6 ? 40 : 50;
         if (random(100) < chance) {
             const int item = row(0xc8 + 2 * levelBand(lv)); // five, by level
-            if (item > 0 && !((item >= 81 && item <= 186) && knows(item))) drops.push_back(item);
+            if (item > 0 && !((item >= 81 && item <= 191) && knows(item))) drops.push_back(item); // (steal_item_add: 81..191 learned)
         }
     }
     if (row(0xbc) != 0) { // a gene
