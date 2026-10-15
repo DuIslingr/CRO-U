@@ -9318,11 +9318,11 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         } else if (style & 0x20) { // a black band across the bottom (tex2d y 252..352), the name on its edge
             r.fillRect(left, 2.0f * 252 + 64, width, 768 - (2.0f * 252 + 64), 0, 0, 0, 1);
             if (!speaker.empty()) { // PutMsg: drawfont_l at tex2d (16, 236), just above the band
-                const float nx = 2.0f * 16 + 32, ny = 2.0f * 236 + 64;
+                const float nx = 2.0f * 16 + 32, ny = 2.0f * 236 + 64 - 11; // (the larger box's offset)
                 app.nameHud.setTint(0, 0, 0); // (an outline, so it reads over a bright scene too)
-                for (int k = 0; k < 4; ++k) app.nameHud.drawAt(r, {speaker}, nx + (k & 1 ? 2 : -2), ny + (k & 2 ? 2 : -2), 2.2f, 0, 0, 0.0f);
+                for (int k = 0; k < 4; ++k) app.nameHud.drawAt(r, {speaker}, nx + (k & 1 ? 2 : -2), ny + (k & 2 ? 2 : -2), kNameScale, 0, 0, 0.0f);
                 app.nameHud.setTint(1, 1, 1);
-                app.nameHud.drawAt(r, {speaker}, nx, ny, 2.2f, 0, 0, 0.0f);
+                app.nameHud.drawAt(r, {speaker}, nx, ny, kNameScale, 0, 0, 0.0f);
             }
         } else if (style & 8) { // a tutorial's band: dark, its edges soft (8 / 88 / 8 tex2d), the text further left
             const float a = 0.75f, y1 = wy + 16, y2 = wy + 192;
