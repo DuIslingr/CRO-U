@@ -374,6 +374,21 @@ struct App {
     int manualCursor = 0, manualTop = 0, manualAnim = 0;
     bool charSelectOpen = false;
     int charSelectCursor = 0, charSelectAnim = 0, chosenPair = 1, charSelectPage = 0;
+    struct StartPage { // StartPrc / StartPut: the second scenario's page, pulled down by its cord
+        int phase = 0;             // 0 still, 1 falling, 2 / 3 its bounce, 4 going back up
+        int t = 0;                 // frames into the fall (DAT_e596c)
+        float y = -440;            // its offset (DAT_e5994): from e59b0 down to 0
+        bool shown = false;        // window 1 on
+        float sway = 0;            // the cord's turn (DAT_e5988: _gafMoveTbl summed, out and back)
+        int swayStep = 0;
+        bool swayBack = false;
+        bool holding = false;      // a finger on the cord (DAT_e599d)
+        float holdY = 0, pull = 0; // ... where it went down, how far it's pulled (0..24)
+        int bob = 0;               // the arrow's PictMove (0..4, 2 a step)
+        bool bobBack = false;
+        float clock = 0;
+        cr::Texture serect;        // slot 0x11: the cord, the arrow
+    } startPage;
     cr::Texture charSelectArt, charSelectArt2; // Select Scenario's sheets: chara1 / chara2 (slot 0x10), chara3 (0x12)
     struct Camp {                          // the Camp menu's page and cursors (__menuu_CampMain*)
         enum Page { Main, Items, Equip, Status, Genes } page = Main;
@@ -7323,11 +7338,12 @@ void manualClick(App& app, float px, float py) {
 // -64), iPhone 22 at (0, 0)), Back at (124, 288), ONE plate at (172, 232) - word 12, 17 on the
 // second page -, and the banner over it all (iPad 27 at (-32, -64), iPhone 26 at (0, 0); from the
 // page's sheet). StartClr: var 0 = 0 Back, 1 the first scenario, 2 the second.
-// (Not yet: the second page's slide-in - StartPrc's drag over x 360..480 with gafMoveTbl, serect's
-// pictures 28 / 29 and chara3's 24 / 32 moving with it; here Left / Right just turn the page.)
+// The second page (StartPrc 4..8): chara3's 24 / 32 fall over the first, pulled by serect's cord
+// (29, rocking by _gafMoveTbl) over x 360..480; Left / Right (the port's) turn it as well.
 constexpr int kScenarioWord[2] = {12, 17};
 
 bool laterPairsOpen(const App& app) { return allPairsFlags(app).flag(31); } // StartSet: the second page
+float pageTop(const App& app);
 
 void openCharSelect(App& app) {
     app.charSelectOpen = true;
@@ -7340,13 +7356,89 @@ void openCharSelect(App& app) {
     cr::Image img;
     if (loadImage(app, g.flag(0x6a2) || g.flag(0x4bd) ? "chara2.mct" : "chara1.mct", img)) app.charSelectArt = app.renderer.upload(img);
     if (g.flag(31) && loadImage(app, "chara3.mct", img)) app.charSelectArt2 = app.renderer.upload(img);
+    app.renderer.destroy(app.startPage.serect);
+    app.startPage = App::StartPage();
+    app.startPage.y = pageTop(app);
+    if (g.flag(31) && loadImage(app, "serect.mct", img)) app.startPage.serect = app.renderer.upload(img);
 }
 
+// The page's fall and rise (StartPrc states 4 / 6 / 8): down from e59b0 (iPad -440, iPhone -388)
+// as 4.5 t^2, a bounce (up at 2 x 20 a frame to -80, back at 20 / 2), or back up at 20 a frame;
+// the music and a sound each way
+constexpr float kPageSpeed = 20;
+float pageTop(const App& app) { return app.renderer.phoneLayout() ? -388.0f : -440.0f; }
+
 void charSelectTurn(App& app) { // the second page, once it's open
+    App::StartPage& sp = app.startPage;
     if (!laterPairsOpen(app) || !app.charSelectArt2.id) { menuSound(app, se::kBuzzer); return; }
-    app.charSelectPage ^= 1;
-    menuSound(app, se::kSlide);
+    if (sp.phase) return;
+    sp.holding = false, sp.pull = 0;
+    sp.t = 0;
+    if (app.charSelectPage == 0) {
+        sp.shown = true;
+        sp.y = pageTop(app);
+        sp.phase = 1;
+        playBgm(app, 0x13);
+        menuSound(app, 0xf8);
+    } else {
+        sp.phase = 4;
+        playBgm(app, 0x1d);
+        menuSound(app, 0x91);
+    }
 }
+
+void stepCharSelect(App& app) {
+    App::StartPage& sp = app.startPage;
+    const float top = pageTop(app);
+    switch (sp.phase) {
+    case 1:
+        sp.y = top + 4.5f * float(sp.t) * float(sp.t);
+        ++sp.t;
+        if (sp.y >= 0) sp.y = 0, sp.phase = 2;
+        break;
+    case 2:
+        sp.y -= 2 * kPageSpeed;
+        if (sp.y <= -80) sp.y = -80, sp.phase = 3;
+        break;
+    case 3:
+        sp.y += kPageSpeed / 2;
+        if (sp.y >= 0) sp.y = 0, sp.phase = 0, app.charSelectPage = 1;
+        break;
+    case 4:
+        sp.y -= kPageSpeed;
+        if (sp.y <= top) sp.y = top, sp.phase = 0, sp.shown = false, app.charSelectPage = 0;
+        break;
+    default: break;
+    }
+    if (!sp.phase && laterPairsOpen(app)) { // the cord rocks (state 2)
+        static const float kSway[20] = {0.009f, 0.008f, 0.007f, 0.006f, 0.005f, 0.004f, 0.003f, 0.002f, 0.001f, 0,
+                                        0, -0.001f, -0.002f, -0.003f, -0.004f, -0.005f, -0.006f, -0.007f, -0.008f, -0.009f};
+        sp.sway += sp.swayBack ? -kSway[sp.swayStep] : kSway[sp.swayStep];
+        if (++sp.swayStep > 19) sp.swayStep = 0, sp.swayBack = !sp.swayBack;
+    }
+    if (!sp.bobBack) { if ((sp.bob += 2) >= 8) sp.bobBack = true; }
+    else if ((sp.bob -= 2) <= 0) sp.bobBack = false;
+}
+
+// The cord (ComUty_PadChkMove over (360, 0, 120, 160)): held and pulled 24 down, the page turns
+void charSelectPress(App& app, float mx, float my) {
+    App::StartPage& sp = app.startPage;
+    if (sp.phase || !laterPairsOpen(app) || mx < 360 || mx >= 480 || my < 0 || my >= 160) return;
+    sp.holding = true;
+    sp.holdY = my;
+    sp.pull = 0;
+}
+void charSelectDrag(App& app, float my) {
+    App::StartPage& sp = app.startPage;
+    if (!sp.holding) return;
+    sp.pull = std::clamp(my - sp.holdY, 0.0f, 24.0f);
+    if (sp.pull >= 24) {
+        menuSound(app, se::kSlide);
+        sp.sway = 0, sp.swayStep = 0, sp.swayBack = false;
+        charSelectTurn(app);
+    }
+}
+void charSelectRelease(App& app) { app.startPage.holding = false, app.startPage.pull = 0; }
 
 void closeCharSelect(App& app, int scenario) { // __menuu_StartClr: var 0 = 0 (Back), 1 / 2 the scenario
     app.charSelectOpen = false;
@@ -7359,6 +7451,8 @@ void closeCharSelect(App& app, int scenario) { // __menuu_StartClr: var 0 = 0 (B
         app.charSelectArt2 = cr::Texture();
     }
     app.renderer.destroy(app.charSelectArt2);
+    app.renderer.destroy(app.startPage.serect);
+    app.startPage = App::StartPage();
     app.charSelectPage = 0;
 }
 
@@ -7387,17 +7481,47 @@ void drawCharSelect(App& app) {
     r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 1);
     r.setOrigin(r.uiX());
     const float t = std::min(1.0f, app.charSelectAnim / 10.0f);
-    drawCharArt(app, t, false); // the art (z -20)
+    const App::StartPage& sp = app.startPage;
+    const bool phone = r.phoneLayout(), later = laterPairsOpen(app) && app.charSelectArt2.id;
+    { // window 0: the first page's art (z -20)
+        const int page = app.charSelectPage;
+        app.charSelectPage = 0;
+        drawCharArt(app, t, false);
+        app.charSelectPage = page;
+    }
+    if (later && sp.shown) { // window 1: the second page's, falling (chara3 24 and 32 under it; iPhone 22 / 31)
+        if (phone) {
+            outPicture(m, app.charSelectArt2, 22, 0, sp.y, t);
+            outPicture(m, app.charSelectArt2, 31, 0, sp.y + 320, t);
+        } else {
+            outPicture(m, app.charSelectArt2, 24, -32, sp.y - 64, t);
+            outPicture(m, app.charSelectArt2, 32, -16, sp.y + 352, t);
+        }
+    }
     m.backButton(124, 288, false, 0, t); // ComUty_BackButtonPosSetXYDraw(124, 288)
     const int word = kScenarioWord[app.charSelectPage & 1];
     m.plate(172, 232, plateIcon(word), word, app.charSelectCursor == 0, t, false);
-    drawCharArt(app, t, true); // (the banner, z -4, over the plate's row)
+    if (later && sp.serect.id) { // window 2: the cord (serect 29, tex2d_add at (260, pull - 205), turned), the arrow while held, 28
+        const short* q = cr::kOutReadPicture[29];
+        const float k = sp.serect.width >= 1024 ? 2.0f : 1.0f;
+        r.drawQuadUVRotated(sp.serect, 2 * (16 + 260 + q[2] / 2.0f), 2 * (32 + std::max(sp.pull, 0.0f) - 205 + q[3] / 2.0f),
+                            2.0f * q[2], 2.0f * q[3], q[0] * k, q[1] * k, q[2] * k, q[3] * k, sp.sway * 6.2831853f, t);
+        if (sp.holding) outPicture(m, sp.serect, 30, 406, 178 - float(sp.bob), t);
+        outPicture(m, sp.serect, 28, -160, 24, t);
+    }
+    { // window 3: the banner over it all (z -4) - chara3's once the second page is open
+        const int page = app.charSelectPage;
+        app.charSelectPage = later ? 1 : 0;
+        drawCharArt(app, t, true);
+        app.charSelectPage = page;
+    }
     if (keyHints(app)) // (our key hints)
         m.text(laterPairsOpen(app) ? "Enter  Left/Right: the other scenario  Esc: back" : "Enter  Esc: back", 20, 352, false,
                t * 0.8f, 9);
 }
 
 void charSelectKey(App& app, SDL_Keycode key) {
+    if (app.startPage.phase) return; // (the page on its way)
     switch (key) {
     case SDLK_LEFT: case SDLK_A: case SDLK_RIGHT: case SDLK_D: case SDLK_Q: case SDLK_TAB: case SDLK_PAGEUP: case SDLK_PAGEDOWN:
         charSelectTurn(app);
@@ -7416,6 +7540,9 @@ void charSelectClick(App& app, float px, float py) {
     app.renderer.toLogical(px, py, lx, ly);
     float mx, my;
     menuPoint(app, lx, ly, mx, my);
+    if (app.startPage.phase) return;
+    charSelectPress(app, mx, my);
+    if (app.startPage.holding) return;
     if (mx >= 172 && mx < 172 + 136 && my >= 232 && my < 272) { // _pad_chk_updw_box(0xac, 0xe8, 0x88, 0x28)
         menuSound(app, se::kChoose);
         closeCharSelect(app, app.charSelectPage + 1);
@@ -12116,7 +12243,9 @@ void drawFrame(App& app, bool present = true) {
     // The menus over everything else (Options draws above them)
     if (app.charSelectOpen) {
         ++app.charSelectAnim;
-        drawCharSelect(app);
+        for (app.startPage.clock += dt; app.startPage.clock >= 1.0f / kFramesPerSecond; app.startPage.clock -= 1.0f / kFramesPerSecond)
+            stepCharSelect(app);
+        if (app.charSelectOpen) drawCharSelect(app);
     }
     if (app.scc.open) {
         for (app.scc.clock += dt; app.scc.clock >= 1.0f / kFramesPerSecond; app.scc.clock -= 1.0f / kFramesPerSecond)
@@ -16403,7 +16532,14 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         app.captureMenu = 3;
     }
     if (app.captureMenu == 2 || app.captureMenu == 3) { openSaveScreen(app, app.captureMenu == 3); app.saveScreen.anim = 100; }
-    if (app.captureMenu == 4) { openCharSelect(app); app.charSelectAnim = 100; }
+    if (app.captureMenu == 4) { // --char-select [--at frames 0]: the second page pulled, that many frames on
+        openCharSelect(app);
+        app.charSelectAnim = 100;
+        if (app.captureAt[0] == app.captureAt[0] && app.captureAt[0] >= 0) {
+            charSelectTurn(app);
+            for (int f = 0; f < int(app.captureAt[0]); ++f) stepCharSelect(app);
+        }
+    }
     if (app.captureMenu == 8) { // (stepped in: a capture draws one frame)
         openWorldSelect(app);
         for (int f = 0; f < 40 && app.worldChoiceOpen; ++f) stepWorldSelect(app);
@@ -17280,6 +17416,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         break;
     case SDL_EVENT_MOUSE_BUTTON_UP:
         if (app.dragging && app.scc.open && app.scc.dragMoved < 8) scenariosChoose(app);
+        if (app.charSelectOpen) charSelectRelease(app);
         app.dragging = false;
         if (app.mode == Mode::Maps && app.puzzle.pkState == 1) {
             int ww = 0, wh = 0;
@@ -17290,7 +17427,16 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         }
         break;
     case SDL_EVENT_MOUSE_MOTION:
-        if (app.dragging && app.scc.open) { // the zoomed picture follows the finger (tex2d: 640 high)
+        if (app.charSelectOpen && app.startPage.holding) { // the cord follows the finger
+            int ww = 0, wh = 0;
+            SDL_GetWindowSize(app.window, &ww, &wh);
+            const float kx = ww > 0 ? float(app.renderer.frameWidth()) / float(ww) : 1.0f;
+            const float ky = wh > 0 ? float(app.renderer.frameHeight()) / float(wh) : 1.0f;
+            float lx, ly, mx, my;
+            app.renderer.toLogical(event->motion.x * kx, event->motion.y * ky, lx, ly);
+            menuPoint(app, lx, ly, mx, my);
+            charSelectDrag(app, my);
+        } else if (app.dragging && app.scc.open) { // the zoomed picture follows the finger (tex2d: 640 high)
             int wh = 0;
             SDL_GetWindowSize(app.window, nullptr, &wh);
             const float k = wh > 0 ? 768.0f / float(wh) : 1.0f;
