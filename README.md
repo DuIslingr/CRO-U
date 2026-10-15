@@ -68,8 +68,8 @@ Done so far:
 - [x] puzzle rooms' stages (16, maps 153..168) from Omega's `PUZZLE_ROOM_DATA`, played through in
       the self-test on Omega's own rooms (teleport, psychokinesis, toughness, pyrokinesis: each to
       its crystal or its gem; the banner on flag 3090); `--puzzle-dump` lists every stage's objects
-- [x] the story plays by itself (`--explore`) from the opening through the first gate (both
-      halves, its boss), the Ark's talks, the World Select and into the second gate
+- [x] the story plays by itself (`--explore`): the first scenario from the opening through all six
+      worlds (100 rooms, 22 battles, the puzzle rooms taken as solved) to its ending and staff roll
 - [x] the Scenarios screen as Omega's bingo cards (`__menuu_Sccnarios*`): the faces and both
       Achievement rates, the cards and their pictures, cells opened from the Camp with presents;
       the Collection (`__menuu_Collection*`: weapons, armor and jewels seen, the rate's rank)
@@ -85,8 +85,7 @@ Next (the self-test's remaining failures are mostly checks still written for CR1
 
 - [ ] the battle stage's own motion during a staged action (440: `mdl_set_act_nextanm2` on the
       stage model - stages are drawn unskinned)
-- [ ] `--explore` through the second gate (it now clears the first, talks the Ark through, takes
-      the second world and gets 41 rooms in before it runs out of ideas in area 4)
+- [ ] `--explore` into the second scenario (it would have to go back to the title's Select Scenario)
 - [ ] the rest of the self-test moved onto Omega's data (battle rules, saves, the save screen)
 
 ## Reverse-engineering groundwork
