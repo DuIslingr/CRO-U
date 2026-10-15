@@ -2428,6 +2428,14 @@ struct ViewerHost : cr::EventHost {
         if (cr::FieldNpc* n = findNpc(app, npc)) n->treasure = uint16_t(on ? n->treasure | 0x8000 : n->treasure & 0x7fff); // (+0x12 bit 15; the port draws no NPC shadows)
     }
     void puzzleTeleportCount(int n) override { app.puzzleTeleports = n; }
+    void fireWall(int npc) override { // Uty_FireWall_Init: walls 454 / 453 burn (effect 0x98 / 0x99, looping)
+        // until their puzzle's clear flag (_PUZZLE_CLEAR_FLAG[wall * 4 + scenario]) is set
+        static const int kClear[2][2] = {{1125, 1525}, {1124, 1524}};
+        const int k = npc == 0x1c6 ? 0 : npc == 0x1c5 ? 1 : -1;
+        cr::Vec3 p;
+        if (k < 0 || app.game.flag(kClear[k][std::clamp(app.game.scenario, 0, 1)]) || !actorPos(app, npc, p)) return;
+        startEffect(app, app.fieldEffects, 0x98 + k, p, true, 1.0f, 0.0f);
+    }
     int bgmNo() override { return app.bgmNo; }
     void endMenu(int kind) override { // 2: the shop - SetShopBgmNoRecovery, __mc_SetMenuStat(7, 4)
         if (kind != 2 || !app.shop.open) return;

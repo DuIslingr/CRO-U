@@ -166,6 +166,7 @@ public:
     virtual int omuItemValue() { return 0; }                  // Uty_Add_OMU_ITEM: the prices of 521..540 held
     virtual void npcShadow(int /*npc*/, bool /*on*/) {}       // Uty_NpcShadow_onoff
     virtual void puzzleTeleportCount(int /*n*/) {}            // Uty_puzzle_teleport_cnt
+    virtual void fireWall(int /*npc*/) {}                     // Uty_FireWall_Init: var 0 the wall NPC
     // FrmPlayEff / FrmPlayEff2: effect `effect` (looped) on actor `actor` (0 the leader, else an NPC
     // by id); an actor that isn't an NPC takes the current record's position `v` (`angled`: and
     // its angle, v[3..5]); `scale` percent. FrmStopEff (actor -1) / FrmStopEff2 stop them.

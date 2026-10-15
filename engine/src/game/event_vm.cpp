@@ -404,6 +404,8 @@ bool EventRunner::step(EventHost* host) {
             else if (id == 2044 && host) state.vars[9] = std::min(9999999, vm.var(9) + host->omuItemValue());
             else if (id == 2045 && host) host->npcShadow(vm.var(8), vm.var(9) != 0);
             else if (id == 2046 && host) host->puzzleTeleportCount(vm.var(9));
+            else if (id == 2015 && host) host->fireWall(vm.var(0));
+            else if (id == 2047) state.party[2].equip[kJewel] = 369; // Uty_EquipAcce: prty + 0x56a, record 2's jewel
             break;
         }
         case 14: { // Wait: frames, or 0xFFFF/0xFFFC fade, 0xFFFE loading, 0xFFFD + npc
