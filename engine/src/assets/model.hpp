@@ -83,6 +83,7 @@ struct Model {
     std::vector<Mesh> meshes;
     std::vector<Image> textures;
     std::vector<int> textureIds;     // MCT header id of each texture (what materials reference)
+    int extraModels = 0;             // further MCM_ blocks among the textures (Omega: c302, c343, c344)
     std::vector<int> appearanceIds;
     std::vector<Material> materials; // parallel to appearanceIds
     Skeleton skeleton;

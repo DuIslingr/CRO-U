@@ -15938,6 +15938,25 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
             SDL_SetLogPriorities(SDL_LOG_PRIORITY_WARN);
             return runCapture(*app, argv[i + 1], argv[i + 2]) ? SDL_APP_FAILURE : SDL_APP_SUCCESS;
         }
+        if (SDL_strcmp(argv[i], "--capture-model") == 0 && i + 2 < argc) { // name out.bmp [yaw pitch zoom]
+            SDL_SetLogPriorities(SDL_LOG_PRIORITY_WARN);
+            App& a = *app;
+            a.persist = false;
+            int idx = -1;
+            for (size_t m = 0; m < a.models.size(); ++m)
+                if (a.models[m] == argv[i + 1]) idx = int(m);
+            if (idx < 0) { std::printf("no model %s\n", argv[i + 1]); return SDL_APP_FAILURE; }
+            setMode(a, Mode::Models);
+            showModel(a, idx);
+            if (i + 3 < argc && argv[i + 3][0] != '-') a.yaw = float(SDL_atof(argv[i + 3]));
+            if (i + 4 < argc && argv[i + 4][0] != '-') a.pitch = float(SDL_atof(argv[i + 4]));
+            if (i + 5 < argc && argv[i + 5][0] != '-') a.zoom = float(SDL_atof(argv[i + 5]));
+            a.hideHud = true;
+            for (int f = 0; f < 3; ++f) { a.lastTicks = 0; drawFrame(a, false); }
+            saveFrame(a, argv[i + 2]);
+            std::printf("model %s: radius %.1f, %zu meshes\n", argv[i + 1], a.model.radius, a.model.meshes.size());
+            return SDL_APP_SUCCESS;
+        }
         if (SDL_strcmp(argv[i], "--explore") == 0) {
             SDL_SetLogPriorities(SDL_LOG_PRIORITY_WARN);
             return runExplore(*app, i + 1 < argc ? SDL_atoi(argv[i + 1]) : 200) ? SDL_APP_FAILURE : SDL_APP_SUCCESS;

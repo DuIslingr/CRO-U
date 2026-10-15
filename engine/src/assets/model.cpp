@@ -451,6 +451,8 @@ bool loadModelPackage(const std::vector<uint8_t>& file, Model& out, std::string*
         const uint32_t off = table.u32(), size = table.u32();
         if (!table.ok || off == 0) break;
         if (size_t(off) + size > file.size()) return fail("texture entry out of range");
+        // (Omega's c302 / c343 / c344 carry a second model block among them: not drawn yet)
+        if (size >= 4 && std::memcmp(file.data() + off, "MCM_", 4) == 0) { ++out.extraModels; continue; }
         if (!decodeTextures) continue;
         std::vector<uint8_t> tex(file.begin() + off, file.begin() + off + size);
         Image img;
@@ -472,6 +474,9 @@ bool loadModelPackage(const std::vector<uint8_t>& file, Model& out, std::string*
         if (!table.ok || off == 0) break;
         if (size_t(off) + size > file.size()) return fail("animation entry out of range");
         const size_t first = out.actions.size();
+        // Omega's packages keep empty slots in the list: a 3-byte "a\r\n" in place of a block. They
+        // hold no action but keep their number (battle slots go by it)
+        if (size < 16 && (size < 4 || std::memcmp(file.data() + off, "MCA_", 4) != 0)) continue;
         std::string aerr;
         if (!parseMca(file.data(), size_t(off) + size, off, out.actions, &aerr)) return fail("animation: " + aerr);
         for (size_t a = first; a < out.actions.size(); ++a)
