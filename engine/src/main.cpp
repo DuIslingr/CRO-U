@@ -15801,6 +15801,10 @@ int runExplore(App& app, int maxActions) {
     std::printf("explore: %d actions, %d frames, %d pages, %zu maps seen, %d flags set, ends on map %d (%s)\n", step,
                 totalFrames, pagesRead, mapsSeen.size(), flagCount(), app.mapNumber,
                 stuckReason == 1 ? "nothing new to try" : stuckReason == 2 ? "a script never finished" : "action limit");
+    std::printf("explore: flags set:");
+    for (int fl = 0; fl < cr::GameState::kFlagCount; ++fl)
+        if (app.game.flag(fl)) std::printf(" %d", fl);
+    std::printf("\n");
     std::map<std::string, int> counts;
     for (const std::string& u : app.unsupported) counts[u.substr(0, u.find(" on map"))]++;
     for (const auto& [what, c] : counts) std::printf("  not implemented: %s x%d\n", what.c_str(), c);
@@ -16430,6 +16434,10 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         const cr::Mat4 vp = cr::Mat4::perspective(sc.fovDegrees * 3.14159265f / 180.0f, 1.0f, 10.0f, 4000.0f) *
                             cr::Mat4::lookAt({sc.eye[0], sc.eye[1], sc.eye[2]}, {sc.target[0], sc.target[1], sc.target[2]},
                                              {0, 1, 0});
+        if (SDL_getenv("CR_CAPTURE_NPCS")) // (debugging) every NPC of the room: id, kind, +0x12, active, where
+            for (const cr::FieldNpc& n : app.npcs)
+                std::printf("npc id %d kind %#x treasure %#x active %d at (%.1f %.1f %.1f) touch %d\n", n.id, n.kind, n.treasure,
+                            npcActive(app, n), n.pos[0], n.pos[1], n.pos[2], n.touchTrigger());
         for (const auto& d : app.npcDraws) {
             const float o[3] = {0, 0, 0};
             const cr::Vec3 p = d.world.transformPoint(o);
