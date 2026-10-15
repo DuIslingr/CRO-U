@@ -4469,8 +4469,9 @@ constexpr int kEquipSlots = 7;                                 // weapon, armor,
 constexpr int kEntries = 5;                                    // (CR1's iPad had Save as a sixth)
 constexpr float kPlateX = 328, kPlateY = 48, kPlateStep = 48;
 constexpr float kMemberY = 176, kMemberStep = 56;
-constexpr int kCategoryKind[6] = {14, 3, 6, 7, 8, 10};         // make_item_list (0xc8660)
-constexpr int kCategoryLabel[6] = {58071, 58072, 58073, 58074, 58075, 58079}; // (0xc8640)
+constexpr int kCategories = 8;
+constexpr int kCategoryKind[kCategories] = {16, 3, 6, 7, 8, 10, 11, 12}; // make_item_list (_kanItemTypeTbl)
+constexpr int kCategoryLabel[kCategories] = {58071, 58072, 58073, 58074, 58075, 58079, 58124, 58125}; // (_kanStrItemTbl)
 constexpr float kRowX = 192, kRowY = 92, kRowH = 48;
 constexpr int kRows = 4;
 constexpr float kBackX = 192, kBackY = 344;
@@ -4566,20 +4567,22 @@ void memberHpMp(const App& app, int c, int& hp, int& hpMax, int& mp, int& mpMax,
 // MuComMakeItemHaveData: what the bag holds of a category (the pair's own weapons and armor)
 std::vector<int> campItems(const App& app, int category) {
     std::vector<int> out;
+    // make_item_list's ranges (Omega); MuComMakeItemHaveData keeps weapons / armor of their kind
     int from = 1, to = 60;
-    switch (campui::kCategoryKind[std::clamp(category, 0, 5)]) {
+    switch (campui::kCategoryKind[std::clamp(category, 0, campui::kCategories - 1)]) {
     case 3: from = 61, to = 80; break;
-    case 6: case 7: from = 201, to = 424; break;
-    case 8: from = 425, to = 438; break;
-    case 10: from = 479, to = 500; break;
+    case 6: case 7: from = 201, to = 368; break;
+    case 8: from = 369, to = 418; break;
+    case 10: from = 474, to = 520; break;
+    case 11: from = 521, to = 550; break;
+    case 12: from = 551, to = 630; break;
     default: break;
     }
-    const int route = campRoute(app), bits = 3 << (2 * route);
     for (int n = from; n <= to; ++n) {
         if (ownedCount(app, n) <= 0) continue;
         const cr::ItemParam* p = app.itemTable.item(n);
-        if (category == 2 && (!p || p->kind != cr::kKindWeapon || !(p->owners & bits))) continue;
-        if (category == 3 && (!p || p->kind != cr::kKindArmor || !(p->owners & bits))) continue;
+        if (category == 2 && (!p || p->kind != cr::kKindWeapon)) continue;
+        if (category == 3 && (!p || p->kind != cr::kKindArmor)) continue;
         out.push_back(n);
     }
     return out;
@@ -4602,7 +4605,7 @@ std::vector<int> campEquipList(const App& app, int c, int slot) {
     }
     const int kind = slot == cr::kWeapon ? cr::kKindWeapon : slot == cr::kArmor ? cr::kKindArmor : cr::kKindJewel;
     if (slot == cr::kJewel && app.game.party[size_t(c)].equip[cr::kJewel] > 0) out.push_back(0); // take it off
-    for (int n = 201; n <= 438; ++n) {
+    for (int n = 201; n <= 418; ++n) { // (Omega: weapons and armor 201..368, jewels 369..418)
         const cr::ItemParam* p = app.itemTable.item(n);
         if (!p || p->kind != kind || ownedCount(app, n) <= 0 || !(p->owners & (1 << c))) continue;
         out.push_back(n);
@@ -4642,9 +4645,10 @@ void campRefreshList(App& app) {
 // Items: the next category that holds anything, `dir` from the current (the current one too if 0)
 void campNextCategory(App& app, int dir) {
     App::Camp& c = app.camp;
-    for (int k = dir ? 1 : 0; k <= 6; ++k) {
-        const int cat = ((c.category + dir * k) % 6 + 6) % 6;
-        if (!campItems(app, cat).empty() || k == 6) {
+    const int n = campui::kCategories;
+    for (int k = dir ? 1 : 0; k <= n; ++k) {
+        const int cat = ((c.category + dir * k) % n + n) % n;
+        if (!campItems(app, cat).empty() || k == n) {
             c.category = cat;
             break;
         }
