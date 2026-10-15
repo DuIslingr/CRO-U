@@ -96,3 +96,12 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
 - [x] `--explore n 1` finds all 80 presents itself (battles won with their EXP, Oz and drops, keys
       bought for the gold boxes, the World Select's worlds taken in turn); `CR_EXPLORE_NO_GIFTS`
       stops instead of taking missing presents as found
+- [x] the save prompt in every layout as `__menuu_SaveLoadPut` draws it - the message board at
+      (0, 220) and the Yes / No plates (`ComUty_MsgBoardDraw`, `ComUty_YesNoChoiceDraw`); the iPad
+      layout used CR1's own iPad panel and buttons
+- [x] the Camp's equipment slots as `__MuCampScrListEquipInit` lists them: a scrolling list of seven
+      (an empty jewel / gene slot showing its placeholder item, 0x1c6..0x1ca) in four rows of one
+      line with the list's scroll bar, and no section bar under the "Equip" title
+      (`__MuEquip_CategoryChoiceInit`: the title and the character's name) - it was seven rows at
+      70% with the slots' names under them
+

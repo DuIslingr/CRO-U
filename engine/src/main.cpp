@@ -402,6 +402,7 @@ struct App {
         int listCursor = 0, listTop = 0;
         int member = 0;                    // the pair's first or second
         int slot = 0;                      // Equip: weapon, armor, jewel, Human Genes, gene plates 1-3
+        int slotTop = 0;                   // the slot list's first row shown (a MuScrList of seven, four rows)
         int count = 1, confirm = 0;        // Items: how many seeds, Yes / No
         std::string message;
         int messageFrames = 0;
@@ -3961,9 +3962,9 @@ void drawSaveScreen(App& app) {
                     false); // (window 3; the icon is the word's: ComUty_ChoicePlateDraw)
         r.setOrigin(r.uiX());
         m.backButton(192, 288, false, 0, a); // (Omega's ComUty_BackButtonDraw: CmdBack at (192, 288))
-    } else if (r.phoneLayout()) { // the original's (SaveLoadPut, the same in 2.2.0): the message
+    } else { // SaveLoadPut, in every layout (Omega's iPad screen is the iPhone's doubled): the message
         // board (ComUty_MsgBoardDraw, picture 12) at (0, 220), lines from (24, 234); Yes / No the
-        // plates at window 6 + (336, 104) / (336, 160)
+        // plates at window 6 + (336, 104) / (336, 160) (ComUty_YesNoChoiceDraw)
         m.picture(12, 0, 220, a);
         const std::string msg = ss.message > 0 ? sysText(app, ss.message) : std::string("The save couldn't be written.");
         m.text(msg.empty() ? "?" : msg, 24, 234, false, a, 14);
@@ -3973,20 +3974,6 @@ void drawSaveScreen(App& app) {
         if (ss.phase == 1) {
             m.plate(336, 104, 0, 0, ss.confirm == 0, a, false);
             m.plate(336, 160, 1, 1, ss.confirm == 1, a, false);
-        }
-    } else { // the message board, Yes / No under it while asking
-        r.setOrigin(r.uiX());
-        const float mx = 96, my = 232;
-        drawWinPiece(app, kWinSmallPanel, mx * 2, my * 2, 320 * 2, 48 * 2);
-        const std::string msg = ss.message > 0 ? sysText(app, ss.message) : std::string("The save couldn't be written.");
-        int extra = 0;
-        for (int l : ss.lines) extra += l > 0;
-        const float ty = my + 24 - 9.0f * float(extra);
-        m.textCentred(msg.empty() ? "?" : msg, mx + 20, ty, false, a, 15);
-        for (int l = 0; l < extra; ++l) m.textCentred(sysText(app, ss.lines[l]), mx + 20, ty + 18.0f * float(l + 1), false, a, 13);
-        if (ss.phase == 1) {
-            m.button(128, 296, 0, "", ss.confirm == 0, a, ss.confirm == 0); // Yes
-            m.button(272, 296, 1, "", ss.confirm == 1, a, ss.confirm == 1); // No
         }
     }
     r.setOrigin(wideLeft(app));
@@ -4966,7 +4953,7 @@ void campChoose(App& app) {
         }
         return;
     case App::Camp::Equip:
-        if (c.phase == App::Camp::Member) { menuSound(app, se::kChoose); c.phase = App::Camp::Slot; c.slot = 0; }
+        if (c.phase == App::Camp::Member) { menuSound(app, se::kChoose); c.phase = App::Camp::Slot; c.slot = 0, c.slotTop = 0; }
         else if (c.phase == App::Camp::Slot) {
             c.listCursor = c.listTop = 0;
             campRefreshList(app);
@@ -5034,7 +5021,12 @@ void campKey(App& app, SDL_Keycode key) {
             return;
         }
         if (c.phase == App::Camp::Slot && c.page == App::Camp::Equip) {
-            if (step) { c.slot = (c.slot + step + campui::kEquipSlots) % campui::kEquipSlots; menuSound(app, se::kCursor); }
+            if (step) {
+                c.slot = (c.slot + step + campui::kEquipSlots) % campui::kEquipSlots;
+                if (c.slot < c.slotTop) c.slotTop = c.slot;
+                if (c.slot >= c.slotTop + campui::kRows) c.slotTop = c.slot - campui::kRows + 1;
+                menuSound(app, se::kCursor);
+            }
             return;
         }
         [[fallthrough]];
@@ -5076,9 +5068,11 @@ void campClick(App& app, float px, float py) {
             if (in(kPlateX, kMemberY + kMemberStep * float(k), 136, 40)) { c.member = k; if (c.phase == App::Camp::Member) campChoose(app); return; }
         return;
     }
-    if (c.phase == App::Camp::Slot) { // the seven rows as drawn (70% from (kRowX + 64, 58), 32 apart)
-        for (int k = 0; k < kEquipSlots; ++k)
-            if (in(kRowX + 64, 58 + 32.0f * float(k), 256 * 0.7f, 32)) { c.slot = k; campChoose(app); return; }
+    if (c.phase == App::Camp::Slot) { // the slot list's rows, as the item lists'
+        if (in(kRowX, kRowY, 256, kRowH * kRows)) {
+            const int slot = c.slotTop + int((my - kRowY) / kRowH);
+            if (slot < kEquipSlots) { c.slot = slot; campChoose(app); }
+        }
         return;
     }
     if (c.phase == App::Camp::List) {
@@ -6509,8 +6503,11 @@ void drawCamp(App& app) {
         else if (c.page == App::Camp::Genes) section = sysText(app, 58079);
         else section = sysText(app, 58087);
         if (!section.empty() && section[0] != '>') section = ">" + section;
-        m.picture(16, 24 - 140 * (1 - ease), 72, pa);
-        m.textCentred(section, 40 - 140 * (1 - ease), 65, false, pa, 15);
+        if (c.page != App::Camp::Equip) { // (Omega's equipment pages have none: __MuEquip_CategoryChoiceInit
+            // registers the title, 58059, and the character's name)
+            m.picture(16, 24 - 140 * (1 - ease), 72, pa);
+            m.textCentred(section, 40 - 140 * (1 - ease), 65, false, pa, 15);
+        }
         if (c.page == App::Camp::Items && c.phase == App::Camp::List) { // ◀ ▶ beside the section
             m.picture(99, 8, 60, pa);
             m.picture(100, 168, 60, pa);
@@ -6580,13 +6577,15 @@ void drawCamp(App& app) {
         } else if (c.phase == App::Camp::Slot) {
             drawShopBoard(app, 12, 92, ch, 0, ease);
             right();
-            for (int k = 0; k < kEquipSlots; ++k) { // the rows at 70%: weapon, armor, jewel, the genes (Omega:
-                // all seven above the iPhone layout's Back)
-                const float rx = kRowX + 160 * (1 - ease) + 64, ry = 58 + 32.0f * float(k);
-                m.setScale(rx, ry, 0.7f);
-                drawCampRow(app, m, rx, ry, k < 3 ? pm.equip[k] : pm.genes[k - 3], 0, c.slot == k, ease, sysText(app, 58061 + k));
-                m.setScale(0, 0, 1);
+            // __MuCampScrListEquipInit: a scrolling list of the seven - weapon, armor, jewel (else item
+            // 0x1c6, "Jewel"), the Human Genes and three plates (else 0x1c7.., their names) - four rows
+            // of ComUty_ComPlate (one line each) with the list's scroll bar
+            for (int k = 0; k < kRows && c.slotTop + k < kEquipSlots; ++k) {
+                const int slot = c.slotTop + k, worn = slot < 3 ? pm.equip[slot] : pm.genes[slot - 3];
+                const int shown = worn > 0 ? worn : slot == 2 ? 0x1c6 : slot >= 3 ? 0x1c7 + (slot - 3) : 0;
+                drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), shown, 0, c.slot == slot, ease);
             }
+            drawCampScrollBar(m, c.slotTop, kEquipSlots, ease);
             left();
         } else if (c.slot >= 3) { // a gene plate for the slot: its board beside the list
             drawGeneBoard(app, m, 12, 92, item > 0 ? item : pm.genes[c.slot - 3], ease);
