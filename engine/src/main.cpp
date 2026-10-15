@@ -15797,14 +15797,19 @@ int runExplore(App& app, int maxActions) {
         if (!pick && !escaped.count({app.mapNumber, key})) {
             // all tried here: once for this story state, a way out to another area (the Ark, most
             // often - least wanted by the ranking, as the room seen most), whatever was tried
+            // ... else any way out (the ranking's best): back towards rooms with something untried
+            const Cand* anyExit = nullptr;
             for (const Cand& c : cands) {
                 cr::GameState trial = app.game;
                 const cr::EventResult r = cr::runEvent(app.events, c.examine && (findNpc(app, c.id) && (findNpc(app, c.id)->treasure & 3))
                                                                       ? c.id + 1 : c.id, trial, app.area, app.mapNumber);
-                if (r.warp.valid && r.warp.area >= 0 && r.warp.area != app.area) { pick = &c; break; }
+                if (!r.warp.valid || worldDoors.count({app.mapNumber, c.id})) continue;
+                if (r.warp.area >= 0 && r.warp.area != app.area) { pick = &c; break; }
+                if (!anyExit) anyExit = &c;
             }
+            if (!pick) pick = anyExit;
             escaped.insert({app.mapNumber, key});
-            if (pick) std::printf("     nothing new here: out to another area\n");
+            if (pick) std::printf("     nothing new here: out again\n");
         }
         if (!pick) { stuckReason = 1; break; }
         tried.insert({app.mapNumber, pick->id * 2 + pick->examine, key});
