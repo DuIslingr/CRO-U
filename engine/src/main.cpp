@@ -374,6 +374,7 @@ struct App {
     } collection;
     bool manualOpen = false;               // Options > Instruction Manual
     int manualCursor = 0, manualTop = 0, manualAnim = 0;
+    int manualIntro = 0;                   // the page shown before a topic is chosen (56040), 0 none
     bool charSelectOpen = false;
     int charSelectCursor = 0, charSelectAnim = 0, chosenPair = 1, charSelectPage = 0;
     struct StartPage { // StartPrc / StartPut: the second scenario's page, pulled down by its cord
@@ -1245,7 +1246,7 @@ int plateIcon(int word);
 // The port's own key hints under the menus: not in a Release build (F3 shows them, with the status
 // text at the top), nor in the iPhone layout - its screen has no room below
 bool keyHints(const App& app);
-void openManual(App& app);
+void openManual(App& app, int intro);
 void openScenarios(App& app);
 void openScenarios(App& app, int mode);
 void openCollection(App& app);
@@ -3337,7 +3338,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
         rows.push_back(swap);
         OptRow manual; // the topics and their pages (MuScrList + MsgUty)
         manual.label = sysLabel(app, 58081, "Instruction Manual");
-        manual.act = [&app](int) { openManual(app); };
+        manual.act = [&app](int) { openManual(app, 0); };
         rows.push_back(manual);
         OptRow title;
         if (app.optionsFromTitle) { // ModeOptionMenu(1): erasing the save data, asked twice
@@ -3453,12 +3454,18 @@ float optRowY(int i) { return kOptRowTop + kOptRowPitch * float(i); }
 // A control's x (unscaled design units from kOptCtrlX) on screen
 float optCtrlX(float x) { return kOptCtrlX + (x - kOptCtrlX) * kOptCtrlScale; }
 
+
 void openOptions(App& app, int page) {
-    if (!app.optionsOpen) app.optionsFromTitle = app.titleOpen, app.resetAsk = 0;
+    const bool first = !app.optionsOpen;
+    if (first) app.optionsFromTitle = app.titleOpen, app.resetAsk = 0;
     app.optionsOpen = true;
     app.optionsPage = (page + kOptionPages) % kOptionPages;
     app.optionsRow = 0;
     app.optionsAnim = 0;
+    if (first && !app.optionsFromTitle && !app.game.flag(0x43)) { // OptionSet: "About Option", once
+        app.game.setFlag(0x43, true);
+        openManual(app, 56040);
+    }
 }
 
 // The menus' coordinates are the iPhone screen's - (0, 0) its corner, not CR1's iPad 512 x 384
@@ -7546,8 +7553,10 @@ void collectionClick(App& app, float mx, float my) { // BackButtonProc(1)
 }
 
 // ---- The Instruction Manual (Options; MuScrList + MsgUty: the topics, then the page) ----
-// The topics are system messages 56000 on ("Title / / text"); 56007 is the manual's own
-// introduction, 56006 / 56008 are fragments, "dummy" fills the gaps
+// OptionPrc 0xf..0x16: the topics are the manual items the bag holds (make_item_list kind 9,
+// 419..473, given as the story goes), by name; each one's page is system message 56000 + (item -
+// 419) (MsgUty_SetMsg: block 5). OptionSet: the first time Options open (flag 0x43) 56040 "About
+// Option" comes first (OptionPrc 0..2)
 // A manual message's title: its first non-empty line (the messages open with an empty one)
 std::string manualTitle(const App& app, int id) {
     std::vector<std::vector<std::string>> pages;
@@ -7558,15 +7567,13 @@ std::string manualTitle(const App& app, int id) {
     return std::string();
 }
 
-std::vector<int> manualTopics(const App& app) {
-    std::vector<int> ids;
-    for (int id = 56000; id <= 56036; ++id) {
-        if (id == 56006 || id == 56007 || id == 56008) continue;
-        const std::string t = manualTitle(app, id);
-        if (t.empty() || t == "dummy") continue;
-        ids.push_back(id);
-    }
-    return ids;
+constexpr int kManualFirstItem = 419, kManualLastItem = 473, kManualFirstPage = 56000, kOptionIntroPage = 56040;
+
+std::vector<int> manualTopics(const App& app) { // the items
+    std::vector<int> items;
+    for (int item = kManualFirstItem; item <= kManualLastItem; ++item)
+        if (ownedCount(app, item) > 0) items.push_back(item);
+    return items;
 }
 
 std::vector<std::string> manualPage(const App& app, int id) { // the lines after the title
@@ -7581,9 +7588,10 @@ std::vector<std::string> manualPage(const App& app, int id) { // the lines after
     return lines;
 }
 
-void openManual(App& app) {
+void openManual(App& app, int intro) { // intro: a page shown before any topic (OptionSet's 56040), 0 none
     app.manualOpen = true;
-    app.manualCursor = -1; // the introduction first
+    app.manualIntro = intro;
+    app.manualCursor = intro ? -1 : 0;
     app.manualTop = 0;
     app.manualAnim = 0;
 }
@@ -7599,32 +7607,37 @@ void drawManual(App& app) {
     r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 0.75f);
     r.setOrigin(r.uiX());
     const float a = std::min(1.0f, app.manualAnim / 8.0f);
-    m.picture(102, 8, 4, a); // "Options"
+    m.picture(103, 8, 4, a); // "Options" (_stMuPictInfo_Option)
     m.text(sysLabel(app, 58081, "Instruction Manual"), 236, 14, false, a, 16);
     const std::vector<int> topics = manualTopics(app);
     for (int i = 0; i < kManualRows && app.manualTop + i < int(topics.size()); ++i) {
         const int n = app.manualTop + i;
-        std::string title = manualTitle(app, topics[size_t(n)]);
-        int same = 0; // the puzzles' second pages share their title
-        for (int k = 0; k < n; ++k) same += manualTitle(app, topics[size_t(k)]) == title;
-        if (same) title += " (" + std::to_string(same + 1) + ")";
-        m.rowBar(20, 52 + 32.0f * float(i), title, a, app.manualCursor == n);
+        m.rowBar(20, 52 + 32.0f * float(i), itemName(app, topics[size_t(n)]), a, app.manualCursor == n);
     }
     if (app.manualTop > 0) m.text("...", 100, 40, false, a, 12);
     if (app.manualTop + kManualRows < int(topics.size())) m.text("...", 100, 52 + 32.0f * kManualRows - 6, false, a, 12);
     // The page, on the right
-    const int id = app.manualCursor >= 0 && app.manualCursor < int(topics.size()) ? topics[size_t(app.manualCursor)] : 56007;
+    const int id = app.manualCursor >= 0 && app.manualCursor < int(topics.size())
+                       ? kManualFirstPage + topics[size_t(app.manualCursor)] - kManualFirstItem
+                       : app.manualIntro;
     if (r.phoneLayout()) // (the panel in the fitted menu's units)
         drawWinPiece(app, kWinMessagePanel, 2 * (kPhoneFitX + 252 * kPhoneFitK), 2 * (kPhoneFitY + 48 * kPhoneFitK),
                      2 * 252 * kPhoneFitK, 2 * 280 * kPhoneFitK);
     else drawWinPiece(app, kWinMessagePanel, 2 * 252, 2 * 48, 2 * 252, 2 * 280);
-    m.text(manualTitle(app, id), 268, 58, false, a, 13);
-    float y = 82;
+    // (a line the message centres - its 0x17, marked \x01 - centred in the panel)
+    auto centred = [](std::string& l) { const bool c = !l.empty() && l[0] == '\x01'; if (c) l.erase(0, 1); return c; };
     constexpr float kWidth = 228; // the panel's inside, in menu units: lines wrap at words
-    for (const std::string& l : manualPage(app, id)) {
+    {
+        std::string t = manualTitle(app, id);
+        const bool c = centred(t);
+        m.text(t, c ? 268 + (kWidth - m.textWidth(t, 13)) / 2 : 268, 58, false, a, 13);
+    }
+    float y = 82;
+    for (std::string l : manualPage(app, id)) {
+        const bool centre = centred(l);
         std::string line;
         auto flush = [&] {
-            if (y <= 316) m.text(line, 268, y, false, a, 10);
+            if (y <= 316) m.text(line, centre ? 268 + (kWidth - m.textWidth(line, 10)) / 2 : 268, y, false, a, 10);
             y += 14;
             line.clear();
         };
@@ -14813,16 +14826,36 @@ int runSelfTest(App& app) {
         for (const char* f : {"save1.dat", "resume.dat"}) SDL_RemovePath(savePath(app, f).c_str());
         SDL_RemovePath(app.saveDirOverride.c_str());
         app.saveDirOverride = keepDir;
-        // The Instruction Manual (Options) and Scenarios (the title)
-        openManual(app);
-        const int topics = int(manualTopics(app).size());
-        manualKey(app, SDLK_DOWN);
-        manualKey(app, SDLK_DOWN);
-        problems += topics < 25 || app.manualCursor != 1 || manualPage(app, manualTopics(app)[1]).empty();
-        manualKey(app, SDLK_PAGEDOWN);
-        manualKey(app, SDLK_ESCAPE);
-        problems += app.manualOpen;
-        problems += expectSounds("manual", {4, 4, 5, 3});
+        // The Instruction Manual (Options): the manual items held, each its page (56000 + item - 419);
+        // the first Options in a game open on 56040 "About Option" (flag 0x43), once. Then Scenarios
+        int manualTopicsHeld = 0;
+        {
+            const cr::GameState keepGame = app.game;
+            for (int item = 419; item <= 473; ++item) app.game.items.erase(item);
+            for (int item : {419, 420, 421, 428, 459}) app.game.items[item] = 1;
+            app.game.setFlag(0x43, false);
+            const bool keepTitle = app.titleOpen;
+            app.titleOpen = false;
+            openOptions(app, 0);
+            problems += !app.manualOpen || app.manualIntro != 56040 || manualPage(app, 56040).empty() || !app.game.flag(0x43);
+            manualKey(app, SDLK_ESCAPE);
+            app.optionsOpen = false;
+            openOptions(app, 0);
+            problems += app.manualOpen;
+            app.optionsOpen = false;
+            app.titleOpen = keepTitle;
+            openManual(app, 0);
+            const std::vector<int> topics = manualTopics(app);
+            manualTopicsHeld = int(topics.size());
+            manualKey(app, SDLK_DOWN);
+            manualKey(app, SDLK_DOWN);
+            problems += topics.size() != 5 || app.manualCursor != 2 || topics[2] != 421 || manualPage(app, 56002).empty();
+            manualKey(app, SDLK_PAGEDOWN);
+            manualKey(app, SDLK_ESCAPE);
+            problems += app.manualOpen;
+            app.game = keepGame;
+        }
+        problems += expectSounds("manual", {3, 4, 4, 5, 3});
         // Scenarios: the title's (mode 0, to look at) then the Camp's, a cell opened with a present
         openScenarios(app);
         problems += !app.scc.open || !app.scc.sheet.id;
@@ -14876,7 +14909,8 @@ int runSelfTest(App& app) {
             app.game = keepGame;
         }
         problems += bingoProblems;
-        std::printf("manual: %d topics; scenarios: bingo cards drawn, a cell opened from the Camp, the Collection's rate %s\n", topics,
+        std::printf("manual: %d topics held; scenarios: bingo cards drawn, a cell opened from the Camp, the Collection's rate %s\n",
+                    manualTopicsHeld,
                     bingoProblems ? "NO" : "yes");
         std::printf("saves: save -> title Start -> load %s (map %d, flags, items, vars, Oz, party, play time, position); "
                     "resume point written, offered at the title and resumed, saved as you go %s; %d problems\n", loaded ? "ok" : "FAILED",
@@ -17521,7 +17555,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         app.scc.anim = 100;
     }
     if (app.captureMenu == 6) {
-        openManual(app);
+        openManual(app, 0);
         app.manualAnim = 100;
         if (app.captureAt[0] == app.captureAt[0]) app.manualCursor = int(app.captureAt[0]);
         std::printf("manual: %zu topics\n", manualTopics(app).size());
@@ -17927,6 +17961,14 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         }
         if (SDL_strcmp(argv[i], "--print-sysmsg") == 0) { // --print-sysmsg id...: system messages' text (tools)
             for (int k = i + 1; k < argc; ++k) std::printf("%s: %s\n", argv[k], sysText(*app, SDL_atoi(argv[k])).c_str());
+            return SDL_APP_SUCCESS;
+        }
+        if (SDL_strcmp(argv[i], "--print-manual") == 0) { // the manual's items (419..473) against their pages (tools)
+
+            for (int item = 419; item <= 473; ++item)
+                std::printf("%d: item '%s', page %d '%s', %zu lines\n", item, itemName(*app, item).c_str(), 56000 + item - 419,
+                            manualTitle(*app, 56000 + item - 419).c_str(), manualPage(*app, 56000 + item - 419).size());
+            std::printf("intro 56040 '%s'\n", manualTitle(*app, 56040).c_str());
             return SDL_APP_SUCCESS;
         }
         if (SDL_strcmp(argv[i], "--selftest") == 0) {

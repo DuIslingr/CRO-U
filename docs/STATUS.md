@@ -142,3 +142,11 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
       57034) and each item's (57010 / 57035, grouped with how many), and the windows go. A gene
       learned is said in the battle as it's learned (0506's 57049 / 57050) - it was the port's own
       static screen with every line at once and an English "Level up!"
+- [x] Options checked against `__menuu_OptionSet` / `Put` / `Prc`: the same settings as CR1's
+      (Instruction Manual, BGM, Sound Effects, Language, Environment Effects - the same effects held
+      still, `__GetScreenEffectState` -, Lock Screen Orientation, Return to Title / Reset Data); the
+      first Options of a game open on 56040 "About Option" (flag 0x43)
+- [x] the Instruction Manual as OptionPrc 0xf..0x16 has it: its topics are the manual items held
+      (419..473, given as the story goes), by name, each one's page 56000 + (item - 419); a page's
+      centred lines (code 0x17) centred, and the header Omega's picture 103 - it listed CR1's fixed
+      topics with an introduction and showed 102 ("Sold Out!")
