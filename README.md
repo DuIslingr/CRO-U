@@ -39,6 +39,10 @@ Done so far:
 - [x] the opening as the reference video plays it: painted rooms' `FrmPanCam` moves from
       `GetScroll`'s unclamped value, camera-wise (up = + y); the leader's model as `Set_Prtyno`
       (f009a / f009b, f010, f011)
+- [x] rooms' paintings and overlays as their stage records name them (+60 / +62 of the record)
+- [x] scene effects as Omega's `ScnEffectRead` / `Proc`: eleven sets, effects 2..30 (weather, the
+      elevator shaft, the space backdrop, the battleship's sky behind its painting); not yet effect
+      1 (a blinking overlay) or additive blending
 - [x] a new game reaches the opening; with Omega's data the self-test loads all 373 models and
       spawns and walks the player on all 125 fields
 
@@ -46,6 +50,11 @@ Next (the CR1 self-test's checks that fail on Omega point at most of these):
 
 - [ ] Select Scenario's second page (flag 31: `serect` / `chara3` sliding in by drag)
 - [ ] the party: Omega's (`prty`, the leader / scenario bytes) in place of CR1's eight characters
+- [ ] the opening's first battle: which group / stage the deck scene starts (the battle system
+      runs on Omega's data, with its characters; 651 on stage 11 is a hall, not the deck)
+- [ ] native calls 2036.. (SetPrtyNo, SetPrtyLv_Add, TBox, SaveEvent, Chk / Chg_BtlFld, Chg_MsgSkip,
+      Chg_char, Add_OMU_ITEM, NpcShadow_onoff, puzzle_teleport_cnt, EquipAcce) and 2015 FireWall:
+      Omega's additions (2001..2035 number as CR1's)
 - [ ] the other menus against Omega's `*Put` / `*Prc` (save / load, Camp, shop, World Select, ...)
 - [ ] `sys.evt`'s data (items, monsters, actions) and the battle rules where Omega changed them
 - [ ] puzzle rooms (Omega's `PuzzleManager`), field cameras, the story's scripts
