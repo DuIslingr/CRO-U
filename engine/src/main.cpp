@@ -15218,7 +15218,9 @@ int runExplore(App& app, int maxActions) {
             stepEvents(app);
             if (!app.dialogue.empty()) { pagesRead += int(app.dialogue.size()); app.dialogue.clear(); }
             if (app.choiceFlag >= 0) answerChoice(app, true);
-            if (app.worldChoiceOpen) answerWorldChoice(app, 0);
+            if (app.worldChoiceOpen) answerWorldChoice(app, int(app.worldSelect.worlds.size()) - 1); // the newest world
+            if (app.shop.open && !app.shop.talkRunning) closeShop(app); // (it buys nothing)
+            if (app.saveScreen.open && !app.booting) closeSaveScreen(app);
             if (app.itemWindowOpen) app.game.setFlag(0, true);
             app.tapPending = true;
         }
@@ -15258,7 +15260,10 @@ int runExplore(App& app, int maxActions) {
             if ((n.kind & 8) && !parked) cands.push_back({n.id, true, rankOf(n.treasure & 3 ? n.id + 1 : n.id, 0)});
             if (n.touchTrigger()) cands.push_back({n.id, false, rankOf(n.id, 1)});
         }
-        std::stable_sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) { return a.rank < b.rank; });
+        // (at the same rank walk-in triggers first: they're the rooms' ways on more often than doors)
+        std::stable_sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) {
+            return a.rank != b.rank ? a.rank < b.rank : (!a.examine && b.examine);
+        });
         const uint64_t key = stateKey();
         const Cand* pick = nullptr;
         for (const Cand& c : cands)
@@ -15280,9 +15285,15 @@ int runExplore(App& app, int maxActions) {
         if (traceStep && SDL_atoi(traceStep) == step)
             cr::setEventTrace([](size_t pc, int op) { std::printf("    pc %#zx op %d\n", pc, op); });
         bool started;
-        if (pick->examine) {
-            app.walker.pos = {n->pos[0] + n->box[0] / 2 + app.walker.radius, n->pos[1], n->pos[2]};
-            started = interact(app);
+        if (pick->examine) { // from each side of its box, facing it, until one starts it
+            started = false;
+            const float dx = n->box[0] / 2 + app.walker.radius, dz = n->box[2] / 2 + app.walker.radius;
+            const float side[4][3] = {{dx, 0, 3.14159265f * 1.5f}, {-dx, 0, 3.14159265f * 0.5f}, {0, dz, 3.14159265f}, {0, -dz, 0}};
+            for (int k = 0; k < 4 && !started; ++k) {
+                app.walker.pos = {n->pos[0] + side[k][0], n->pos[1], n->pos[2] + side[k][1]};
+                if (k) app.walker.heading = side[k][2];
+                started = interact(app);
+            }
         } else {
             app.walker.pos = {n->boxCenterX(), n->pos[1], n->boxCenterZ()};
             app.lastKick = 0;
