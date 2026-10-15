@@ -14829,30 +14829,30 @@ int runSelfTest(App& app) {
         auto finish = [&] { for (int f = 0; f < 30 && app.worldChoiceOpen; ++f) stepWorldSelect(app); };
         app.game = cr::GameState();
         app.playerChar = 0;
-        for (int f : {1076, 1077, 1123, 1052}) app.game.setFlag(f, true); // gates 0, 1; one band more; a pip
+        for (int f : {1076, 1077, 1163}) app.game.setFlag(f, true); // (Omega) worlds 0, 1; two bands
         openWorldSelect(app);
         settle();
         look("CR_WORLD_SHOT_A");
-        const bool offered = ws.worlds == std::vector<int>{0, 1} && ws.levels == 3;
+        const bool offered = ws.worlds == std::vector<int>{0, 1} && ws.levels == 2;
         ws.cursor = 1;
         worldSelectChoose(app, 1);
         settle();
         const bool bands = ws.state == 6;
         look("CR_WORLD_SHOT_B");
-        worldSelectLevel(app, 2);
+        worldSelectLevel(app, 1);
         settle();
         const bool asked = ws.state == 8;
         look("CR_WORLD_SHOT_C");
         worldSelectAnswer(app, true);
         finish();
-        const bool chosen = !app.worldChoiceOpen && app.game.vars[0] == 1 && app.game.vars[1] == 2 && app.game.vars[2] == 0 &&
-                            !app.game.flag(0) && !app.game.flag(1);
+        const bool chosen = !app.worldChoiceOpen && app.game.vars[0] == 1 && app.game.vars[1] == 1 && app.game.vars[2] == 0 &&
+                            !app.game.flag(0) && !app.game.flag(1) && app.game.bands[0] == 1;
         openWorldSelect(app); // Back
         settle();
         worldSelectChoose(app, -1);
         finish();
         const bool back = !app.worldChoiceOpen && app.game.flag(0);
-        app.game.setFlag(1122, true); // the first gate asks to skip its first half
+        app.game.setFlag(1162, true); // the first world asks to skip its first half (_gkashStgSkipTbl)
         openWorldSelect(app);
         settle();
         worldSelectChoose(app, 0);
@@ -14865,7 +14865,7 @@ int runSelfTest(App& app) {
         worldSelectAnswer(app, true);
         finish();
         const bool skipped = app.game.vars[0] == 0 && app.game.flag(1) && !app.game.flag(0);
-        app.game.setFlag(1104, true); // the sixth gate
+        app.game.setFlag(1082, true); // the sixth world (no bands)
         openWorldSelect(app);
         settle();
         const int last = int(ws.worlds.size()) - 1;
@@ -14875,12 +14875,12 @@ int runSelfTest(App& app) {
         worldSelectAnswer(app, true);
         finish();
         const bool sixth = last >= 0 && app.game.vars[0] == 5 && app.game.vars[1] == 0 && !app.game.flag(1);
-        app.game = cr::GameState(); // the second pair's order: gate 1 first
-        app.playerChar = 2;
-        for (int f : {1476, 1477}) app.game.setFlag(f, true);
+        app.game = cr::GameState(); // scenario 1: its own worlds (6..12), numbered within it
+        app.game.scenario = 1;
+        for (int f : {1576, 1577}) app.game.setFlag(f, true);
         openWorldSelect(app);
-        const bool order = ws.worlds == std::vector<int>{1, 0};
-        answerWorldChoice(app, 0);
+        const bool order = ws.worlds == std::vector<int>{6, 7};
+        answerWorldChoice(app, 1);
         const bool second = app.game.vars[0] == 1 && app.game.vars[2] == 1;
         problems += !offered + !bands + !asked + !chosen + !back + !skipAsked + !skipped + !sixthAsked + !sixth + !order + !second;
         problems += app.renderer.takeErrors();
