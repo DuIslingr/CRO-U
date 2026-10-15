@@ -15696,6 +15696,7 @@ int runExplore(App& app, int maxActions) {
     startNewGame(app);
     int totalFrames = 0, pagesRead = 0;
     bool worldAsked = false;                  // the last action opened the World Select
+    std::set<std::pair<int, uint64_t>> escaped; // (map, state) where the way out to another area was taken
     std::set<std::pair<int, int>> worldDoors; // (map, id) that do: tried last, once the rooms about are done
     auto settle = [&](int limit) {
         int f = 0;
@@ -15749,7 +15750,9 @@ int runExplore(App& app, int maxActions) {
             cr::GameState trial = app.game;
             const cr::EventResult r = cr::runEvent(app.events, id, trial, app.area, app.mapNumber);
             if (!r.warp.valid) return base;
-            return mapsSeen.count(r.warp.map) ? 5 + std::min(visits[r.warp.map], 50) : 2;
+            if (!mapsSeen.count(r.warp.map)) return 2;
+            const bool away = r.warp.area >= 0 && r.warp.area != app.area; // (another area: the Ark - not held back by its many visits)
+            return 5 + std::min(visits[r.warp.map], away ? 3 : 50);
         };
         for (size_t i = 0; i < app.npcs.size(); ++i) {
             const cr::FieldNpc& n = app.npcs[i];
@@ -15768,6 +15771,9 @@ int runExplore(App& app, int maxActions) {
             // a puzzle room it can't play: solved on the spot (its clear flag), so the room's ways on open
             std::printf("     puzzle stage %d taken as solved (flag %d)\n", app.puzzle.stage, 3000 + app.puzzle.stage);
             app.game.setFlag(3000 + app.puzzle.stage, true);
+            puzzle::enter(app); // the room again as solved: its crystal out (the way on)
+            buildNpcDraws(app);
+            buildWalkCollision(app);
             tried.clear();
             continue;
         }
@@ -15787,6 +15793,18 @@ int runExplore(App& app, int maxActions) {
             app.game.setFlag(3000 + app.puzzle.stage, true);
             tried.clear();
             continue;
+        }
+        if (!pick && !escaped.count({app.mapNumber, key})) {
+            // all tried here: once for this story state, a way out to another area (the Ark, most
+            // often - least wanted by the ranking, as the room seen most), whatever was tried
+            for (const Cand& c : cands) {
+                cr::GameState trial = app.game;
+                const cr::EventResult r = cr::runEvent(app.events, c.examine && (findNpc(app, c.id) && (findNpc(app, c.id)->treasure & 3))
+                                                                      ? c.id + 1 : c.id, trial, app.area, app.mapNumber);
+                if (r.warp.valid && r.warp.area >= 0 && r.warp.area != app.area) { pick = &c; break; }
+            }
+            escaped.insert({app.mapNumber, key});
+            if (pick) std::printf("     nothing new here: out to another area\n");
         }
         if (!pick) { stuckReason = 1; break; }
         tried.insert({app.mapNumber, pick->id * 2 + pick->examine, key});
@@ -16392,6 +16410,37 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         openLastBattle(app);
         for (int f = 0; f < 40 && app.lastBattle.open; ++f) stepLastBattle(app);
     }
+    if (app.captureMenu == 12) { // --door-dump area: each room's NPC / trigger scripts dry-run, where they warp (with the flags given)
+        const int area = app.captureArea >= 0 ? app.captureArea : 0;
+        const cr::GameState start = app.game;
+        for (int map = 0; map < cr::kNumMaps; ++map) {
+            if (cr::areaForMap(map, area) != area) continue;
+            app.runner.stop();
+            app.game = start;
+            app.mapNumber = -1;
+            cr::WarpRequest w;
+            w.valid = true, w.area = area, w.map = map;
+            performWarp(app, w, -1);
+            for (int f = 0; f < 2000 && (app.runner.running() || app.pendingEntry != App::Entry::None); ++f) {
+                stepEvents(app);
+                app.dialogue.clear();
+                if (app.choiceFlag >= 0) answerChoice(app, true);
+                app.tapPending = true;
+                if (app.battle.active) endBattle(app, true);
+            }
+            if (app.mapNumber != map) { std::printf("map %d: left at once for %d\n", map, app.mapNumber); continue; }
+            std::printf("map %d:", map);
+            for (const cr::FieldNpc& n : app.npcs) {
+                cr::GameState trial = app.game;
+                const int script = n.treasure & 3 ? n.id + 1 : n.id;
+                const cr::EventResult r = cr::runEvent(app.events, script, trial, app.area, app.mapNumber);
+                if (r.warp.valid)
+                    std::printf(" %d%s%s->%d/%d", n.id, npcActive(app, n) ? "" : "(off)", n.touchTrigger() ? "x" : (n.kind & 8) ? "t" : "",
+                                r.warp.area, r.warp.map);
+            }
+            std::printf("\n");
+        }
+    }
     if (app.captureMenu == 11) { // --puzzle-dump: each stage's ability, ESP and objects (types by row / column)
         static const char* const kName[11] = {"-", "block", "fixed", "fragile", "candle", "red", "blue", "cswitch", "wswitch",
                                               "gem", "crystal"};
@@ -16714,6 +16763,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         else if (SDL_strcmp(argv[i], "--scenarios") == 0) app->captureMenu = 5;
         else if (SDL_strcmp(argv[i], "--collection") == 0) app->captureMenu = 10;
         else if (SDL_strcmp(argv[i], "--puzzle-dump") == 0) app->captureMenu = 11;
+        else if (SDL_strcmp(argv[i], "--door-dump") == 0) app->captureMenu = 12;
         else if (SDL_strcmp(argv[i], "--manual") == 0) app->captureMenu = 6;
         else if (SDL_strcmp(argv[i], "--title") == 0) app->captureTitle = true;
     for (int i = 1; i < argc; ++i) {
