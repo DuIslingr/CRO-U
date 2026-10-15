@@ -21,7 +21,7 @@ bool rd(const std::vector<uint8_t>& f, size_t pos, T& v) {
 int s16(const uint8_t* p) { return int16_t(uint16_t(p[0] | p[1] << 8)); }
 uint32_t u32(const uint8_t* p) { return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24; }
 
-constexpr size_t kMonsterSize = 204;
+constexpr size_t kMonsterSize = 220; // Omega's rows (CR1: 204)
 
 } // namespace
 
@@ -58,13 +58,15 @@ bool BattleData::load(const std::string& dataDir) {
         m.exp = u32(r + 4);
         m.genePoints = u32(r + 8);
         m.model = s16(r + 12);
-        m.size = s16(r + 26);
+        m.size = m.model >= 0x88 && m.model <= 0x8a ? 5 : s16(r + 26); // read_btlcpl: these three fill the field
         m.strongGrowth = s16(r + 28) != 0;
         m.level = s16(r + 32);
         m.atk = s16(r + 38);
         m.grd = s16(r + 40);
         m.spd = s16(r + 42);
         m.lck = s16(r + 44);
+        m.scaleXZ = float(s16(r + 0x46)) / 100.0f;
+        m.scaleY = float(s16(r + 0x48)) / 100.0f;
         monsters_.push_back(m);
     }
     // Section 13 (+0x34): u32 file offset per battle model -> its 18-byte action records, 13 for

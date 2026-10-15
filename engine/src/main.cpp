@@ -421,7 +421,7 @@ struct App {
             float yaw = 0;
             int slot = 0, action = -1;     // action slot (BattleAnim) and the package's action index
             float time = 0;
-            float scale = 1;               // +0x540: 0.5 for the pair (btl_main)
+            float scale = 1, scaleY = 1;   // +0xfa0..: the monster row's +0x46 / +0x48 (read_btlcpl); +0xf98 is the yaw in turns
             int fighter = -1;              // BattleRules::f index: 0, 1 the pair, 2..4 the enemies
             int then = -1;                 // the slot after this one ends (-1 loop, -2 hold the last frame)
             cr::Vec3 home, from, to;       // its place; a move (btlmove_setpos) from -> to
@@ -8806,7 +8806,7 @@ float actorDuration(App& app, const App::Battle::Actor& a) {
 // Where the damage numbers start: over the actor's model
 cr::Vec3 actorHead(App& app, const App::Battle::Actor& a) {
     const LoadedModel& lm = app.battle.models[a.model];
-    return a.pos + cr::Vec3{0, (lm.center.y + lm.radius * 0.6f) * a.scale, 0};
+    return a.pos + cr::Vec3{0, (lm.center.y + lm.radius * 0.6f) * a.scaleY, 0};
 }
 
 // btlcamera_set: camera `id` (sys.evt section 15), its values over 9000 relative to fighter `actor`
@@ -8818,6 +8818,8 @@ void setBattleCamera(App& app, int id, int actor = 0) {
     b.camFrame = 0;
 }
 
+cr::Vec3 actorPoint(App& app, const App::Battle::Actor& a, int user);
+
 // btlcamera_prc: the camera's eye and target this frame - still, moving from its first pair of
 // points to its second over raw[15] frames, or turning raw[14] degrees about its target
 void battleCameraView(App& app, cr::Vec3& eye, cr::Vec3& target) {
@@ -8825,10 +8827,13 @@ void battleCameraView(App& app, cr::Vec3& eye, cr::Vec3& target) {
     const cr::BattleCamera* c = app.battleData.camera(b.cam);
     if (!c) c = app.battleData.camera(std::max(0, b.formation - 2));
     if (!c) return;
+    if (const char* o = SDL_getenv("CR_BATTLE_EYE")) { // debugging: "ex ey ez tx ty tz"
+        if (std::sscanf(o, "%f %f %f %f %f %f", &eye.x, &eye.y, &eye.z, &target.x, &target.y, &target.z) == 6) return;
+    }
     const int16_t* r = c->raw;
     cr::Vec3 base{0, 0, 0};
-    for (const App::Battle::Actor& a : b.actors)
-        if (a.fighter == b.camActor) base = a.home;
+    for (const App::Battle::Actor& a : b.actors) // btlcamera_getpos: its node 1003 as it moves (else the actor)
+        if (a.fighter == b.camActor) base = actorPoint(app, a, 1003);
     auto rel = [](int v, float at) { return v > 9000 ? float(v - 10000) + at : float(v); };
     eye = {rel(r[0], base.x), rel(r[1], base.y), rel(r[2], base.z)};
     target = {rel(r[3], base.x), rel(r[4], base.y), rel(r[5], base.z)};
@@ -8954,7 +8959,7 @@ cr::Vec3 actorPoint(App& app, const App::Battle::Actor& a, int user) {
     if (node >= int(lm.world.size())) return a.pos;
     const float* w = lm.world[size_t(node)].m;
     const float c = std::cos(a.yaw), sn = std::sin(a.yaw);
-    const float x = w[12] * a.scale, y = w[13] * a.scale, z = w[14] * a.scale;
+    const float x = w[12] * a.scale, y = w[13] * a.scaleY, z = w[14] * a.scale;
     return {a.pos.x + c * x + sn * z, a.pos.y + y, a.pos.z - sn * x + c * z};
 }
 
@@ -9291,13 +9296,16 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
         const int c = rules.f[size_t(k)].character;
         App::Battle::Actor& a = add(c, cr::kBattlePosition[0][k], 3.14159265f, k);
         a.name = sysText(app, 58028 + c + 1); // the name plates' character names
-        a.level = rules.f[size_t(k)].level;
-        a.scale = 0.5f;
+        a.level = rules.f[size_t(k)].level; // (btl_main's 0.5 at +0xf98 is the half turn, the yaw above)
     }
     for (int k = 0; k < 3; ++k) {
         const cr::MonsterDef* m = app.battleData.monster(ids[size_t(k)]);
         if (!m || m->model >= cr::kNumBattleModels || !rules.f[size_t(2 + k)].present) continue;
         App::Battle::Actor& a = add(m->model, cr::kBattlePosition[b.formation][k], 0.0f, 2 + k);
+        if (m->model == 13 || m->model == 14 || m->model == 15 || m->model == 16) a.pos.z += 20; // read_btlcpl's nudges
+        if (m->model == 32) a.pos.z -= 10;
+        a.home = a.pos;
+        a.scale = m->scaleXZ, a.scaleY = m->scaleY;
         a.enemy = true;
         a.monster = m->id;
         a.level = rules.f[size_t(2 + k)].level;
@@ -9315,6 +9323,10 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     playBgm(app, uint32_t(track));
     app.dialogue.clear();
     ++app.battlesFought;
+    if (SDL_getenv("CR_BATTLE_DEBUG"))
+        for (const auto& a : b.actors)
+            std::printf("battle actor: fighter %d model %d %s (%zu meshes) at %.0f %.0f %.0f scale %.2f/%.2f\n", a.fighter, a.modelId,
+                        a.model.c_str(), b.models[a.model].meshes.size(), a.pos.x, a.pos.y, a.pos.z, a.scale, a.scaleY);
     SDL_Log("battle: group %d on stage %s (formation %d, %s)", start.group, cr::kBattleStageFile[start.stage],
             b.formation, start.strike == 1 ? "first strike" : start.strike == 2 ? "ambush" : "normal");
     updateTitle(app);
@@ -10590,7 +10602,7 @@ void drawBattle(App& app, float dt) {
         }
         cr::Mat4 world;
         const float c = std::cos(a.yaw), sn = std::sin(a.yaw);
-        world.m[0] = c * a.scale; world.m[2] = -sn * a.scale; world.m[5] = a.scale;
+        world.m[0] = c * a.scale; world.m[2] = -sn * a.scale; world.m[5] = a.scaleY;
         world.m[8] = sn * a.scale; world.m[10] = c * a.scale;
         world.m[12] = a.pos.x; world.m[13] = a.pos.y; world.m[14] = a.pos.z;
         drawLoaded(app, lm, vp * world, nullptr, a.alpha);
@@ -15426,6 +15438,13 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                     for (const auto& ac : lm.actions) std::printf(" '%s' (%.0f)", ac.name.c_str(), ac.duration);
                     std::printf("\n");
                 }
+        }
+        if (v.rfind("cam", 0) == 0) setBattleCamera(app, SDL_atoi(v.c_str() + 3), v.find('@') != std::string::npos ? SDL_atoi(v.c_str() + v.find('@') + 1) : 0); // cam<id>[@fighter]
+        if (SDL_getenv("CR_BATTLE_DEBUG")) {
+            cr::Vec3 eye{}, target{};
+            battleCameraView(app, eye, target);
+            std::printf("battle camera %d (formation %d): eye %.0f %.0f %.0f target %.0f %.0f %.0f\n", b.cam, b.formation, eye.x, eye.y,
+                        eye.z, target.x, target.y, target.z);
         }
         if (v == "genes" || v == "genehit") battleChooseTop(app, 0), battleChooseCommand(app, 1);
         if (v == "genehit") {

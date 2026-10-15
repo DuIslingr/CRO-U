@@ -2,6 +2,7 @@
 // Battle data: the monster table and enemy groups from sys.evt (gameapp_init points globals at
 // its header's sections), and the per-map encounter tables of the area files (fldencount_*).
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -22,16 +23,17 @@ struct MonsterDef {
     bool strongGrowth = false; // +28
     int level = 0;            // +32: fixed level, <= 0 = from the party's
     int atk = 0, grd = 0, spd = 0, lck = 0; // +38..+44, plus 12/10/8/9 or 6/4/5/4 per level
-    std::array<uint8_t, 204> raw{};
+    float scaleXZ = 1.0f, scaleY = 1.0f; // +0x46 / +0x48, hundredths: the model's size (read_btlcpl)
+    std::array<uint8_t, 220> raw{};
 
-    // The stats at level `lv` (read_btlcpl)
-    uint32_t hpAt(int lv) const { return hp + uint32_t(lv) * (strongGrowth ? 200 : 30); }
-    uint32_t expAt(int lv) const { return exp + uint32_t(lv * lv); }
+    // The stats at level `lv` (Omega's read_btlcpl)
+    uint32_t hpAt(int lv) const { return hp + uint32_t(lv) * (strongGrowth ? 150 : 25); }
+    uint32_t expAt(int lv) const { return std::max<uint32_t>(1, (uint32_t(lv * lv) + exp) / 10); }
     uint32_t genePointsAt(int lv) const { return genePoints + uint32_t(lv) * (strongGrowth ? 15 : 10); }
-    int atkAt(int lv) const { return atk + lv * (strongGrowth ? 12 : 6); }
-    int grdAt(int lv) const { return grd + lv * (strongGrowth ? 10 : 4); }
-    int spdAt(int lv) const { return spd + lv * (strongGrowth ? 8 : 5); }
-    int lckAt(int lv) const { return lck + lv * (strongGrowth ? 9 : 4); }
+    int atkAt(int lv) const { return atk + lv * (strongGrowth ? 10 : 7); }
+    int grdAt(int lv) const { return grd + lv * (strongGrowth ? 8 : 3); }
+    int spdAt(int lv) const { return spd + lv * (strongGrowth ? 6 : 4); }
+    int lckAt(int lv) const { return lck + lv * (strongGrowth ? 7 : 3); }
 };
 
 // One group a map can meet: 12 bytes of an encounter table.
