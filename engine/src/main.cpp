@@ -13354,7 +13354,7 @@ int runSelfTest(App& app) {
         glErrors += errs;
     }
     // Every exit of every map: stand in its box, fire it, check where the player arrives
-    int exits = 0, arrived = 0, onFloor = 0, exitFailures = 0;
+    int exits = 0, arrived = 0, onFloor = 0, exitFailures = 0, shadowed = 0;
     for (int area0 = 0; area0 < cr::kNumAreas; ++area0)
     for (int map0 = 0; map0 < cr::kNumMaps; ++map0) {
         if (cr::areaForMap(map0, area0) != area0) continue;
@@ -13367,6 +13367,13 @@ int runSelfTest(App& app) {
         const std::vector<bool> warps = app.npcWarps;
         for (size_t k = 0; k < npcs.size(); ++k) {
             if (!warps[k] || !npcActive(app, npcs[k])) continue;
+            // RectWrapper::checkEventKick: the first box (in the file's order) with the player in it
+            // kicks - an exit with an earlier one on the same spot never fires while both are shown
+            if (app.mapNumber != map || app.area != area) showMap(app, i, map, area);
+            if (npcs[k].touchTrigger() && triggerAt(app, {npcs[k].boxCenterX(), npcs[k].pos[1], npcs[k].boxCenterZ()}) != npcs[k].id) {
+                ++shadowed;
+                continue;
+            }
             ++exits;
             if (app.mapNumber != map || app.area != area) showMap(app, i, map, area);
             cr::GameState trial = app.game;
@@ -13378,8 +13385,8 @@ int runSelfTest(App& app) {
             const int wantArea = r.warp.area >= 0 ? r.warp.area : area;
             if (!warped || app.mapNumber != r.warp.map || app.area != wantArea) {
                 ++exitFailures;
-                std::printf("exit problem: %s map %d event %d -> map %d: %s\n", cr::kAreaEventFile[area], map,
-                            npcs[k].id, r.warp.map, warped ? "arrived elsewhere" : "did not warp");
+                std::printf("exit problem: %s map %d event %d -> map %d: %s (area %d map %d)\n", cr::kAreaEventFile[area], map,
+                            npcs[k].id, r.warp.map, warped ? "arrived elsewhere" : "did not warp", app.area, app.mapNumber);
                 continue;
             }
             ++arrived;
@@ -13390,8 +13397,8 @@ int runSelfTest(App& app) {
                              cr::kAreaEventFile[area], map, npcs[k].id, app.mapNumber, p.x, p.y, p.z);
         }
     }
-    std::printf("exits: %d fired, %d arrived on the right map, %d on a floor, %d problems\n", exits, arrived, onFloor,
-                exitFailures);
+    std::printf("exits: %d fired, %d arrived on the right map, %d on a floor, %d under an earlier one, %d problems\n", exits,
+                arrived, onFloor, shadowed, exitFailures);
     // Every visible NPC of every (area, map) should stand on a floor
     int npcsDrawn = 0, npcsOnFloor = 0, npcMaps = 0;
     std::map<std::string, int> offFloor;
