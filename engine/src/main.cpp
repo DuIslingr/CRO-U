@@ -9933,6 +9933,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     rules.strike = start.strike;
     rules.stage = start.stage;
     rules.group = start.group;
+    rules.story = &app.game;
     rules.scenario = std::clamp(app.game.scenario, 0, cr::kScenarios - 1);
     rules.escapeBlocked = flags != 0;
     rules.setupParty(app.game, app.itemTable, route);
@@ -12719,6 +12720,26 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                     return first;
                 };
                 int cbad = 0;
+                { // Omega's calcs 42..44 and the stats under Down / the Ward (btlpcparam_atk)
+                    int obad = 0;
+                    cr::BattleRules r44; runAs(439, 2, r44); // power 2: 200 HP (with its variance), 20 MP
+                    obad += r44.f[2].mp != 380 || r44.f[2].hp >= 5000 || r44.f[2].hp < 4700;
+                    cr::BattleRules rw; runAs(402, 3, rw); // (126 is the enemies' own: the Ward set here)
+                    rw.f[2].status[cr::kStatusWard] = 1;
+                    obad += rw.atkOf(2) != 200;
+                    rw.f[2].status[cr::kStatusAttackUp] = 3;
+                    obad += rw.atkOf(2) != 300; // the up: its whole value with the Ward
+                    cr::BattleRules rd; runAs(441, 2, rd);
+                    obad += rd.f[2].status[cr::kStatusDown] != 5 || rd.atkOf(2) != 80;
+                    rd.f[2].status[cr::kStatusAttackUp] = 3;
+                    obad += rd.atkOf(2) != 100; // 80 + a fifth
+                    std::printf("omega calcs: 44 (HP / MP), 42 (Down), the stats with the Ward / Down %s\n", obad ? "WRONG" : "ok");
+                    if (obad)
+                        std::printf("  44: hp %d mp %d; ward %d %d atk %d; down %d %d atk %d\n", r44.f[2].hp, r44.f[2].mp,
+                                    rw.f[2].status[cr::kStatusWard], rw.f[0].status[cr::kStatusWard], rw.atkOf(2),
+                                    rd.f[2].status[cr::kStatusDown], rd.f[0].status[cr::kStatusDown], rd.atkOf(2));
+                    cbad += obad;
+                }
                 { cr::BattleRules rr; runAs(402, 2, rr); if (rr.f[2].hp != 4000) std::printf("  fixed: hp %d %d mp %d oz %d\n", rr.f[2].hp, rr.f[3].hp, rr.f[2].mp, rr.ozStolen), ++cbad; }
                 { cr::BattleRules rr; runAs(433, 2, rr); if (rr.f[2].hp != 3000 || rr.f[3].hp != 5000) std::printf("  shared: hp %d %d mp %d oz %d\n", rr.f[2].hp, rr.f[3].hp, rr.f[2].mp, rr.ozStolen), ++cbad; }
                 { cr::BattleRules rr; runAs(432, 2, rr); if (rr.f[2].hp != 1) std::printf("  to1: hp %d %d mp %d oz %d\n", rr.f[2].hp, rr.f[3].hp, rr.f[2].mp, rr.ozStolen), ++cbad; }
@@ -12917,7 +12938,7 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                                   {434, 352, 130, 65, 2, true, true, 3},     {435, 356, 163, 140, 5, true, false, 3},
                                   {436, 356, 61, 50, 4, false, false, 10},   {503, 666, 140, 40, 3, true, true, 3},
                                   {505, 716, -1, 40, 5, false, false, 0},    {507, 667, 130, 65, 2, true, true, 3},
-                                  {437, 655, 0xd7, -1, -1, true, false, 3},  {439, 659, 0x62, -1, -1, true, true, -1},
+                                  {437, 655, 0xd7, -1, -1, true, false, 0},    {439, 659, 0x62, -1, -1, true, true, -1},
                                   {440, 658, 0x97, -1, -1, true, true, -1},  {441, 660, 0x52, -1, -1, false, true, -1},
                                   {442, 660, 0x9b, -1, -1, true, true, -1},  {511, 677, -2, 40, -1, false, false, -1}};
             constexpr int kWants = int(sizeof wants / sizeof wants[0]);

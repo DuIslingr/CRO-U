@@ -178,24 +178,24 @@ void BattleRules::setupEnemies(const BattleData& data, const std::array<int, 3>&
     }
 }
 
-int BattleRules::atkOf(int i) const {
-    const Fighter& x = f[size_t(i)];
-    return x.status[kStatusAttackUp] ? x.atk + x.atk / 4 : x.atk;
+// btlpcparam_atk / grd / spd / lck (Omega): the value, less a fifth while Down (+0x96), its own again
+// with the Ward (+0x97); the up status adds a quarter (a fifth while Down, the whole with the Ward)
+static int statWith(const Fighter& x, int v, int up) {
+    int out = v, add = v / 4;
+    if (x.status[kStatusDown]) add = v / 5, out = v - add;
+    if (x.status[kStatusWard]) out += v, add = v;
+    if (x.status[up]) out += add;
+    return out;
 }
+int BattleRules::atkOf(int i) const { return statWith(f[size_t(i)], f[size_t(i)].atk, kStatusAttackUp); }
 int BattleRules::grdOf(int i) const {
     const Fighter& x = f[size_t(i)];
-    int v = x.status[kStatusDefenseUp] ? x.grd + x.grd / 4 : x.grd;
+    int v = statWith(x, x.grd, kStatusDefenseUp);
     if (i < 2 && x.guarding) v *= 2;
     return v;
 }
-int BattleRules::spdOf(int i) const {
-    const Fighter& x = f[size_t(i)];
-    return x.status[kStatusSpeedUp] ? x.spd + x.spd / 4 : x.spd;
-}
-int BattleRules::lckOf(int i) const {
-    const Fighter& x = f[size_t(i)];
-    return x.status[kStatusLuckUp] ? x.lck + x.lck / 4 : x.lck;
-}
+int BattleRules::spdOf(int i) const { return statWith(f[size_t(i)], f[size_t(i)].spd, kStatusSpeedUp); }
+int BattleRules::lckOf(int i) const { return statWith(f[size_t(i)], f[size_t(i)].lck, kStatusLuckUp); }
 
 int BattleRules::attackAction(int fighter) const {
     if (fighter < 2 && pair) return f[0].character / 2 + 18;
@@ -356,8 +356,8 @@ BattleHit BattleRules::physical(const BattleActionDef& a, const int actors[2], i
             ++n;
         }
     int bonus = bonusFor(actors, false);
-    // skill 135: a plain attack is critical the first time, when every attacker has it
-    bool firstCrit = a.id >= 10 && a.id <= 21;
+    // skill 135: an attack (Omega: actions 10..99) is critical the first time, when every attacker has it
+    bool firstCrit = a.id >= 10 && a.id < 100;
     for (int k = 0; k < 2; ++k)
         if (actors[k] >= 0) firstCrit &= f[size_t(actors[k])].skills[135 - 131] && f[size_t(actors[k])].firstAttack;
     // btlcalc_critical: the attackers' average level against the target's
@@ -371,6 +371,9 @@ BattleHit BattleRules::physical(const BattleActionDef& a, const int actors[2], i
     }
     const int grd = crit && has(actors[0], 137) ? 0 : grdOf(target); // 137: a critical pierces
     int dmg = (bonus + a.power) * atkSum / 100 - grd;
+    if (a.id == 236) // (0xec) the attackers' lost HP on top
+        for (int k = 0; k < 2; ++k)
+            if (actors[k] >= 0) dmg += f[size_t(actors[k])].hpMax - f[size_t(actors[k])].hp;
     if (crit && has(actors[0], 134)) dmg *= 2;
     if (!crit && dmg > 0) {
         const int d = spdSum - lckOf(target);
@@ -381,6 +384,7 @@ BattleHit BattleRules::physical(const BattleActionDef& a, const int actors[2], i
             h.type = kHitGuard;
         }
     }
+    if (scenario == 0 && group == 693 && (a.id == 27 || a.id == 28)) dmg = 0, h.type = 0; // (0x2b5: the story's)
     dmg = std::max(dmg, 0);
     if (h.type != kHitGuard) dmg = dmg * elementScale(a, actors[0], target, h.type) / 100;
     if (dmg >= 1) dmg = resist(a, actors[0], target, dmg, false, h.type);
@@ -413,7 +417,8 @@ BattleHit BattleRules::magical(const BattleActionDef& a, const int actors[2], in
     dmg = dmg * elementScale(a, actors[0], target, h.type) / 100;
     if (dmg >= 1) dmg = resist(a, actors[0], target, dmg, true, h.type);
     if (dmg >= 1 && h.type != kHitKill) dmg = zoku(dmg, a, actors[0], target, true);
-    if (blocked(target, 136)) dmg = 0, h.type = kHitMiss;
+    if (a.id == 241) dmg = 99999, h.type = 0; // (0xf1, 435's quick form) all of it, unblockable
+    else if (blocked(target, 136)) dmg = 0, h.type = kHitMiss;
     h.amount = dmg;
     return h;
 }
@@ -908,6 +913,55 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                 h.type = kHitQuiet;
                 out.hits.push_back(h);
                 continue;
+            case 38: { // btlcalc_0430 (237 / 238): a random element (1..3), and the first two of
+                // _kiss_tbl - shuffled, and kept so, between kisses - of poison, silence and half the HP
+                if (a->id == 237 && monsterField(tx, 0x2e)) { h.type = kHitQuiet; out.hits.push_back(h); continue; }
+                tx.element = 1 + random(3);
+                for (int k = 0; k < random(64); ++k) { // (the bound drawn again each time round)
+                    const int j = random(2);
+                    std::swap(kiss_[size_t(j)], kiss_[size_t(j + 1)]);
+                }
+                h.amount = 0;
+                for (int k = 0; k < 2; ++k) {
+                    if (kiss_[size_t(k)] == 10) tx.status[kStatusSilence] = 5;
+                    else if (kiss_[size_t(k)] == 21) h.amount = tx.hp / 2;
+                    else if (kiss_[size_t(k)] == 4) tx.status[kStatusPoison] = 5;
+                }
+                statusTaken = true;
+                if (h.amount <= 0) { h.type = kHitQuiet; out.hits.push_back(h); continue; }
+                break;
+            }
+            case 39: // btlcalc_0431 (242): the target's element at random (0..3)
+                tx.element = random(4);
+                h.type = kHitQuiet;
+                out.hits.push_back(h);
+                continue;
+            case 40: // btlcalc_0432 (437): all its HP - or 1000 once flag 0x584 is set (0x594 the first time)
+                if (story && story->flag(0x584)) {
+                    if (!story->flag(0x594)) story->setFlag(0x594, true);
+                    h.amount = 1000;
+                } else h.amount = tx.hp;
+                break;
+            case 42: // btlcalc_0434 (441): unwarded, the ups gone and Down for 5 rounds
+                if (!tx.status[kStatusWard]) {
+                    for (int k = kStatusAttackUp; k <= kStatusLuckUp; ++k) tx.status[k] = 0;
+                    tx.status[kStatusDown] = 5;
+                    statusTaken = true;
+                }
+                h.type = kHitQuiet;
+                out.hits.push_back(h);
+                continue;
+            case 43: // btlcalc_0435 (126): the Ward, the ups gone
+                tx.status[kStatusWard] = 1;
+                for (int k = kStatusAttackUp; k <= kStatusLuckUp; ++k) tx.status[k] = 0;
+                statusTaken = true;
+                h.type = kHitQuiet;
+                out.hits.push_back(h);
+                continue;
+            case 44: // btlcalc_0436 (439 / 509 / 511): power x 10 MP, power x 100 HP
+                tx.mp = std::max(0, tx.mp - a->power * 10);
+                h.amount = a->power * 100;
+                break;
             case -1: case 20: case 21: h.type = kHitQuiet; out.hits.push_back(h); continue;
             default: {
                 const std::string why = "calc " + std::to_string(calc);
@@ -973,7 +1027,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             }
             out.hits.push_back(h);
         }
-        if (a->id >= 10 && a->id <= 21)
+        if (a->id >= 10 && a->id < 100) // (btlcalc_prc_0404: +0xd1 set)
             for (int k : e.actors)
                 if (k >= 0) f[size_t(k)].firstAttack = false;
         if (a->id == 223) { // btlcalc_0504: Steal Item, when the blow landed
@@ -1066,7 +1120,7 @@ void BattleRules::endRound() {
     for (Fighter& x : f) {
         x.guarding = false;
         for (int k = 0; k < kStatusCount; ++k)
-            if (k != kStatusEndure && x.status[k] > 0) --x.status[k];
+            if (k != kStatusEndure && k != kStatusWard && x.status[k] > 0) --x.status[k];
     }
 }
 

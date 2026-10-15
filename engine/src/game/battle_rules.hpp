@@ -122,6 +122,10 @@ enum BattleStatus {
     kStatusInvincible, // +0x91: no damage, acts first (calc 33, for the next round)
     kStatusUnused92,
     kStatusUnused93,
+    kStatusUnused94,
+    kStatusUnused95,
+    kStatusDown,       // +0x96 (Omega): Attack .. Luck -20%, their ups +20% instead of +25% (calc 42, for 5 rounds)
+    kStatusWard,       // +0x97 (Omega): each of them its own value again, ups too; calc 42 can't touch it (calc 43)
     kStatusCount
 };
 
@@ -216,6 +220,7 @@ public:
     int allyCounter = 0;         // +0x17c
     int stage = -1;              // the battle stage (btlflrname index: +0x8a53d)
     int forceAction = 0;         // tests (--battle-view stage<n>): enemy 2 always chooses this action
+    GameState* story = nullptr;  // the save's flags some calcs read and set (calc 40: 0x584 / 0x594)
     int group = 0;               // the encounter group (gac + 0x8a538: _btlque_special's)
     int scenario = 0;            // Select Scenario's (_prty + 8)
     // _btlque_special: the story battles' set moves - by group, round and monster, what an enemy
@@ -305,6 +310,7 @@ public:
     int lckOf(int i) const;
 
 private:
+    std::array<int, 3> kiss_{{4, 10, 21}}; // _kiss_tbl
     struct Entry {
         bool counter = false;
         int repeats = 1;          // +0xb: monsters with row +0x3e 2 act twice; Asura Lotus 2..5 times
