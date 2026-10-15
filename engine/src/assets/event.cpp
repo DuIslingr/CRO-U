@@ -283,7 +283,7 @@ bool decodeMessage(const std::vector<uint8_t>& data, size_t msg, const std::func
         if (u == 0x15 || u == 0x1c) { // speaker name plate / speaking side
             uint16_t v = 0;
             rd(data, q + 2, v);
-            if (info && u == 0x15) info->nameId = 58028 + v;
+            if (info && u == 0x15) info->nameId = 58000 + 0x95 + v; // (PrcMsg: font block 7, v + 0x95 - CR1 v + 28)
             if (info && u == 0x1c) info->side = v;
             q += 2;
             continue;
@@ -340,7 +340,8 @@ bool EventFile::message(int id, int language, const std::function<int(int)>& var
         !rd(data_, 0x28 + 4 * size_t(language), table))
         return false;
     if (table == 0 && language != 1) return message(id, 1, var, pages, info);
-    if (!lookupMessage(data_, table, id - 1000, 300, msg)) return false;
+    // (__EvtMsg: Omega files 200 a block - CR1 300)
+    if (!lookupMessage(data_, table, id - 1000, 200, msg)) return false;
     return decodeMessage(data_, msg, var, pages, info);
 }
 

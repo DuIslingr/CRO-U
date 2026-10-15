@@ -9068,20 +9068,29 @@ void animateNpcs(App& app, float dt) {
             d.time = len > 0 ? start + std::fmod(d.time - start, len) : start;
         }
     }
-    // Joint: a model riding another's node - the parent's world, then its node's this frame
-    for (const auto& [child, j] : app.npcJoints) {
-        App::NpcDraw* parent = nullptr;
-        for (auto& d : app.npcDraws)
-            if (d.id == j.first) parent = &d;
-        if (!parent) continue;
-        LoadedModel& pm = app.npcModels[parent->model];
-        const cr::Action* act = parent->action >= 0 && parent->action < int(pm.actions.size()) ? &pm.actions[size_t(parent->action)] : nullptr;
-        cr::computeWorld(pm.cpu.skeleton, act, parent->time, pm.world);
-        if (j.second < 0 || j.second >= int(pm.world.size())) continue;
-        const cr::Mat4 at = parent->world * pm.world[size_t(j.second)];
-        for (auto& d : app.npcDraws)
-            if (d.id == child) d.world = at;
-    }
+    // Joint: a model riding another's node (its object of that user id: 1205 in the scripts) - the
+    // parent's world, then that node's this frame; twice round, for one riding a rider
+    for (int pass = 0; pass < 2; ++pass)
+        for (const auto& [child, j] : app.npcJoints) {
+            App::NpcDraw* parent = nullptr;
+            for (auto& d : app.npcDraws)
+                if (d.id == j.first) parent = &d;
+            if (!parent) continue;
+            LoadedModel& pm = app.npcModels[parent->model];
+            const cr::Model& m = pm.cpu;
+            int node = -1;
+            for (const auto& t : m.records)
+                if (t.user == j.second)
+                    for (const auto& [obj, n] : m.objectNodes)
+                        if (obj == t.id) node = n;
+            if (node < 0 || m.skeleton.nodes.empty()) continue;
+            const cr::Action* act = parent->action >= 0 && parent->action < int(pm.actions.size()) ? &pm.actions[size_t(parent->action)] : nullptr;
+            cr::computeWorld(m.skeleton, act, parent->time, pm.world);
+            if (node >= int(pm.world.size())) continue;
+            const cr::Mat4 at = parent->world * pm.world[size_t(node)];
+            for (auto& d : app.npcDraws)
+                if (d.id == child) d.world = at;
+        }
 }
 
 void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::Material* override = nullptr,
@@ -13541,6 +13550,37 @@ int runSelfTest(App& app) {
                 if (warpFrame < 0 || screenFadeAlpha(app) > 0.01f) ++mapErrors;
                 break;
             }
+    }
+    { // Every area's scripts dry-run (entries 0..999, a fresh state): each message they show has its
+      // text, and a name plate's name (__EvtMsg's 200 a block, PrcMsg's names at block 7 + 0x95)
+        int shown = 0, missing = 0, plates = 0, badPlates = 0;
+        for (int area = 0; area < cr::kNumAreas; ++area) {
+            cr::EventFile ef;
+            if (!ef.load(app.dataDir, area)) continue;
+            std::set<int> ids;
+            for (int e = 0; e < 1000; ++e) {
+                cr::GameState g;
+                const cr::EventResult r = cr::runEvent(ef, e, g, area, cr::kAreaFirstMap[area]);
+                ids.insert(r.messages.begin(), r.messages.end());
+            }
+            for (int id : ids) {
+                std::vector<std::vector<std::string>> pages;
+                cr::MessageInfo info;
+                ++shown;
+                if (!ef.message(id, 1, nullptr, pages, &info) && !app.systemText.message(id, 1, nullptr, pages, &info)) {
+                    if (missing++ < 5) std::printf("  message %d (area %d) has no text\n", id, area);
+                    continue;
+                }
+                if (info.nameId >= 0) {
+                    ++plates;
+                    std::vector<std::vector<std::string>> name;
+                    badPlates += !app.systemText.message(info.nameId, 1, nullptr, name) || name.empty() || name[0].empty();
+                }
+            }
+        }
+        std::printf("script messages: %d shown by the areas' scripts, %d without text; %d name plates, %d without a name\n", shown,
+                    missing, plates, badPlates);
+        mapErrors += missing + badPlates + (shown < 100);
     }
     // Entry scripts on a new game: each area's script 0 on its first room, then every room's
     // EvrStart 5, played frame by frame to the end (dialogue paged, taps given)
