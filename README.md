@@ -68,11 +68,13 @@ Done so far:
 - [x] puzzle rooms' stages (16, maps 153..168) from Omega's `PUZZLE_ROOM_DATA`
 - [x] the story plays by itself (`--explore`) from the opening through its first battles to the
       Ark, the first dungeon and back
+- [x] the Scenarios screen as Omega's bingo cards (`__menuu_Sccnarios*`): the faces and both
+      Achievement rates, the cards and their pictures, cells opened from the Camp with presents;
+      the Collection (`__menuu_Collection*`: weapons, armor and jewels seen, the rate's rank)
+- [x] worn equipment stays in the bag, as Omega's `prty_init` / `__ChangeEquipItem` have it
 
 Next (the CR1 self-test's checks that fail on Omega point at most of these):
 
-- [ ] the Scenarios screen (Omega's bingo cards, `__menuu_Sccnarios*`, picture groups 3..6) - the
-      title's and the Camp's; the Collection screen (`__menuu_Collection*`, group 7)
 - [ ] Select Scenario's second page sliding in by drag (flag 31: page turn only for now)
 - [ ] the puzzles' play against Omega's objects (WarpCrystal CS / NG / WS) and the self-test's stages
 - [ ] the rest of the battle rules where Omega changed them (special commands 10..22)
