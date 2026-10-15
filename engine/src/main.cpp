@@ -2721,10 +2721,11 @@ struct ViewerHost : cr::EventHost {
                 const App::FieldScroll& fs = app.scroll;
                 const float x = fs.scripted ? (fs.sliding ? fs.toX : fs.curX) : fs.offX;
                 const float y = fs.scripted ? (fs.sliding ? fs.toY : fs.curY) : fs.offY;
-                // (FrmPanCam moves the camera, as its 3D path does - + y up -, and this scroll is the
-                // painting's offset, the other way: the opening's 0, 600 then 0, -600 over 300 frames
-                // goes up to the sky and slowly back down to the player, as the reference video shows)
-                scriptFieldScroll(app, x - 2 * d[0], y - 2 * d[1], std::max(frames, 1));
+                // (GetScroll's x is the painting's offset, as this scroll's is, but its y the camera's - + y
+                // up -, this one's the other way: the opening's 0, 600 then 0, -600 over 300 frames goes up
+                // to the sky and slowly back down to the player, as the reference video shows, and c101_t01's
+                // -270 follows 409 across to 413 for their talk)
+                scriptFieldScroll(app, x + 2 * d[0], y - 2 * d[1], std::max(frames, 1));
             }
             return;
         }
