@@ -307,6 +307,7 @@ struct App {
     bool itemWindowOpen = false;           // Uty_GetItem
     bool skipScene = false;                // the skip button (X): pages turn by themselves until the scene ends
     int msgStyle = 2, msgLines = 2;        // the script's last Open: the message window's style and lines
+    int msgColour = -1;                    // the page's message's 0x16 colour (MessageInfo::colour), -1 none
     double playSeconds = 0;                // TOTAL PLAYTIME: time on the field and in battles
     // The save / load screen (__menuu_SaveLoad*): from the Camp menu (save) or the title's Start
     // (load / new game). phase 0 choose, 1 confirm (Yes / No), 2 done (a message, then it closes)
@@ -1837,6 +1838,8 @@ void showMessages(App& app, const std::vector<int>& ids) {
             for (const auto& pz : info.pauses)
                 if (pz.page == int(k)) pi.pauses.push_back(pz);
             if (k + 1 < pages.size()) pi.closeAfter = -1;
+            for (const auto& t : info.turns) // (a page the window clears by itself after its pause turns so)
+                if (t.page == int(k) && k + 1 < pages.size()) pi.closeAfter = t.frames;
             app.dialogueInfo.push_back(pi);
         }
         app.dialogueVoices.resize(app.dialogue.size() - pages.size());
@@ -9602,6 +9605,10 @@ void drawMessageLines(App& app, const std::vector<std::string>& page, float x, f
 void drawMessageBox(App& app, const std::vector<std::string>& page, const std::string& speaker, bool next,
                     const std::string& pageNo) {
     cr::Renderer& r = app.renderer;
+    auto ink = [&] { // a message's 0x16 colour over the window's own
+        if (app.msgColour == 1) app.dialogueHud.setTint(0, 0, 0);
+        else if (app.msgColour == 0) app.dialogueHud.setTint(1, 1, 1);
+    };
     const float W = cr::Renderer::kLogicalW;
     // The screen's edges in the 1024 layout's units - in the iPhone layout (2.2.0) the safe area
     // tex2d (0, 0)..(480, 320), which its corners keep to (the skip button at (444, 0), the "next"
@@ -9665,6 +9672,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
             }
         }
         app.dialogueHud.setTint(1, 1, 1);
+        ink();
         drawMessageLines(app, page, tx, ty, kMsgScale, centreAll);
         if (!pageNo.empty()) {
             app.pageHud.setTint(1, 1, 1);
@@ -9723,6 +9731,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         app.dialogueHud.setTint(1, 1, 1);
         textY = H - 140;
     }
+    ink();
     drawMessageLines(app, page, textX, textY, kMsgScale, false); // text and name from the screen's left
     if (!pageNo.empty()) {
         app.pageHud.setTint(0.12f, 0.10f, 0.08f);
@@ -12791,6 +12800,7 @@ void drawFrame(App& app, bool present = true) {
         }
         const cr::MessageInfo* info = pageInfo(app);
         if (app.typeOn) app.textLimit = app.dialogueTyped;
+        app.msgColour = info ? info->colour : -1;
         drawMessageBox(app, app.dialogue[pi], speaker, pageTyped(app) && !(info && info->closeAfter >= 0),
                        app.dialogue.size() > 1 ? std::to_string(app.dialoguePage + 1) + "/" + std::to_string(app.dialogue.size())
                                                : std::string());
@@ -16107,7 +16117,7 @@ int runSelfTest(App& app) {
         tapDialogue(app);
         const bool turned = app.dialogue.empty();
         problems += !rate || !whole || !turned;
-        int frames = 0, taps = 0, pauses = 0, pauseFrames = 0, total = 0, closeAfter = -2;
+        int frames = 0, taps = 0, pauses = 0, pauseFrames = 0, total = 0, closeAfter = -2, turnsSeen = 0;
         bool closed = false;
         int typedId = 6717; // (the Vita's block starts with three more: its 6720)
         if (app.events.load(app.dataDir, 7)) {
@@ -16126,17 +16136,23 @@ int runSelfTest(App& app) {
             for (const auto& pg : app.dialogue) total += pageChars(pg);
             closeAfter = app.dialogueInfo.empty() ? -2 : app.dialogueInfo.back().closeAfter;
             const size_t pages = app.dialogue.size();
+            int& turns = turnsSeen; // pages the window clears by itself (0x1a then 0x10)
+            for (size_t k = 0; k + 1 < app.dialogueInfo.size() && k + 1 < pages; ++k) turns += app.dialogueInfo[k].closeAfter >= 0;
+            for (size_t k = 0; k + 1 < app.dialogueInfo.size() && k + 1 < pages; ++k)
+                if (app.dialogueInfo[k].closeAfter > 0) closeAfter += app.dialogueInfo[k].closeAfter;
             for (; frames < 4000 && !app.dialogue.empty(); ++frames) {
                 stepTyping(app);
-                if (!app.dialogue.empty() && pageTyped(app) && app.dialoguePage + 1 < app.dialogue.size()) {
+                const cr::MessageInfo* pinfo = pageInfo(app);
+                if (!app.dialogue.empty() && pageTyped(app) && app.dialoguePage + 1 < app.dialogue.size() &&
+                    !(pinfo && pinfo->closeAfter >= 0)) {
                     tapDialogue(app); // the reader turns each page once it's out
                     ++taps;
                 }
             }
-            closed = app.dialogue.empty() && size_t(taps) + 1 == pages;
+            closed = app.dialogue.empty() && size_t(taps + turns) + 1 == pages;
         }
         const int least = total + pauseFrames + std::max(0, closeAfter);
-        problems += pauses == 0 || closeAfter <= 0 || !closed || frames < least || frames > least + 2 * (taps + 2);
+        problems += pauses + turnsSeen == 0 || closeAfter <= 0 || !closed || frames < least || frames > least + 2 * (taps + turnsSeen + 2);
         std::printf("message typing: a character a frame %s, a tap brings it out %s, the next turns it %s; %d: %d "
                     "characters, %d pauses (%d frames), then closes by itself %d frames after the last %s in %d frames; %d problems\n",
                     rate ? "yes" : "NO", whole ? "yes" : "NO", turned ? "yes" : "NO", typedId, total, pauses, pauseFrames, closeAfter,
@@ -17939,6 +17955,17 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         }
         if (SDL_strcmp(argv[i], "--print-sysmsg") == 0) { // --print-sysmsg id...: system messages' text (tools)
             for (int k = i + 1; k < argc; ++k) std::printf("%s: %s\n", argv[k], sysText(*app, SDL_atoi(argv[k])).c_str());
+            return SDL_APP_SUCCESS;
+        }
+        if (SDL_strcmp(argv[i], "--print-msg-shape") == 0 && i + 2 < argc) { // --print-msg-shape area id: pages / line lengths (tools)
+            cr::EventFile ef;
+            std::vector<std::vector<std::string>> pages;
+            if (ef.load(app->dataDir, SDL_atoi(argv[i + 1])) && ef.message(SDL_atoi(argv[i + 2]), 1, nullptr, pages))
+                for (size_t pg = 0; pg < pages.size(); ++pg) {
+                    std::printf("page %zu:", pg);
+                    for (const std::string& l : pages[pg]) std::printf(" %zu", l.size());
+                    std::printf("\n");
+                }
             return SDL_APP_SUCCESS;
         }
         if (SDL_strcmp(argv[i], "--print-manual") == 0) { // the manual's items (419..473) against their pages (tools)

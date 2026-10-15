@@ -157,3 +157,9 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
       held 10 x; then 100 + 120 frames, mode 0's end picture (EndBack01_end's 14 at (176, 128)) in at
       6 a frame, a 120-frame fade to black and the windows go - no tap. It was CR1's (the black
       panel sliding away, 21 lines from y 800, the end card waiting for a tap)
+- [x] the message codes checked against Omega's `_PrcMsg` (CR1's too): 0x10 clears the window and
+      types on from its first line - after a tap (0x12) that is the next page, which had kept an
+      empty first line, and after a timed pause (0x1a) the page turns by itself once the pause is
+      out; 0x16 0 / 1 sets the text white or black for the rest of the message (four of
+      j001_d06's lines and a manual page); 0x11 breaks the line, 0x17 centres one, 0x15 / 0x1c the
+      name plate and the speaking side as before

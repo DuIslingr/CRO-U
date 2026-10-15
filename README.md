@@ -83,9 +83,12 @@ Both scenarios play from the opening to their endings. Checked against Omega's o
   gold boxes, the natives the scripts call
 - **Battles**: Omega's monsters, line-ups, genes (plates 474..504), actions and calcs, stat
   formula, level-ups and seeds, the bosses' staged actions and set moves, the story battles' talks
-  and HP floors, battle voices' speakers
+  and HP floors, battle voices' speakers; its damage, resistances, dodges and counters, the
+  barrier's reflection, skills 187..190, turn order, the AI, and the results screen
 - **Menus**: the Camp (its plates, eight item categories, Status, seven equipment slots), the shop,
-  the World Select with its bands, the Scenarios bingo cards and the Collection, save / load
+  the World Select with its bands, the Scenarios bingo cards and the Collection, save / load, the
+  field menu and the map screen (D01..D04 and the maze's three pages), Options and the
+  Instruction Manual (the manual items held), the staff roll; the message codes
 - **The Vita**: as an add-on or as the game - its scripts and eight languages, voices, music, all
   of its textures, its boot logos and its 960 × 544 screen layout
 - **The collection**: all 80 presents can be found - the gold boxes (keys from the shop), the
