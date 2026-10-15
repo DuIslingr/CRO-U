@@ -639,7 +639,10 @@ struct App {
     std::map<std::string, struct LoadedModel> npcModels; // NPC model cache by file
     std::map<int, std::vector<cr::TreasureBox>> treasureBoxes; // per area: selected boxes and items
     bool showPlayer = true;                // P: the party leader walking on the field
-    int playerChar = 0;                    // O: which field model, f001..f008
+    int playerChar = 0;                    // the leader's record (game.leaders[scenario]): its field model
+    bool treasureBoxesHidden = false;      // Uty_TBox(0)
+    bool messageSkip = false;              // Uty_Chg_MsgSkip
+    int puzzleTeleports = 0;               // Uty_puzzle_teleport_cnt
     LoadedModel player;
     std::string playerName;
     cr::FieldWalker walker;
@@ -1335,6 +1338,7 @@ bool npcVisible(const App& app, size_t index) {
 
 // npcVisible, or a red / blue block put away (npc_kill, then mdl_set_alpha keeps it drawn)
 bool npcDrawn(const App& app, size_t index) {
+    if (app.treasureBoxesHidden && index < app.npcs.size() && (app.npcs[index].treasure & 3)) return false; // Uty_TBox(0)
     if (app.puzzle.stage >= 0)
         for (const App::Puzzle::Obj& o : app.puzzle.objs)
             if (o.npc == int(index)) return o.shown || o.ghost;
@@ -1753,13 +1757,12 @@ void animate(App& app, LoadedModel& lm, float dt) {
 
 void animateModel(App& app, float dt) { animate(app, app.model, dt); }
 
+bool viegIsOlgar(const App& app);
 // The leader's field model (Omega's Set_Prtyno / fldread_prc): leader 0 f009a - f009b in the second
 // scenario (prty + 8) or once flag 0x468 is set (MuCom_GetViegOlgarCheck) -, 1 f010, 2 f011, 3 f009b.
-// (The port's party is still CR1's: the leader is playerChar's 0..3, the scenario chosenPair's.)
 std::string playerModelName(const App& app) {
-    const int leader = app.playerChar & 3, scenario = std::max(0, app.chosenPair - 1);
-    switch (leader) {
-    case 0: return scenario == 1 || (scenario == 0 && app.game.flag(0x468)) ? "f009b.bin" : "f009a.bin";
+    switch (app.playerChar & 3) {
+    case 0: return viegIsOlgar(app) ? "f009b.bin" : "f009a.bin";
     case 1: return "f010.bin";
     case 2: return "f011.bin";
     default: return "f009b.bin";
@@ -2292,6 +2295,8 @@ void scriptFieldScroll(App& app, float x, float y, int frames) {
 
 void openStaffRoll(App& app, int mode);
 int currentPair(const App& app);
+cr::SaveData captureSave(const App& app);
+std::string slotPath(const App& app, int pair);
 void closeShop(App& app);
 
 void openLastBattle(App& app);
@@ -2385,17 +2390,51 @@ struct ViewerHost : cr::EventHost {
     void warp(const cr::WarpRequest& w) override { performWarp(app, w, app.runner.eventNo()); }
     void playSound(uint32_t id) override { app.sound.play(id); app.soundLog.push_back(id); }
     void playMusic(uint32_t v) override { playBgm(app, v); app.soundLog.push_back(0x40000000u | v); }
-    void recoverPair() override { // pcparam_hpmp_recovery: the current pair's two
-        const int p = std::clamp(currentPair(app) - 1, 0, 3);
-        for (int c : {2 * p, 2 * p + 1}) app.game.party[size_t(c)].hp = app.game.party[size_t(c)].mp = -1;
+    void recoverPair() override { // pcparam_hpmp_recovery: the scenario's pair
+        for (int c : app.game.pairs[size_t(std::clamp(app.game.scenario, 0, cr::kScenarios - 1))])
+            if (c >= 0 && c < cr::kCharacters) app.game.party[size_t(c)].hp = app.game.party[size_t(c)].mp = -1;
     }
+    void addLevels(int c, int n) override { // pcparam_change_lv: to 255; the growth goes with it
+        if (c < 0 || c >= cr::kCharacters) return;
+        cr::PartyMember& m = app.game.party[size_t(c)];
+        const int before = m.level;
+        m.level = std::clamp(m.level + n, 1, cr::kMaxLevel);
+        if (m.level > before) cr::levelUpBoosts(app.game, c, m.level - before);
+    }
+    void treasureBoxesShown(bool on) override { app.treasureBoxesHidden = !on, buildNpcDraws(app); }
+    void saveEvent() override { cr::writeSave(slotPath(app, currentPair(app)), captureSave(app)); } // SaveData_Save
+    bool inBattle() override { return app.battle.active; }
+    void changeBattleStage(int stage) override { // Uty_Chg_BtlFld: the stage model swapped mid-battle
+        if (!app.battle.active || stage < 0 || stage >= cr::kNumBattleStages) return;
+        app.battle.start.stage = stage;
+        loadModelFile(app, cr::kBattleStageFile[stage], app.battle.stage, false);
+    }
+    void messageSkip(bool on) override { app.messageSkip = on; }
+    void setLeader(int c) override { // Uty_Chg_char: Set_Prtyno(c) when it isn't already the leader
+        c = std::clamp(c, 0, 3);
+        auto& lead = app.game.leaders[size_t(std::clamp(app.game.scenario, 0, cr::kScenarios - 1))];
+        if (lead == c) return;
+        lead = c;
+        app.playerChar = c;
+        placePlayer(app);
+    }
+    int omuItemValue() override {
+        int v = 0;
+        for (int i = 521; i <= 540; ++i)
+            if (const cr::ItemParam* ip = app.itemTable.item(i); ip && app.game.items.count(i) && app.game.items.at(i) > 0) v += ip->price;
+        return v;
+    }
+    void npcShadow(int npc, bool on) override {
+        if (cr::FieldNpc* n = findNpc(app, npc)) n->treasure = uint16_t(on ? n->treasure | 0x8000 : n->treasure & 0x7fff); // (+0x12 bit 15; the port draws no NPC shadows)
+    }
+    void puzzleTeleportCount(int n) override { app.puzzleTeleports = n; }
     int bgmNo() override { return app.bgmNo; }
     void endMenu(int kind) override { // 2: the shop - SetShopBgmNoRecovery, __mc_SetMenuStat(7, 4)
         if (kind != 2 || !app.shop.open) return;
         app.shop.noBgmRecovery = true;
         closeShop(app);
     }
-    int pairNo() override { return std::clamp(currentPair(app) - 1, 0, 3); }
+    int pairNo() override { return std::clamp(app.game.scenario, 0, cr::kScenarios - 1); } // gac + 0x8434c
     void nowLoading(bool on) override { // NowLoadStart / NowLoadEnd
         if (on && !app.nowLoading.on) app.nowLoading = App::NowLoading{true, 0};
         else if (!on) app.nowLoading.on = false;
@@ -3464,6 +3503,8 @@ cr::SaveData captureSave(const App& app) {
     s.savedAt = int64_t(std::time(nullptr));
     s.game = app.game;
     s.game.frmScene = s.game.frmRecord = 0;
+    const int sc = std::clamp(s.game.scenario, 0, cr::kScenarios - 1); // ContData_Save_set: the records in play back to their block
+    for (int k = 0; k < 3; ++k) s.game.party[size_t(4 + 3 * sc + k)] = s.game.party[size_t(k)];
     return s;
 }
 
@@ -3481,7 +3522,7 @@ bool applySave(App& app, const cr::SaveData& s) {
     app.treasureBoxes.clear();
     app.entryArea = -1;
     app.playSeconds = s.playSeconds;
-    app.playerChar = std::clamp(s.leader, 0, 7);
+    app.playerChar = std::clamp(app.game.leaders[size_t(std::clamp(app.game.scenario, 0, cr::kScenarios - 1))], 0, 3);
     app.mapNumber = -1; // so the warp loads the field even if it's the one showing
     cr::WarpRequest w;
     w.valid = true;
@@ -3528,7 +3569,7 @@ std::string slotPath(const App& app, int pair) {
     return savePath(app, name.c_str());
 }
 
-int currentPair(const App& app) { return app.playerChar / 2 + 1; }
+int currentPair(const App& app) { return app.game.scenario + 1; } // (Omega: the scenario + 1)
 
 // The title's plates, by what they are (0 the last battle: every pair cleared; 1 Load: a save;
 // 2 New), drawn at (328, 136 + 48 x that number) - New alone sits at 232
@@ -3544,6 +3585,7 @@ void openSaveScreen(App& app, bool load) {
     ss = App::SaveScreen();
     ss.open = true;
     ss.load = load;
+    if (load) cr::changeScenario(app.game, app.itemTable, app.chosenPair - 1); // SaveLoadSet: __prty_chg(var 0 - 1)
     ss.haveSave = cr::readSave(slotPath(app, load ? app.chosenPair : currentPair(app)), ss.data);
     if (load) { // __menuu_SaveLoadSet, the title's: the emblems and plates from every save's flags
         const cr::GameState sys = allPairsFlags(app);
@@ -6389,16 +6431,18 @@ void drawResumePrompt(App& app) {
 
 // The flags of every pair's story at once: what the original keeps in its system data (the
 // Scenarios chart, the second Character Select sheet). Ours: the pairs' saves and the resume point
-// prty_init_new(pair - 1, mode): a new game for the pair. Its flags 1001 + 400p .. 1400 + 400p
-// are cleared, its two members start over from their records (0xcb3f0: level 1, their weapon,
-// armor and jewel, the Human Genes, their own ability and skill), its bag holds the starting
-// items (those and 0xce700: 3 Emergency Exits, 2 Chocolates). With the pair's clear data (flag
-// 40 + p, its slot) the game goes on from that data - Oz and the flags outside the range kept -
-// and mode 3 (var 1 = 3, "with your clear data") also keeps each member's stat bonuses (seeds
-// and level-up skills' points: +0x0c HP, +0x16 MP, +0x1c..+0x28), equipment and gene plates, and
-// the bag, less its kind 3 and 9 items (the story's)
+// prty_init_new(scenario, mode) - Uty_LoadPrty(var 0 = scenario + 1, var 1 = mode 2 / 3): a new
+// game for the scenario. Its flags (_flgclear: 1001..1500 / 1501..2500) are cleared, its block's
+// records (4 + 3s ..) start over from _prty_init_equip with their plates and extras in the bag
+// (add_item2), its pair is set - scenario 0 Vieg and Olgar (0, 1), scenario 1 Vieg and Dante (0, 2),
+// the second held back by flag 0xfed / 0xfee until the story lets them fight together -, and
+// ResetFieldFlag_NewGame clears scenario 0's field flags (3000..3015, 3300..3379). Scenario 0 also
+// loses the plates and genes 114, 116, 82, 117, 187..190 and (a fresh run) the gear 476, 257, 341,
+// 475, 229, 313; scenario 1 gets 480, 82 and 188. With the scenario's clear data (flag 40 + s,
+// its slot) the run goes on from it, and mode 3 keeps the records' stat bonuses, gear and plates
+// and the bag less its kind 3 and 9 items.
 void newPairParty(App& app, int pair, bool clearData) {
-    const int p = std::clamp(pair, 1, 4) - 1;
+    const int p = std::clamp(pair, 1, cr::kScenarios) - 1;
     cr::SaveData slot;
     const bool fromClear = allPairsFlags(app).flag(40 + p) && cr::readSave(slotPath(app, p + 1), slot);
     cr::GameState g = fromClear ? slot.game : app.game;
@@ -6407,16 +6451,19 @@ void newPairParty(App& app, int pair, bool clearData) {
         g.openedBoxes.clear();
         app.treasureBoxes.clear();
     }
-    for (int f = 1001 + 400 * p; f <= 1400 + 400 * p; ++f) g.setFlag(f, false);
-    // ResetFieldFlag_NewGame: the pair's four blocks of field flags (3000 + 4b .. 3003 + 4b), then
-    // 3300..3363
-    static const int kFieldBlocks[4][4] = {{0, 5, 10, 15}, {1, 6, 11, 12}, {2, 7, 8, 13}, {3, 4, 9, 14}};
-    for (int b : kFieldBlocks[p])
-        for (int f = 3000 + 4 * b; f < 3004 + 4 * b; ++f) g.setFlag(f, false);
-    for (int f = 3300; f < 3364; ++f) g.setFlag(f, false);
-    const cr::Party fresh = cr::newParty();
-    for (int k = 0; k < 2; ++k) {
-        const size_t c = size_t(2 * p + k);
+    cr::changeScenario(g, app.itemTable, p);
+    static const int kFlagClear[cr::kScenarios][2] = {{1001, 1500}, {1501, 2500}};
+    for (int f = kFlagClear[p][0]; f <= kFlagClear[p][1]; ++f) g.setFlag(f, false);
+    auto del = [&](int item) {
+        auto it = g.items.find(item);
+        if (it != g.items.end() && --it->second <= 0) g.items.erase(it);
+    };
+    if (p == 0)
+        for (int item : {114, 116, 82, 117, 187, 188, 189, 190}) g.items.erase(item); // del_item_cnt0
+    cr::Party fresh = g.party;
+    cr::newScenarioRecords(fresh, p);
+    for (int k = 0; k < 3; ++k) {
+        const size_t c = size_t(4 + 3 * p + k);
         cr::PartyMember m = fresh[c];
         if (fromClear && clearData) {
             const cr::PartyMember& old = g.party[c];
@@ -6424,24 +6471,40 @@ void newPairParty(App& app, int pair, bool clearData) {
             std::copy(std::begin(old.boosts), std::end(old.boosts), m.boosts);
             std::copy(std::begin(old.equip), std::end(old.equip), m.equip);
             std::copy(std::begin(old.genes), std::end(old.genes), m.genes);
+        } else {
+            cr::addScenarioItem(g, app.itemTable, p, m.genes[0], 1);
+            for (int e = 0; e < 2; ++e) cr::addScenarioItem(g, app.itemTable, p, cr::startItem(int(c), e), 1);
         }
         m.hp = m.mp = -1;
         g.party[c] = m;
     }
-    if (fromClear && clearData) {
+    if (p == 1) {
+        for (int item : {480, 82, 188}) cr::addScenarioItem(g, app.itemTable, 1, item, 1);
+        g.pairs[1] = {0, 2};
+        g.setFlag(0xfee, true);
+    } else {
+        g.pairs[0] = {0, 1};
+        g.setFlag(0xfed, true);
+        for (int v = 0x40; v < 0x50; ++v) g.vars[v] = 0;
+        g.leaders[0] = 0;
+        if (!(fromClear && clearData))
+            for (int item : {476, 257, 341, 475, 229, 313}) del(item);
+    }
+    if (!(fromClear && clearData)) del(369);
+    for (int k = 0; k < 3; ++k) g.party[size_t(k)] = g.party[size_t(4 + 3 * p + k)];
+    if (p == 0) {
+        for (int f = 3000; f < 3016; ++f) g.setFlag(f, false);
+        for (int f = 3300; f < 3380; ++f) g.setFlag(f, false);
+    }
+    if (fromClear && clearData)
         for (auto it = g.items.begin(); it != g.items.end();) {
             const cr::ItemParam* ip = app.itemTable.item(it->first);
             if (ip && (ip->kind == 3 || ip->kind == 9)) it = g.items.erase(it);
             else ++it;
         }
-        cr::ensureStartingGenes(g);
-    } else {
-        g.items.clear();
-        cr::giveStartingItems(g);
-    }
     if (!fromClear) g.walkExp = {}, g.noEncounters = {};
     app.game = std::move(g);
-    app.playerChar = 2 * p;
+    app.playerChar = app.game.leaders[size_t(p)];
 }
 
 cr::GameState allPairsFlags(const App& app) {
@@ -9216,6 +9279,26 @@ void step(App& app) {
 }
 } // namespace battletalk
 
+// MuCom_GetViegOlgarCheck: record 0 is Olgar - scenario 1, or scenario 0 once flag 0x468 is set;
+// MuCom_GetOlgarDanteCheck: scenario 1 (record 1 is Dante there)
+bool viegIsOlgar(const App& app) { return app.game.scenario == 1 || (app.game.scenario == 0 && app.game.flag(0x468)); }
+bool olgarIsDante(const App& app) { return app.game.scenario == 1; }
+
+// MuStr_GetCharNameId: a record's name in font block 7 (188 Vieg, 189 Olgar, 190 Vahti, 191 Dante)
+int charNameId(const App& app, int c) {
+    if (c == 0 && viegIsOlgar(app)) return 0xbd;
+    if (c == 1 && olgarIsDante(app)) return 0xbf;
+    return c + 0xbc;
+}
+
+// btl_prty_init: a record's battle model - j009a / j010 / j011 (record + 8), j009b for record 0
+// while it is Olgar, j007 for the guest beside (slot 1, record 3)
+int battleModelOf(const App& app, int c, int slot) {
+    if (slot == 1 && c == 3) return 6;
+    if (c == 0 && viegIsOlgar(app)) return 11;
+    return std::clamp(c + 8, 0, cr::kNumBattleModels - 1);
+}
+
 void startBattle(App& app, const cr::BattleStart& start, int flags) {
     app.renderer.resetHistory(); // a cut: the upscaler starts over
     App::Battle& b = app.battle;
@@ -9294,8 +9377,8 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     for (int k = 0; k < 2; ++k) { // the pair (or who fights): j001..j008
         if (!rules.f[size_t(k)].present) continue;
         const int c = rules.f[size_t(k)].character;
-        App::Battle::Actor& a = add(c, cr::kBattlePosition[0][k], 3.14159265f, k);
-        a.name = sysText(app, 58028 + c + 1); // the name plates' character names
+        App::Battle::Actor& a = add(battleModelOf(app, c, k), cr::kBattlePosition[0][k], 3.14159265f, k);
+        a.name = sysText(app, 58000 + charNameId(app, c)); // the name plates' character names
         a.level = rules.f[size_t(k)].level; // (btl_main's 0.5 at +0xf98 is the half turn, the yaw above)
     }
     for (int k = 0; k < 3; ++k) {
@@ -11666,7 +11749,7 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
             // genes: the new game's own, a plate's known ones, plate drops, learning, pair MP
             {
                 cr::GameState g;
-                cr::giveStartingItems(g);
+                cr::giveStartingItems(g, app.itemTable);
                 const std::vector<int> own = cr::usableAbilities(g, 0);
                 bad += own != std::vector<int>{81} || !cr::hasSkill(g, 0, 131) || cr::hasSkill(g, 0, 133);
                 g.items[481] = 1, g.items[108] = 1;
@@ -11677,7 +11760,7 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 int plates = 0, taught = 0;
                 for (uint32_t seed = 1; seed <= 40; ++seed) { // monster 200 (model 13) falls to a level-1 attack
                     cr::GameState fresh;
-                    cr::giveStartingItems(fresh);
+                    cr::giveStartingItems(fresh, app.itemTable);
                     cr::BattleRules k;
                     k.seed(seed);
                     k.setupParty(fresh, app.itemTable, 0);
@@ -11729,7 +11812,7 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 pm.seeds[0] = 5000;
                 gbad += cr::statBonus(pm, cr::kAttack) != 5000 || cr::seedRoom(pm, cr::kAttack) != 0;
                 cr::GameState fresh;
-                cr::giveStartingItems(fresh);
+                cr::giveStartingItems(fresh, app.itemTable);
                 cr::BattleRules gr;
                 gr.setupSpecial(fresh, app.itemTable, 372, 1); // Ayuta's guest
                 const bool quirk = gr.f[1].guest && gr.f[1].spd == gr.f[1].grd && gr.f[1].lck == gr.f[1].grd &&
@@ -11738,7 +11821,7 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 int firstOk = 0, tries = 0; // monster 203 (row +0xb4.. 92 170 89 175 100 182) at level 30
                 for (uint32_t seed = 1; seed <= 60 && firstOk == tries; ++seed) {
                     cr::GameState g2;
-                    cr::giveStartingItems(g2);
+                    cr::giveStartingItems(g2, app.itemTable);
                     g2.items[92] = 1; // the first already known: the second comes next
                     cr::BattleRules k;
                     k.seed(seed);
@@ -11783,7 +11866,7 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 bool once = true;
                 for (uint32_t seed = 1; seed <= 200; ++seed) {
                     cr::GameState fresh;
-                    cr::giveStartingItems(fresh);
+                    cr::giveStartingItems(fresh, app.itemTable);
                     for (int pass = 0; pass < 2; ++pass) {
                         cr::BattleRules k;
                         k.seed(seed);
@@ -11878,7 +11961,7 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 sbad += q.f[0].hp != 55;
                 // the Gates: Dragon Gate Stage 1 (175, on plate 482) adds its item's Attack
                 cr::GameState g;
-                cr::giveStartingItems(g);
+                cr::giveStartingItems(g, app.itemTable);
                 const int base = cr::memberStat(g, 0, cr::kAttack, app.itemTable);
                 g.items[482] = 1, g.items[175] = 1;
                 g.party[0].genes[1] = 482;
@@ -11966,7 +12049,7 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 }
                 { // story line-ups and the guest's rotation
                     cr::GameState g;
-                    cr::giveStartingItems(g);
+                    cr::giveStartingItems(g, app.itemTable);
                     cr::BattleRules a;
                     a.setupParty(g, app.itemTable, 0);
                     a.setupSpecial(g, app.itemTable, 371, 0);
@@ -14239,7 +14322,7 @@ int runSelfTest(App& app) {
         int problems = 0;
         const cr::GameState keepGame = app.game;
         app.game = cr::GameState();
-        cr::giveStartingItems(app.game);
+        cr::giveStartingItems(app.game, app.itemTable);
         showMap(app, 0, 0, 2);
         app.pendingEntry = App::Entry::None;
         app.runner.stop();
@@ -14295,7 +14378,7 @@ int runSelfTest(App& app) {
         r.screenToLayout(bx, by);
         const bool inverse = std::fabs(bx - 500) < 0.01f && std::fabs(by - 300) < 0.01f;
         app.game = cr::GameState();
-        cr::giveStartingItems(app.game);
+        cr::giveStartingItems(app.game, app.itemTable);
         showMap(app, 0, 0, 2);
         app.pendingEntry = App::Entry::None;
         app.runner.stop();
@@ -14371,7 +14454,7 @@ int runSelfTest(App& app) {
         };
         float px, py;
         app.game = cr::GameState();
-        cr::giveStartingItems(app.game);
+        cr::giveStartingItems(app.game, app.itemTable);
         showMap(app, 0, 0, 2);
         app.pendingEntry = App::Entry::None;
         app.runner.stop();
@@ -14437,7 +14520,7 @@ int runSelfTest(App& app) {
             SDL_Gamepad* keepPad = app.pad;
             app.pad = pad;
             app.game = cr::GameState();
-            cr::giveStartingItems(app.game);
+            cr::giveStartingItems(app.game, app.itemTable);
             showMap(app, 0, 0, 2);
             app.pendingEntry = App::Entry::None;
             app.runner.stop();
@@ -14497,7 +14580,7 @@ int runSelfTest(App& app) {
         const cr::GameState keepGame = app.game;
         const int keepChar = app.playerChar;
         app.game = cr::GameState();
-        cr::giveStartingItems(app.game);
+        cr::giveStartingItems(app.game, app.itemTable);
         app.game.oz = 1005;
         app.playerChar = 2; // Zhamo and Eluca: area 13
         showMap(app, 0, 0, 2);
@@ -14570,7 +14653,7 @@ int runSelfTest(App& app) {
         int problems = 0;
         const cr::GameState keepGame = app.game;
         app.game = cr::GameState();
-        cr::giveStartingItems(app.game);
+        cr::giveStartingItems(app.game, app.itemTable);
         showMap(app, 0, 0, 2);
         app.pendingEntry = App::Entry::None;
         app.runner.stop();
@@ -14764,7 +14847,7 @@ int runSelfTest(App& app) {
         app.testNoTutorials = false;
         app.game = cr::GameState();
         app.playerChar = 0;
-        cr::giveStartingItems(app.game);
+        cr::giveStartingItems(app.game, app.itemTable);
         showMap(app, 0, 0, 2);
         app.pendingEntry = App::Entry::None;
         app.runner.stop();
@@ -14788,7 +14871,7 @@ int runSelfTest(App& app) {
         if (b.active) endBattle(app, false);
         // 2. An event battle: the script goes on after it
         app.game = cr::GameState();
-        cr::giveStartingItems(app.game);
+        cr::giveStartingItems(app.game, app.itemTable);
         app.game.setFlag(0xff1, true);
         bool waited = true, continued = false, bossIn = false, gated = false;
         if (playScript(5, 47, 201)) {
@@ -14818,7 +14901,7 @@ int runSelfTest(App& app) {
         app.runner.stop();
         // 3. The 1st Gate boss's talks
         app.game = cr::GameState();
-        cr::giveStartingItems(app.game);
+        cr::giveStartingItems(app.game, app.itemTable);
         app.game.setFlag(0xff1, true);
         int talk1 = 0, talk2 = 0, heldAt1 = 0, healedWhole = 0, lateRound = 0;
         bool bossWon = false, scriptEnded = false;
@@ -14944,7 +15027,7 @@ void startNewGame(App& app) {
     // Set by the title's new-game path: t01's script 0 tests it to play the opening (event 201's
     // scene, gosub 0x5f98) instead of treating the opening as seen
     app.game.setFlag(4089, true);
-    cr::giveStartingItems(app.game); // prty_init_new: the Human Genes, 3 Emergency Exits, 2 Chocolates
+    cr::giveStartingItems(app.game, app.itemTable); // prty_init_new: the Human Genes, 3 Emergency Exits, 2 Chocolates
     app.treasureBoxes.clear();
     app.entryArea = -1;
     const int area = 7, map = 97;

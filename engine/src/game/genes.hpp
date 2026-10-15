@@ -52,8 +52,15 @@ int memberStat(const GameState& gs, int character, int stat, const ItemTable& it
 void levelUpBoosts(GameState& gs, int character, int levels);
 // The gene plate a monster of battle model `model` leaves (0 none)
 int plateDrop(int model);
+// __prty_chg(s): the records in play back to their scenario's block, then scenario s's in; and the
+// bag and Oz swapped with the other scenario's (its own kinds: everything but genes, skills and
+// kinds 9 / 10)
+void changeScenario(GameState& gs, const ItemTable& items, int scenario);
+bool sharedItem(const ItemTable& items, int item); // kinds 4, 5, 9, 10: one count for both scenarios
 // prty_init_new's genes and items; ensureStartingGenes only adds what an older save lacks
-void giveStartingItems(GameState& gs);
+void giveStartingItems(GameState& gs, const ItemTable& items);
+// add_item while scenario `scenario` is set: its own bag, or the shared one
+void addScenarioItem(GameState& gs, const ItemTable& items, int scenario, int item, int count);
 void ensureStartingGenes(GameState& gs);
 
 } // namespace cr

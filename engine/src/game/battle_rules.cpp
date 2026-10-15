@@ -72,90 +72,75 @@ const BattleActionDef* BattleActionTable::get(int id) const {
 
 int BattleRules::random(int n) { return (shared_ ? *shared_ : own_).get(n); }
 
-void BattleRules::setupParty(const GameState& gs, const ItemTable& items, int route) {
-    route = std::clamp(route, 0, 3);
+void BattleRules::setupParty(const GameState& gs, const ItemTable& items, int) {
     known_.clear();
     purse = gs.oz;
     for (const auto& [item, count] : gs.items)
-        if (count > 0 && ((item >= 81 && item <= 186) || (item >= 479 && item <= 500))) known_.push_back(item);
+        if (count > 0 && ((item >= 81 && item <= 186) || (item >= 474 && item <= 500))) known_.push_back(item);
+    // btl_prty_init: the scenario's pair (records 0..2), the second away while flag 0xfed + s holds
+    const int s = std::clamp(gs.scenario, 0, kScenarios - 1);
     for (int k = 0; k < 2; ++k) {
-        Fighter& x = f[size_t(k)];
-        x = Fighter();
-        x.present = true;
-        x.character = 2 * route + k;
-        const PartyMember& m = gs.party[size_t(x.character)];
-        x.level = m.level;
-        x.hpMax = memberStat(gs, x.character, kHp, items);
-        x.mpMax = memberStat(gs, x.character, kMp, items);
-        x.hp = x.hpMax; // btlpcparam_prty_init: every battle starts with full HP
-        x.mp = m.mp < 0 ? x.mpMax : std::min(m.mp, x.mpMax);
-        x.atk = memberStat(gs, x.character, kAttack, items);
-        x.grd = memberStat(gs, x.character, kDefense, items);
-        x.spd = memberStat(gs, x.character, kSpeed, items);
-        x.lck = memberStat(gs, x.character, kLuck, items);
-        for (int s = 131; s <= 186; ++s) x.skills[size_t(s - 131)] = hasSkill(gs, x.character, s);
+        const int c = k == 1 && gs.flag(0xfed + s) ? -1 : gs.pairs[size_t(s)][size_t(k)];
+        member(gs, items, k, c);
     }
 }
 
-void BattleRules::setupSpecial(const GameState& gs, const ItemTable& items, int group, int route) {
-    struct Solo { int group, route, character; };
-    static const Solo kSolo[] = {{371, 0, 0}, {283, 1, 2}, {376, 2, 4}, {172, 2, 4}, {374, 2, 4},
-                                 {350, 2, 5}, {377, 2, 4}, {375, 3, 6}, {372, 1, 3}};
-    auto member = [&](int k, int c) {
-        Fighter& x = f[size_t(k)];
-        x = Fighter();
-        x.present = true;
-        x.character = c;
-        const PartyMember& m = gs.party[size_t(c)];
-        x.level = m.level;
-        x.hpMax = memberStat(gs, c, kHp, items);
-        x.mpMax = memberStat(gs, c, kMp, items);
-        x.hp = x.hpMax;
-        x.mp = m.mp < 0 ? x.mpMax : std::min(m.mp, x.mpMax);
-        x.atk = memberStat(gs, c, kAttack, items);
-        x.grd = memberStat(gs, c, kDefense, items);
-        x.spd = memberStat(gs, c, kSpeed, items);
-        x.lck = memberStat(gs, c, kLuck, items);
-        for (int s = 131; s <= 186; ++s) x.skills[size_t(s - 131)] = hasSkill(gs, c, s);
-    };
-    if (gs.flag(4077 + route)) f[1] = Fighter(); // the partner is away
-    for (const Solo& s : kSolo)
-        if (s.group == group && s.route == route) {
-            member(0, s.character);
-            f[1] = Fighter();
-        }
-    struct Guest { int group, route, character, script; };
-    static const Guest kGuest[] = {{370, 0, 4, 1}, {372, 1, 6, 2}, {373, 2, 6, 2}};
-    for (const Guest& g : kGuest)
-        if (g.group == group && g.route == route) {
+// btlpcparam_prty_init: record c's level and stats in slot k, HP full (-1: nobody)
+void BattleRules::member(const GameState& gs, const ItemTable& items, int k, int c) {
+    Fighter& x = f[size_t(k)];
+    x = Fighter();
+    if (c < 0 || c >= kCharacters) return;
+    x.present = true;
+    x.character = c;
+    const PartyMember& m = gs.party[size_t(c)];
+    x.level = m.level;
+    x.hpMax = memberStat(gs, c, kHp, items);
+    x.mpMax = memberStat(gs, c, kMp, items);
+    x.hp = x.hpMax; // every battle starts with full HP
+    x.mp = m.mp < 0 ? x.mpMax : std::min(m.mp, x.mpMax);
+    x.atk = memberStat(gs, c, kAttack, items);
+    x.grd = memberStat(gs, c, kDefense, items);
+    x.spd = memberStat(gs, c, kSpeed, items);
+    x.lck = memberStat(gs, c, kLuck, items);
+    for (int sk = 131; sk <= 186; ++sk) x.skills[size_t(sk - 131)] = hasSkill(gs, c, sk);
+}
+
+void BattleRules::setupSpecial(const GameState& gs, const ItemTable& items, int group, int) {
+    // btl_prty_init's story line-ups: scenario 0's groups 651, 654, 655, 656, 688 Vieg alone,
+    // 656 / 695 Olgar alone (695 with the guest beside, at the leader's level + 5: base + level x
+    // 50 / x 5 and Speed and Luck from the base Defense - btlpcparam_prty_init_special), scenario
+    // 1's 675 its leader alone; group 656 starts at 70% HP
+    const int s = std::clamp(gs.scenario, 0, kScenarios - 1);
+    if (s == 0) {
+        for (int g : {651, 688, 654, 655})
+            if (group == g) member(gs, items, 0, 0), f[1] = Fighter();
+        if (group == 656 || group == 695) member(gs, items, 0, 1), f[1] = Fighter();
+        if (group == 656) f[0].hp = f[0].hpMax * 70 / 100;
+        if (group == 695) {
             Fighter& x = f[1];
             x = Fighter();
             x.present = x.guest = true;
-            x.character = g.character;
+            x.character = 3;
             x.level = std::min(kMaxLevel, f[0].level + 5);
-            // btlpcparam_prty_init_special: base + level x 50 / x 5, nothing else - and (in both
-            // releases) Speed and Luck from the base Defense too
-            auto at = [&](Stat s, int per) { return baseStat(g.character, s) + x.level * per; };
+            auto at = [&](Stat st, int per) { return baseStat(3, st) + x.level * per; };
             x.hp = x.hpMax = at(kHp, 50);
             x.mp = x.mpMax = at(kMp, 5);
             x.atk = at(kAttack, 5);
             x.grd = x.spd = x.lck = at(kDefense, 5);
-            (void)items;
-            allyAuto = true;
-            allyScript = g.script;
         }
+    } else if (group == 675)
+        member(gs, items, 0, 0), f[1] = Fighter();
 }
 
 int BattleRules::leaderLevel() const {
-    // btl_enemy_init_lv: the pair's average when both are the route's own, else the leader's
-    if (f[0].present && f[1].present && f[1].character == (f[0].character | 1) && !(f[0].character & 1))
-        return (f[0].level + f[1].level) / 2;
+    // btl_enemy_init_lv: the pair's average when both fight, else the leader's
+    if (f[0].present && f[1].present) return (f[0].level + f[1].level) / 2;
     return f[0].level;
 }
 
 void BattleRules::setupEnemies(const BattleData& data, const std::array<int, 3>& ids, int band) {
     const int L = leaderLevel();
-    const int hi = L > 98 ? 100 : L + 2, lo = L < 6 ? 1 : L - 5;
+    const int hi = L > 198 ? 200 : L + 2, lo = L < 6 ? 1 : L - 5;
     band = std::clamp(band, 0, 9);
     for (int k = 0; k < 3; ++k) {
         Fighter& x = f[size_t(2 + k)];
@@ -179,7 +164,7 @@ void BattleRules::setupEnemies(const BattleData& data, const std::array<int, 3>&
             }
         } else
             lv = m->level > 0 ? m->level : L;
-        x.level = std::clamp(lv, 1, 100);
+        x.level = std::clamp(lv, 1, kMaxLevel);
         x.hp = x.hpMax = int(m->hpAt(x.level));
         x.atk = m->atkAt(x.level);
         x.grd = m->grdAt(x.level);

@@ -33,6 +33,12 @@ bool writeSave(const std::string& path, const SaveData& s) {
     std::map<int, int> items(s.game.items.begin(), s.game.items.end());
     for (auto& [k, v] : items) o << ' ' << k << '=' << v;
     o << "\noz " << s.game.oz;
+    o << "\nscenario " << s.game.scenario << ' ' << s.game.pairs[0][0] << ' ' << s.game.pairs[0][1] << ' '
+      << s.game.pairs[1][0] << ' ' << s.game.pairs[1][1] << ' ' << s.game.leaders[0] << ' ' << s.game.leaders[1] << ' '
+      << s.game.otherOz;
+    o << "\notherbag";
+    std::map<int, int> other(s.game.otherBag.begin(), s.game.otherBag.end());
+    for (auto& [k, v] : other) o << ' ' << k << '=' << v;
     for (int c = 0; c < kCharacters; ++c) { // party c level exp hp mp weapon armor jewel
         const PartyMember& m = s.game.party[size_t(c)];
         o << "\nparty " << c << ' ' << m.level << ' ' << m.exp << ' ' << m.hp << ' ' << m.mp << ' ' << m.equip[0] << ' '
@@ -83,6 +89,16 @@ bool readSave(const std::string& path, SaveData& s, std::string* error) {
         else if (key == "play") l >> out.playSeconds;
         else if (key == "saved") l >> out.savedAt;
         else if (key == "oz") l >> out.game.oz;
+        else if (key == "scenario") {
+            GameState& g = out.game;
+            l >> g.scenario >> g.pairs[0][0] >> g.pairs[0][1] >> g.pairs[1][0] >> g.pairs[1][1] >> g.leaders[0] >> g.leaders[1] >>
+                g.otherOz;
+            g.scenario = std::clamp(g.scenario, 0, kScenarios - 1);
+            for (auto& pr : g.pairs)
+                for (int& c : pr) c = std::clamp(c, -1, kCharacters - 1);
+            for (int& c : g.leaders) c = std::clamp(c, 0, 3);
+            g.otherOz = std::clamp(g.otherOz, 0, 9999999);
+        }
         else if (key == "party") {
             int c = -1;
             PartyMember m;
@@ -104,13 +120,14 @@ bool readSave(const std::string& path, SaveData& s, std::string* error) {
             std::string w;
             for (size_t i = 0; i < out.game.flags.size() && l >> w; ++i)
                 out.game.flags[i] = uint32_t(std::strtoul(w.c_str(), nullptr, 16));
-        } else if (key == "vars" || key == "items") {
+        } else if (key == "vars" || key == "items" || key == "otherbag") {
             std::string kv;
             while (l >> kv) {
                 const size_t eq = kv.find('=');
                 if (eq == std::string::npos) continue;
                 const int k = std::atoi(kv.c_str()), v = std::atoi(kv.c_str() + eq + 1);
                 if (key == "vars") out.game.vars[k] = v;
+                else if (key == "otherbag") out.game.otherBag[k] = v;
                 else out.game.items[k] = v;
             }
         } else if (key == "noencounters") {
@@ -128,7 +145,7 @@ bool readSave(const std::string& path, SaveData& s, std::string* error) {
     }
     if (out.area < 0 || out.map < 0) return fail("incomplete save");
     ensureStartingGenes(out.game); // saves from before genes were kept
-    out.leader = std::clamp(out.leader, 0, 7);
+    out.leader = std::clamp(out.leader, 0, 3);
     out.game.oz = std::clamp(out.game.oz, 0, 9999999);
     s = std::move(out);
     return true;

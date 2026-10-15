@@ -1,13 +1,13 @@
 #pragma once
-// The eight characters' levels, experience and equipment, and the stats the menus show
-// (pcparam_max_*): base (_pcparam, 0xd2cd0) + level × 50 (HP) or × 5 (the others) + the
-// equipment's bonuses (param_equip_calc) + the save's per-stat bonus (+0x2fc5c HP, +0x16..+0x28):
-// what the levels from 20 on add (pcparam_change_lv: leaving level L >= 20, 10 L - 190 HP and
-// L - 19 to each of the others), the level-up skills' boosts and the seeds, at most 50000 / 5000.
-// (1.0.1's loop runs one step short when a battle gives several levels; 2.2.0 fixed it - kept
-// fixed here.) A new game's party (prty_init / _prty_init_equip):
-// level 1, everyone in their own starting weapon and armor, some with jewel 426. The level
-// needs _exp[level] (0xd2d30) experience in total (GetNextExp).
+// Omega's ten character records (_prty + 0x4a4, 0x4c bytes each): 0..2 the scenario being played
+// (Vieg, Olgar, Dante - __prty_chg copies them in from / back to its own block), 3 the guest, 4..6
+// scenario 0's block and 7..9 scenario 1's. Their levels, experience and equipment, and the stats
+// the menus show (pcparam_max_*): base (_pcparam) + level x 50 (HP) or x 5 (the others) + the
+// equipment's bonuses (param_equip_calc) + the record's per-stat bonus: what the levels from 20 on
+// add (pcparam_change_lv: leaving level L >= 20, 10 HP and 1 to each of the others), the level-up
+// skills' boosts and the seeds, at most 99999 / 9999. A new game's records (prty_init /
+// _prty_init_equip): each its level, weapon, armor, jewel and gene plate. The level needs
+// _exp[level] experience in total (GetNextExp), to level 255.
 //
 // The seeds (items 3..6, `use_item`) add a point each to Attack / Defense / Speed / Luck, into
 // the same bonus: one more while it's below 5000 (`MuCom_GetUsedItemLimitNum`: 5000 - bonus;
@@ -19,8 +19,8 @@ namespace cr {
 
 class ItemTable;
 
-constexpr int kCharacters = 8;  // Escher, Musiea, Eluca, Zhamo, Olgar, Vahti, Ayuta, Mana
-constexpr int kMaxLevel = 99;
+constexpr int kCharacters = 10; // the records above
+constexpr int kMaxLevel = 255;
 enum Stat { kHp, kMp, kAttack, kDefense, kSpeed, kLuck, kStats };
 enum EquipSlot { kWeapon, kArmor, kJewel, kEquipSlots };
 
@@ -33,12 +33,17 @@ struct PartyMember {
     int genes[4] = {0, 0, 0, 0};        // gene plates worn (game/genes.hpp): Human Genes, then 3
     int boosts[6] = {0, 0, 0, 0, 0, 0}; // level-up skills' points (164..169): HP, MP, Attack.. Luck
 };
-constexpr int kMaxSeedPoints = 5000;
-constexpr int kMaxHpBonus = 50000, kMaxStatBonus = 5000;
+constexpr int kMaxSeedPoints = 9999;
+constexpr int kMaxHpBonus = 99999, kMaxStatBonus = 9999;
+constexpr int kScenarios = 2; // Select Scenario's two: their own pair, leader, bag and Oz
 
 using Party = std::array<PartyMember, kCharacters>;
 
 Party newParty();
+// prty_init_new(scenario): that scenario's block (records 4 + 3s .. 6 + 3s) as a new game's
+void newScenarioRecords(Party& p, int scenario);
+// _prty_init_equip's two extra items (genes / skills) for the bag, per record (0 none)
+int startItem(int record, int k);
 int expForLevel(int level); // total experience level `level` needs (level 1 = 0)
 // Stat `stat` with the member's equipment, seeds and level-up boosts; `swap` (if > 0) as if that
 // item were worn in its slot. memberStat (game/genes.hpp) adds the skills' (the Gates).

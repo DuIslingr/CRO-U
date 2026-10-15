@@ -1,6 +1,7 @@
 #include "game/genes.hpp"
 
 #include <algorithm>
+#include <unordered_map>
 
 #include "game/event_vm.hpp"
 #include "game/party.hpp"
@@ -88,24 +89,55 @@ void levelUpBoosts(GameState& gs, int character, int levels) {
         if (hasSkill(gs, character, 164 + k)) gs.party[size_t(character)].boosts[k] += (k == 0 ? 10 : 1) * levels;
 }
 
+bool sharedItem(const ItemTable& items, int item) {
+    const ItemParam* p = items.item(item);
+    return p && (p->kind == 4 || p->kind == 5 || p->kind == 9 || p->kind == 10);
+}
+
+void changeScenario(GameState& gs, const ItemTable& items, int scenario) {
+    scenario = std::clamp(scenario, 0, kScenarios - 1);
+    for (int k = 0; k < 3; ++k) gs.party[size_t(4 + 3 * gs.scenario + k)] = gs.party[size_t(k)];
+    if (scenario != gs.scenario) {
+        std::unordered_map<int, int> mine, theirs = std::move(gs.otherBag);
+        for (auto it = gs.items.begin(); it != gs.items.end();)
+            if (!sharedItem(items, it->first)) mine[it->first] = it->second, it = gs.items.erase(it);
+            else ++it;
+        for (auto& [item, count] : theirs) gs.items[item] = count;
+        gs.otherBag = std::move(mine);
+        std::swap(gs.oz, gs.otherOz);
+        gs.scenario = scenario;
+    }
+    for (int k = 0; k < 3; ++k) gs.party[size_t(k)] = gs.party[size_t(4 + 3 * gs.scenario + k)];
+}
+
 // btlcalc_chk_dead: models 33..138 leave the plate of their species (_btlanmtbl [15])
 int plateDrop(int model) { return model >= 33 && model <= 138 ? 481 + kBattleAnimTable[model][15] : 0; }
 
-void giveStartingItems(GameState& gs) {
-    ensureStartingGenes(gs);
-    gs.items[1] += 3;  // Emergency Exit
-    gs.items[21] += 2; // Chocolate
+void addScenarioItem(GameState& gs, const ItemTable& items, int scenario, int item, int count) {
+    if (item <= 0) return;
+    auto& bag = sharedItem(items, item) || scenario == gs.scenario ? gs.items : gs.otherBag;
+    bag[item] = std::min(99, bag[item] + count);
 }
 
-void ensureStartingGenes(GameState& gs) {
-    for (int c = 0; c < 8; ++c) {
-        PartyMember& m = gs.party[size_t(c)];
-        if (!isPlate(m.genes[0])) m.genes[0] = humanPlate(c);
-        if (owned(gs, 81 + c) <= 0) gs.items[81 + c] = 1;
-        if (owned(gs, 131 + c) <= 0) gs.items[131 + c] = 1;
+void giveStartingItems(GameState& gs, const ItemTable& items) {
+    // prty_init: records 3..6 fill scenario 0's bag, 7..9 scenario 1's - their plates and two
+    // extras (the port keeps worn equipment out of the bag) -, scenario 1 also gets 480, 82 and
+    // 188, scenario 0 _prty_init_item_all; then plate 475 (record 6's) and 369 go again
+    static const short kItemAll[] = {419, 420, 421, 422, 423, 428, 429, 430, 431, 432, 433,
+                                     434, 435, 437, 438, 443, 444, 445, 459, 460};
+    for (int c = 3; c < kCharacters; ++c) {
+        const int s = (c - 3) / 4;
+        addScenarioItem(gs, items, s, gs.party[size_t(c)].genes[0], 1);
+        for (int k = 0; k < 2; ++k) addScenarioItem(gs, items, s, startItem(c, k), 1);
     }
-    for (int p = kFirstPlate; p < kFirstPlate + 2; ++p)
-        if (owned(gs, p) <= 0) gs.items[p] = 1;
+    for (int i : {480, 82, 188}) addScenarioItem(gs, items, 1, i, 1);
+    for (int i : kItemAll) addScenarioItem(gs, items, 0, i, 1);
+    for (int i : {475, 369}) {
+        auto& bag = sharedItem(items, i) || gs.scenario == 0 ? gs.items : gs.otherBag;
+        if (bag.count(i) && --bag[i] <= 0) bag.erase(i);
+    }
 }
+
+void ensureStartingGenes(GameState&) {} // (CR1's Human Genes; Omega's records carry their plates)
 
 } // namespace cr

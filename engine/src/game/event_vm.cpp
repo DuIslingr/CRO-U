@@ -1,5 +1,6 @@
 #include "game/event_vm.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -385,6 +386,24 @@ bool EventRunner::step(EventHost* host) {
             else if (id == 2027 && host) state.vars[a0] = host->pairNo();                   // Uty_GetPartyNo: var a0
             else if (id == 2028 && host) host->nowLoading(state.flag(4086));                // Uty_NowLoading
             else if (id == 2020 && host) host->sceneEffectSet(vm.var(0));                  // ScnEffectRead: set var 0
+            // Omega's: SetPrtyNo (the scenario's pair = vars 1, 2), SetPrtyLv_Add (record var 1 up
+            // var 2 levels), TBox, SaveEvent, Chk_BtlFld, Chg_BtlFld, Chg_MsgSkip, Chg_char (the
+            // leader = var 0), Add_OMU_ITEM (var 9 += the prices, to 9,999,999), NpcShadow_onoff
+            // (npc var 8, on var 9), puzzle_teleport_cnt (var 9), EquipAcce
+            else if (id == 2036) {
+                auto& pr = state.pairs[size_t(std::clamp(state.scenario, 0, kScenarios - 1))];
+                pr = {vm.var(1), vm.var(2)};
+            }
+            else if (id == 2037 && host) host->addLevels(vm.var(1), vm.var(2));
+            else if (id == 2038 && host) host->treasureBoxesShown(vm.var(9) != 0);
+            else if (id == 2039 && host) host->saveEvent();
+            else if (id == 2040) state.vars[0] = host && host->inBattle() ? 1 : 0;
+            else if (id == 2041 && host) host->changeBattleStage(vm.var(0));
+            else if (id == 2042 && host) host->messageSkip(vm.var(0) == 1);
+            else if (id == 2043 && host) host->setLeader(vm.var(0));
+            else if (id == 2044 && host) state.vars[9] = std::min(9999999, vm.var(9) + host->omuItemValue());
+            else if (id == 2045 && host) host->npcShadow(vm.var(8), vm.var(9) != 0);
+            else if (id == 2046 && host) host->puzzleTeleportCount(vm.var(9));
             break;
         }
         case 14: { // Wait: frames, or 0xFFFF/0xFFFC fade, 0xFFFE loading, 0xFFFD + npc

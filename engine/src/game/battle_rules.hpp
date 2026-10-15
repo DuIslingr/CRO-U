@@ -245,6 +245,7 @@ public:
     // btl_prty_init: the story battles' own line-ups - one member alone, a guest beside the
     // leader (prty_init_special: level + 5, base stats), or the partner away (flag 4077 + route)
     void setupSpecial(const GameState& gs, const ItemTable& items, int group, int route);
+    void member(const GameState& gs, const ItemTable& items, int slot, int character);
     // The group's monsters; `band` is the area's progress 0..9 (the original's per-route byte)
     void setupEnemies(const BattleData& data, const std::array<int, 3>& ids, int band);
     int leaderLevel() const;

@@ -26,6 +26,15 @@ struct GameState {
     std::vector<int> openedBoxes;            // per area*1000 + box id (Uty_SetOpenedTresureBox)
     int oz = 0;                              // money (AppCtl +0x2f93c, MuCom_AddOz: 0..9,999,999)
     Party party = newParty();                // levels, experience, equipment (game/party.hpp)
+    // Omega's _prty: the scenario in play (+8), each one's pair (+2 + 2s / +3 + 2s: records 0..2, -1
+    // none) and field leader (+6 + s, Set_Prtyno). Each scenario has its own bag and Oz (gac +
+    // 0x83598 + 0x500 s, + 0x82e08 + 4 s; genes, skills, kinds 9 / 10 shared): `items` and `oz`
+    // are the one in play's, these the other's (game/genes.hpp changeScenario)
+    int scenario = 0;
+    std::array<std::array<int, 2>, kScenarios> pairs{{{0, 1}, {0, 2}}};
+    std::array<int, kScenarios> leaders{{0, 0}};
+    std::unordered_map<int, int> otherBag;
+    int otherOz = 0;
     // Per pair (route 0..3, the save's +0xc18): encounters switched off (skill 170's field button,
     // +0xc1b + route) and the EXP banked by walking (skill 174, +0xac0 + 4 route, paid at a win)
     std::array<bool, 4> noEncounters{};
@@ -145,6 +154,17 @@ public:
     virtual int pairNo() { return 0; }          // Uty_GetPartyNo: the pair, 0..3
     virtual void nowLoading(bool /*on*/) {}     // Uty_NowLoading: flag 4086 shows the spinner // Uty_PuzzleStart: the "Puzzle Start" banner (var 0 / flags 0, 1 drive it)
     virtual void warpCrystalCamera(int /*npc*/) {}
+    // Omega's own calls
+    virtual void addLevels(int /*record*/, int /*levels*/) {} // Uty_SetPrtyLv_Add: pcparam_change_lv
+    virtual void treasureBoxesShown(bool /*on*/) {}           // Uty_TBox: var 9 0 hides them
+    virtual void saveEvent() {}                               // Uty_SaveEvent: SaveData_Save
+    virtual bool inBattle() { return false; }                 // Uty_Chk_BtlFld
+    virtual void changeBattleStage(int /*stage*/) {}          // Uty_Chg_BtlFld
+    virtual void messageSkip(bool /*on*/) {}                  // Uty_Chg_MsgSkip
+    virtual void setLeader(int /*record*/) {}                 // Uty_Chg_char: Set_Prtyno
+    virtual int omuItemValue() { return 0; }                  // Uty_Add_OMU_ITEM: the prices of 521..540 held
+    virtual void npcShadow(int /*npc*/, bool /*on*/) {}       // Uty_NpcShadow_onoff
+    virtual void puzzleTeleportCount(int /*n*/) {}            // Uty_puzzle_teleport_cnt
     // FrmPlayEff / FrmPlayEff2: effect `effect` (looped) on actor `actor` (0 the leader, else an NPC
     // by id); an actor that isn't an NPC takes the current record's position `v` (`angled`: and
     // its angle, v[3..5]); `scale` percent. FrmStopEff (actor -1) / FrmStopEff2 stop them.
