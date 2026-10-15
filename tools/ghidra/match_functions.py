@@ -86,8 +86,8 @@ def generic(name):
     return name.startswith(('FUN_', 'thunk_FUN_', 'LAB_', 'entry'))
 
 
-A = load(sys.argv[1])  # named (1.0.1)
-B = load(sys.argv[2])  # stripped (2.2.0)
+A = load(sys.argv[1])  # the named build
+B = load(sys.argv[2])  # the stripped one
 a2b, b2a, how = {}, {}, {}
 
 
@@ -351,10 +351,10 @@ with open(sys.argv[3], 'w', encoding='utf-8') as out:
         mangled = next((n for n in A[a]['names'] if n.startswith('__Z')), '')
         out.write(f"{b}\t{a}\t{A[a]['names'][0]}\t{mangled}\t{how[b]}\t{score(a, b):.2f}\n")
 
-print(f'1.0.1: {len(A)} functions; 2.2.0: {len(B)} functions')
+print(f'named: {len(A)} functions; stripped: {len(B)} functions')
 for k, v in report:
     print(f'  {k:14s} {v}')
-print(f'matched {len(b2a)} ({100 * len(b2a) / len(B):.1f}% of 2.2.0); propagation rounds {rounds}')
+print(f'matched {len(b2a)} ({100 * len(b2a) / len(B):.1f}% of the stripped build); propagation rounds {rounds}')
 print(f'call edges between matched functions that agree: {agree}/{total} ({100 * agree / max(total, 1):.1f}%)')
 if check:
     right = sum(b2a.get(b) == a for b, a in held.items())

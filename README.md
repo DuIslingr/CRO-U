@@ -30,6 +30,24 @@ Known so far:
 - [ ] maps, cameras, events, battles, menus: CR1's tables (map list, NPC models, items, the
       menus' layouts) are compiled in and need Omega's
 
+## Reverse-engineering groundwork
+
+Three builds are the reference, all from your own copies (nothing of them is committed):
+
+| Build | Binary | Functions | Names |
+|---|---|---|---|
+| iPad HD 1.0.0 (2011) | `ChaosRingsOmegaHDeng`, armv7, unencrypted | 3083 | its own symbols (12965) |
+| iPad HD 3.1.0 (2013): voiced (`voiceevnt.bin`, `voicebtl.bin`), 8 languages | the same, stripped | 2930 | 1928 carried over from 1.0.0 (74% of its bodies; 98% of call edges between matches agree) |
+| Vita PCSG00499 | `eboot.bin` (SELF) -> ELF, Thumb-2 (SNC) | 4259 | 905 from both iPad builds (676 agreed by both), 341 imports by NID |
+
+`tools/re_setup.sh <1.0.0 .app> <3.1.0 .app> <PCSG00499>` builds all of it into `re/` (git-ignored):
+the 1.0.0 disassembly with import stubs named (`re/disasm.txt`, `re/symbols.txt`, `re/stubs.txt`,
+`tools/dis.sh <function>`), then Ghidra (headless) per build - `re/ios`, `re/ios310`, `re/vita` each
+hold `decomp.c` (every function's C), `functions.tsv` (entry, size, name, calls) and the Ghidra
+project. Names move between builds with `tools/ghidra/match_functions.py` (call-graph and code
+features; `--cross` for the Vita's other compiler) and `combine_names.py`, applied by
+`ApplyNames.java` with a comment saying where each came from.
+
 ## Layout
 
 | Path | Purpose |
