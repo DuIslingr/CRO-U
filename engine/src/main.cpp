@@ -15733,6 +15733,7 @@ int runExplore(App& app, int maxActions) {
     settle(20000);
     std::set<std::tuple<int, int, uint64_t>> tried;
     std::set<int> mapsSeen{app.mapNumber};
+    std::map<int, int> visits{{app.mapNumber, 1}}; // (rooms seen: the less visited first)
     int step = 0, stuckReason = 0;
     for (; step < maxActions; ++step) {
         // candidates: people / objects (kind bit 3), then touch boxes that don't warp, then exits
@@ -15743,7 +15744,7 @@ int runExplore(App& app, int maxActions) {
             cr::GameState trial = app.game;
             const cr::EventResult r = cr::runEvent(app.events, id, trial, app.area, app.mapNumber);
             if (!r.warp.valid) return base;
-            return mapsSeen.count(r.warp.map) ? 5 : 2;
+            return mapsSeen.count(r.warp.map) ? 5 + std::min(visits[r.warp.map], 50) : 2;
         };
         for (size_t i = 0; i < app.npcs.size(); ++i) {
             const cr::FieldNpc& n = app.npcs[i];
@@ -15765,6 +15766,12 @@ int runExplore(App& app, int maxActions) {
             continue;
         }
         const uint64_t key = stateKey();
+        if (const char* cm = SDL_getenv("CR_EXPLORE_CANDS"); cm && SDL_atoi(cm) == app.mapNumber) { // (debugging)
+            std::printf("     candidates on map %d:", app.mapNumber);
+            for (const Cand& c : cands)
+                std::printf(" %s%d(r%d%s)", c.examine ? "t" : "x", c.id, c.rank, tried.count({app.mapNumber, c.id * 2 + c.examine, key}) ? ",tried" : "");
+            std::printf("\n");
+        }
         const Cand* pick = nullptr;
         for (const Cand& c : cands)
             if (!tried.count({app.mapNumber, c.id * 2 + c.examine, key})) { pick = &c; break; }
@@ -15803,6 +15810,7 @@ int runExplore(App& app, int maxActions) {
         const int frames = settle(20000);
         cr::setEventTrace(nullptr);
         if (!started) continue;
+        if (app.mapNumber != fromMap) ++visits[app.mapNumber];
         mapsSeen.insert(app.mapNumber);
         std::string extra;
         for (size_t u = unsupportedBefore; u < app.unsupported.size(); ++u) extra += ", " + app.unsupported[u];
