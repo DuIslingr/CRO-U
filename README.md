@@ -85,7 +85,8 @@ Next (the self-test's remaining failures are mostly checks still written for CR1
 
 - [ ] the battle stage's own motion during a staged action (440: `mdl_set_act_nextanm2` on the
       stage model - stages are drawn unskinned)
-- [ ] `--explore` into the second scenario (it would have to go back to the title's Select Scenario)
+- [ ] `--explore n 1` (the second scenario) to its end: it gets 61 rooms and 43 battles in (its
+      first five worlds) before it runs out of ideas
 - [ ] the rest of the self-test moved onto Omega's data (battle rules, saves, the save screen)
 
 ## Reverse-engineering groundwork
