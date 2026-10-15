@@ -3536,11 +3536,20 @@ bool applySave(App& app, const cr::SaveData& s) {
     return true;
 }
 
-// The pair's faces (pictures 29..36: the men across the top row, the women below, a pair per
-// column; characters 0 Escher 1 Musiea 2 Eluca 3 Zhamo 4 Olgar 5 Vahti 6 Ayuta 7 Mana)
-int facePicture(int character) {
-    static const int kFace[8] = {29, 30, 32, 31, 33, 34, 35, 36};
-    return kFace[std::clamp(character, 0, 7)];
+bool viegIsOlgar(const App& app);
+bool olgarIsDante(const App& app);
+int charNameId(const App& app, int c);
+// __ComUty_FaceBoardFaceDraw: a record's face, picture 29 + record (32 for record 0 while it is Olgar)
+int facePicture(const App& app, int character) {
+    character = std::clamp(character, 0, cr::kCharacters - 1);
+    return character == 0 && viegIsOlgar(app) ? 32 : 29 + character;
+}
+// __ComUty_FaceBoardBackDraw: whose name picture (45 / 53 + n) a record's board shows - record 1's
+// for record 0 while it is Olgar, record 3's (Dante) for record 1 in scenario 1
+int boardNameIndex(const App& app, int c) {
+    if (c == 0 && viegIsOlgar(app)) return 1;
+    if (c == 1 && olgarIsDante(app)) return 3;
+    return c;
 }
 
 std::string playTimeText(double seconds) {
@@ -4136,9 +4145,9 @@ void drawShopBoard(App& app, float bx, float by, int c, int item, float a) {
     const cr::PartyMember& pm = app.game.party[size_t(c)];
     const float white[4] = {1, 1, 1, a};
     m.quad(bx + 12, by, 143, 16, white, white); // the name
-    m.textCentred(sysText(app, 58029 + c), bx + 12 + (143 - m.textWidth(sysText(app, 58029 + c), 14)) / 2, by + 8, true, a,
-                  14);
-    m.picture(144 + (facePicture(c) - 29), bx - 8, by - 32, a);
+    const std::string name = sysText(app, 58000 + charNameId(app, c)); // (ComUty_StateBoardChrName)
+    m.textCentred(name, bx + 12 + (143 - m.textWidth(name, 14)) / 2, by + 8, true, a, 14);
+    m.picture(148 + std::clamp(c, 0, cr::kCharacters - 1), bx - 8, by - 32, a); // ComUty_StateBoardDraw: 0x94 + record
     m.quad(bx + 12, by + 32, 143, 15, white, white); // LV
     m.picture(82, bx + 50, by + 36, a);
     drawShopNumber(m, pm.level, bx + 80, by + 33, 3, 12, a, 2, true);
@@ -4447,7 +4456,7 @@ namespace campui {
 constexpr int kWords[5] = {8, 9, 10, 11, 3};                 // Items, Equip, Genes, Status, Options
 constexpr bool kReady[5] = {true, true, true, true, true};
 constexpr int kEquipSlots = 7;                                 // weapon, armor, jewel, Human Genes, 3 plates
-constexpr int kEntries = 6;                                    // and Save
+constexpr int kEntries = 5;                                    // (CR1's iPad had Save as a sixth)
 constexpr float kPlateX = 328, kPlateY = 48, kPlateStep = 48;
 constexpr float kMemberY = 176, kMemberStep = 56;
 constexpr int kCategoryKind[6] = {14, 3, 6, 7, 8, 10};         // make_item_list (0xc8660)
@@ -4461,8 +4470,23 @@ constexpr uint32_t kSoundEquip = 21, kSoundUse = 22;
 
 bool keyHints(const App& app) { return app.showHud && !app.renderer.phoneLayout(); }
 int plateIcon(int word) { return word >= 0 && word < cr::kNumPlateWords ? cr::kWordIcon[word] - 1 : -1; } // (kanIconNoTbl)
-int campRoute(const App& app) { return std::clamp(app.playerChar / 2, 0, 3); }
-int campCharacter(const App& app, int member) { return campRoute(app) * 2 + std::clamp(member, 0, 1); }
+int campRoute(const App& app) { return std::clamp(app.game.scenario, 0, cr::kScenarios - 1); }
+// ComUty_CharInfoInit: the boards are the scenario's pair; MuCom_ChkPartyNum: one while flag
+// 0xfed + scenario holds the second back
+int campCharacter(const App& app, int member) {
+    const int c = app.game.pairs[size_t(campRoute(app))][size_t(std::clamp(member, 0, 1))];
+    return c >= 0 && c < cr::kCharacters ? c : 0;
+}
+int campMembers(const App& app) { return app.game.flag(0xfed + campRoute(app)) ? 1 : 2; }
+// ComUty_GetPlateNameFromCharNo: the plate word naming a record (Vieg 12, Olgar 13, Dante 15)
+bool viegIsOlgar(const App& app);
+bool olgarIsDante(const App& app);
+int memberWord(const App& app, int c) {
+    static const int kEquipName[11] = {12, 13, 14, 15, 16, 17, 18, 19, 12, 13, 14};
+    if (c == 0) return viegIsOlgar(app) ? 13 : 12;
+    if (c == 1) return olgarIsDante(app) ? 15 : 13;
+    return kEquipName[std::clamp(c, 0, 10)];
+}
 
 // ComUty_BattryAndRealTimeAndOzDraw: the clock (TIME, 71, at (363, 8); the digits at +47 / +59 /
 // +83 / +95, the colon (75) blinking at +71; the line (74) under it) and the purse (OZ, 72, at
@@ -4492,12 +4516,14 @@ void drawClockAndOz(App& app, cr::MenuPainter& m, float a) {
 // (__ComUty_FaceBoardHpMp, style 2) at (96, 50 / 70), NEXT at (96, 90)
 void drawFaceBoard(App& app, cr::MenuPainter& m, float x, float y, int c, int hp, int hpMax, int mp, int mpMax, float a,
                    const cr::GameState* gs) {
-    const cr::PartyMember& pm = (gs ? *gs : app.game).party[size_t(std::clamp(c, 0, 7))];
-    const int face = facePicture(c) - 29;
+    c = std::clamp(c, 0, cr::kCharacters - 1);
+    const cr::PartyMember& pm = (gs ? *gs : app.game).party[size_t(c)];
     m.picture(28, x + 8, y + 24, a);
-    m.picture(37 + face, x + 136, y + 24, a);
-    m.picture((app.language == 0 ? 45 : 53) + face, x + 96, y + 24, a);
-    m.picture(29 + face, x, y, a);
+    m.picture(37 + c, x + 136, y + 24, a);
+    m.picture((app.language == 0 ? 45 : 53) + boardNameIndex(app, c), x + 96, y + 24, a);
+    m.picture(facePicture(app, c), x, y, a);
+    const cr::GameState& g = gs ? *gs : app.game;
+    if (g.scenario == 1 && c == g.leaders[1]) m.picture(164, x + 238, y + 26, a); // the leader's mark
     m.picture(61, x + 24, y + 86, a);
     drawShopNumber(m, pm.level, x + 48, y + 86, 3, 12, a, 1, true);
     for (int k = 0; k < 2; ++k) {
@@ -4582,8 +4608,8 @@ void campMessage(App& app, const std::string& text) {
     app.camp.messageFrames = text.empty() ? 0 : 90;
 }
 
-int campEntries(const App& app) { return app.renderer.phoneLayout() ? campui::kEntries - 1 : campui::kEntries; }
-float campBackY(const App& app) { return app.renderer.phoneLayout() ? campui::kPhoneBackY : campui::kBackY; }
+int campEntries(const App&) { return campui::kEntries; }
+float campBackY(const App&) { return campui::kPhoneBackY; } // (Omega's iPad: the iPhone layout doubled)
 
 void openCamp(App& app) {
     App::Camp& c = app.camp;
@@ -4591,7 +4617,7 @@ void openCamp(App& app) {
     auto art = std::move(c.plateArt); // the plates' pictures stay loaded
     c = App::Camp();
     c.plateArt = std::move(art);
-    c.cursor = campEntries(app) - 1;
+    c.cursor = 0; // (Omega: none lit until touched - the keys start on Items)
 }
 
 void campRefreshList(App& app) {
@@ -4803,8 +4829,8 @@ void campKey(App& app, SDL_Keycode key) {
         }
         [[fallthrough]];
     case App::Camp::Status:
-        if (c.phase == App::Camp::Member && (step || left || right)) { c.member ^= 1; menuSound(app, se::kCursor); }
-        else if (c.phase == App::Camp::Slot && c.page == App::Camp::Status && (left || right)) { c.member ^= 1; menuSound(app, se::kPage); }
+        if (c.phase == App::Camp::Member && (step || left || right)) { if (campMembers(app) > 1) c.member ^= 1; menuSound(app, se::kCursor); }
+        else if (c.phase == App::Camp::Slot && c.page == App::Camp::Status && (left || right)) { if (campMembers(app) > 1) c.member ^= 1; menuSound(app, se::kPage); }
         return;
     }
 }
@@ -4831,7 +4857,7 @@ void campClick(App& app, float px, float py) {
     default: break;
     }
     if (c.phase == App::Camp::Member || (c.page == App::Camp::Status && c.phase == App::Camp::Slot)) {
-        for (int k = 0; k < 2; ++k)
+        for (int k = 0; k < campMembers(app); ++k)
             if (in(kPlateX, kMemberY + kMemberStep * float(k), 136, 40)) { c.member = k; if (c.phase == App::Camp::Member) campChoose(app); return; }
         return;
     }
@@ -6195,7 +6221,7 @@ void drawCamp(App& app) {
     const bool main = c.page == App::Camp::Main;
     m.picture(81, 8, 4, 1); // "Camp"
     const float out = main ? 1 - ease : ease; // the main screen's pieces slide away on a page
-    for (int k = 0; k < 2; ++k) {
+    for (int k = 0; k < campMembers(app); ++k) {
         const int ch = campCharacter(app, k);
         int hp, hpMax, mp, mpMax;
         memberHpMp(app, ch, hp, hpMax, mp, mpMax);
@@ -6210,6 +6236,10 @@ void drawCamp(App& app) {
     centre();
     m.backButton(kBackX, campBackY(app), false, 0, 1);
     left();
+    if (main) { // __menuu_CampMainPut: Scenarios (162) and Collection (161) under the boards
+        m.picture(162, 12 - 240 * out, 236, 1 - out);
+        m.picture(161, 84 - 240 * out, 236, 1 - out);
+    }
     if (!main) {
         static const int kTitle[5] = {0, 58070, 58059, 58087, 58077};
         const float pa = ease;
@@ -6232,8 +6262,8 @@ void drawCamp(App& app) {
     const int item = c.list.empty() ? 0 : c.list[size_t(c.listCursor)];
     auto memberPlates = [&](bool lit) {
         right();
-        for (int k = 0; k < 2; ++k) {
-            const int word = 12 + campCharacter(app, k);
+        for (int k = 0; k < campMembers(app); ++k) {
+            const int word = memberWord(app, campCharacter(app, k));
             m.plate(kPlateX + 200 * (1 - ease), kMemberY + kMemberStep * float(k), plateIcon(word), word, lit && c.member == k, ease, false);
         }
         left();
@@ -15093,7 +15123,17 @@ int runExplore(App& app, int maxActions) {
     int totalFrames = 0, pagesRead = 0;
     auto settle = [&](int limit) {
         int f = 0;
-        for (; f < limit && (app.runner.running() || app.pendingEntry != App::Entry::None); ++f) {
+        for (; f < limit && (app.runner.running() || app.pendingEntry != App::Entry::None || app.battle.active); ++f) {
+            if (app.battle.active) { // its talks play, then it's won at its first command
+                stepBattle(app);
+                if (!battletalk::on(app) && app.battle.phase == App::Battle::Command) {
+                    for (int k = 2; k < 5; ++k) app.battle.rules.f[size_t(k)].hp = 0;
+                    std::printf("     battle %d won\n", app.battle.start.group);
+                    endBattle(app, true);
+                }
+                if (!app.dialogue.empty()) { pagesRead += int(app.dialogue.size()); advanceDialogue(app); }
+                continue;
+            }
             stepEvents(app);
             if (!app.dialogue.empty()) { pagesRead += int(app.dialogue.size()); app.dialogue.clear(); }
             if (app.choiceFlag >= 0) answerChoice(app, true);
