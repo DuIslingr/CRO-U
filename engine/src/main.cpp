@@ -423,6 +423,10 @@ struct App {
     int padHeld = -1;                      // the direction held for the menus' repeat (0 up 1 down 2 left 3 right)
     float padHeldFor = 0;
     int itemWindowItem = 0;
+    int itemWindowRow = 0, itemWindowFade = 0; // Uty_GetItem's band: its row (y = 32 x row - 32) and fade steps
+    bool itemWindowClosing = false;        // flag 0 raised: it slides on down and fades (Uty_GetItem_Proc)
+    std::string itemWindowText;            // font block 6: "You got ...!" (10), Oz (0x55), empty (0x71)
+    int itemWindowIcon = -1;
     bool tapPending = false;               // action key while a script waits for a tap
     float fadeGrey = 0, fadeFrom = 0, fadeTo = 0; // Screen
     int fadeFrames = 0, fadeT = 0;
@@ -1181,6 +1185,7 @@ void showModel(App& app, int index) {
 void placePlayer(App& app);
 int triggerAt(const App& app, const cr::Vec3& p);
 void showMessages(App& app, const std::vector<int>& ids);
+void drawItemWindow(App& app);
 bool checkTriggers(App& app, bool instant = false);
 bool interact(App& app, bool instant = false);
 
@@ -1744,6 +1749,31 @@ void answerWorldChoice(App& app, int pos, bool skip = false) {
 }
 
 // Queues the messages an event showed (English text) for the dialogue box.
+// Uty_GetItem_Init (Call 2005, var 9 the item): its line - font block 6's 10 "You got <item>!" (0x5e for
+// item 438), with flag 10 var 9 Oz into the scenario's purse (0x55), 999 the box is empty (0x71) - and
+// its icon, and a sound (0xa1 items 61..80, 0xfa the collection's 551..630, 0xa0 the rest, 0x97 empty)
+void openItemWindow(App& app, int item) {
+    app.itemWindowOpen = true;
+    app.itemWindowItem = item;
+    app.itemWindowRow = app.itemWindowFade = 0;
+    app.itemWindowClosing = false;
+    app.itemWindowIcon = -1;
+    if (app.game.flag(10)) {
+        app.game.oz = std::min(9999999, app.game.oz + item);
+        app.itemWindowText = sysText(app, 57085, std::to_string(item));
+        app.itemWindowIcon = 0x3f;
+        app.sound.play(0xa0);
+    } else if (item == 999) {
+        app.itemWindowText = sysText(app, 57113);
+        app.sound.play(0x97);
+    } else {
+        app.itemWindowText = sysText(app, item == 438 ? 57094 : 57010, itemName(app, item));
+        if (const cr::ItemParam* p = app.itemTable.item(item); p && p->icon >= 0) app.itemWindowIcon = p->icon;
+        app.sound.play(item >= 61 && item < 81 ? 0xa1 : item >= 551 && item < 631 ? 0xfa : 0xa0);
+    }
+    if (app.itemWindowText.empty()) app.itemWindowText = itemName(app, item);
+}
+
 void showMessages(App& app, const std::vector<int>& ids) {
     if (app.dialogue.empty()) { app.dialogueInfo.clear(); app.dialogueVoices.clear(); ++app.dialogueSerial; resetTyping(app); }
     for (int id : ids) {
@@ -2396,7 +2426,7 @@ struct ViewerHost : cr::EventHost {
     void showMessage(int id) override { showMessages(app, {id}); }
     bool messageOpen() override { return !app.dialogue.empty(); }
     bool tapped() override { const bool t = app.tapPending; app.tapPending = false; return t; }
-    void showItemWindow(int item) override { app.itemWindowOpen = true; app.itemWindowItem = item; }
+    void showItemWindow(int item) override { openItemWindow(app, item); }
     void playAnim(int id, int slot, int loopFrom, int loopTo) override {
         int action = slot; // a slot LoadAct filled, else the model's own action of that number
         if (auto a = app.actorSlots.find(id); a != app.actorSlots.end())
@@ -6039,6 +6069,27 @@ bool fieldButtonShown(const App& app, int k) {
     return true;
 }
 
+// Uty_GetItem_Put: a black band (144 alpha, 18 less a fade step) across the screen at tex2d
+// y = 32 x row - 32, 32 high (the iPad's x -16..496); the line centred on x 240 at y + 8 (255 alpha,
+// 50 less a step), its icon (ComUty_GetIconPictInfo) 34 to its left at y + 1
+void drawItemWindow(App& app) {
+    cr::Renderer& r = app.renderer;
+    cr::MenuPainter& m = app.menu;
+    m.begin(r, app.windowTex, &app.font);
+    const PhoneMenu phoneMenu(app, m);
+    r.setOrigin(r.uiX());
+    const float top = 32.0f * float(app.itemWindowRow) - 32;
+    const float ba = std::max(0, 144 - 18 * app.itemWindowFade) / 255.0f, ta = std::max(0, 255 - 50 * app.itemWindowFade) / 255.0f;
+    const float black[4] = {0, 0, 0, ba};
+    const float left = app.renderer.phoneLayout() ? 0.0f : -16.0f;
+    m.quad(left - r.uiX() / 2, top, 512 - 2 * left + r.uiX(), 32, black, black);
+    constexpr float kSize = 16;
+    const float w = m.textWidth(app.itemWindowText, kSize), tx = 240 - w / 2;
+    if (app.itemWindowIcon >= 0)
+        m.piece(tx - 34, top + 1, float(app.itemWindowIcon % 16) * 32, 248 + float(app.itemWindowIcon / 16) * 32, 32, 32, ta);
+    m.text(app.itemWindowText, tx, top + 8, false, ta, kSize);
+}
+
 void drawFieldMenu(App& app) {
     using namespace fieldui;
     const App::FieldMenu& f = app.fieldMenu;
@@ -8799,8 +8850,16 @@ void stepEvents(App& app) {
             p.scale = 2.0f - float(p.zoomT) / float(p.zoomFrames);
         }
     }
-    // The item window closes once the script raises flag 0 after the tap, and clears it
-    if (app.itemWindowOpen && app.game.flag(0)) { app.itemWindowOpen = false; app.game.setFlag(0, false); }
+    // Uty_GetItem_Proc: the band comes down to row 2; once the script raises flag 0 (after the tap)
+    // it goes on down a row a frame, fading, and past row 6 it's gone and flag 0 clears
+    if (app.itemWindowOpen) {
+        if (!app.itemWindowClosing && app.game.flag(0)) app.itemWindowClosing = true;
+        if (app.itemWindowClosing) {
+            if (app.itemWindowRow > 6) app.itemWindowOpen = false, app.game.setFlag(0, false);
+            ++app.itemWindowRow, ++app.itemWindowFade;
+        } else if (app.itemWindowRow < 2)
+            ++app.itemWindowRow;
+    }
     if (!app.runner.running() && app.pendingEntry != App::Entry::None) {
         const bool area = app.pendingEntry == App::Entry::Area;
         app.pendingEntry = App::Entry::None;
@@ -12279,16 +12338,7 @@ void drawFrame(App& app, bool present = true) {
                              p.side == 1 ? -float(p.tex.width) : float(p.tex.width), float(p.tex.height), p.shade,
                              p.shade, p.shade, p.alpha); // right-hand portraits are mirrored (slot +0xe)
             }
-        if (app.itemWindowOpen) { // Uty_GetItem
-            std::vector<std::vector<std::string>> name;
-            const std::string item = itemName(app, app.itemWindowItem);
-            if (app.windowTex.id) {
-                drawWinPiece(app, kWinSmallPanel, W / 2 - 256, H / 2 - 60, 512, 120);
-                app.itemHud.drawAt(r, {"Obtained", "  " + item}, W / 2 - 210, H / 2 - 30, 2.0f, 0, 0, 0.0f);
-            } else {
-                app.itemHud.drawAt(r, {"Obtained:", "  " + item, "", "          [E]"}, W / 2 - 180, H / 2 - 60, 2.0f, 360, 100);
-            }
-        }
+        if (app.itemWindowOpen) drawItemWindow(app);
     }
     if (fieldMenuWanted(app)) { // the corner button and its bar
         for (app.fieldMenu.clock += dt; app.fieldMenu.clock >= 1.0f / kFramesPerSecond; app.fieldMenu.clock -= 1.0f / kFramesPerSecond)
@@ -13618,6 +13668,7 @@ int runSelfTest(App& app) {
         showMap(app, int(at - app.maps.begin()), 0, cr::areaForMap(0, 2));
         app.pendingEntry = App::Entry::None; // these tests play one script each
         int lidAnimFrame = -1, windowFrame = -1, fadedFrame = -1, endFrame = -1, frames = 0;
+        int bandRow = 0, closeFrame = -1, closedFrame = -1; // Uty_GetItem's band: down to row 2, out in 5 frames
         const cr::FieldNpc* box = nullptr;
         for (const cr::FieldNpc& n : app.npcs)
             if ((n.treasure & 3) && npcActive(app, n)) { box = &n; break; }
@@ -13635,6 +13686,11 @@ int runSelfTest(App& app) {
                         if (fadedFrame < 0 && d.alpha < 0.1f) fadedFrame = frames;
                     }
                 if (windowFrame < 0 && app.itemWindowOpen) windowFrame = frames;
+                if (app.itemWindowOpen && !app.itemWindowClosing) bandRow = std::max(bandRow, app.itemWindowRow);
+                if (app.itemWindowOpen && app.itemWindowClosing && closeFrame < 0) closeFrame = frames;
+                if (!app.itemWindowOpen && closeFrame >= 0 && closedFrame < 0) closedFrame = frames;
+                if (app.itemWindowOpen && frames - windowFrame == 10)
+                    if (const char* path = SDL_getenv("CR_ITEM_SHOT")) { app.lastTicks = 0; drawFrame(app, false); saveFrame(app, path); }
                 if (app.itemWindowOpen && frames - windowFrame == 30) app.tapPending = true; // read it, then tap
                 if (!app.dialogue.empty()) app.dialogue.clear();
                 if (!app.runner.running() && endFrame < 0) endFrame = frames;
@@ -13644,11 +13700,14 @@ int runSelfTest(App& app) {
             std::printf("stepped chest sounds:");
             for (uint32_t id : app.soundLog) std::printf(" %u", id);
             std::printf("\n");
-            std::printf("stepped chest %d: lid anim at frame %d, item window %d, lid faded %d, done %d, item %s, lid %s\n",
-                        boxId, lidAnimFrame, windowFrame, fadedFrame, endFrame,
+            std::printf("stepped chest %d: lid anim at frame %d, item window %d (band at row %d, out in %d frames: \"%s\"), "
+                        "lid faded %d, done %d, item %s, lid %s\n",
+                        boxId, lidAnimFrame, windowFrame, bandRow, closedFrame - closeFrame, app.itemWindowText.c_str(), fadedFrame, endFrame,
                         app.game.items.size() > itemsBefore || !app.game.items.empty() ? "gained" : "MISSING",
                         lidGone ? "removed" : "STILL THERE");
-            if (lidAnimFrame < 0 || windowFrame < 0 || endFrame < 0 || !lidGone) ++mapErrors;
+            if (lidAnimFrame < 0 || windowFrame < 0 || endFrame < 0 || !lidGone || bandRow != 2 || closedFrame - closeFrame != 5 ||
+                app.itemWindowText.empty())
+                ++mapErrors;
         }
     }
     { // a gold box (c101_d07 map 94, box 408): Uty_ChkItem counts key 2 into var 0 - none, a message; with
