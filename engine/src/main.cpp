@@ -376,7 +376,8 @@ struct App {
     bool charSelectOpen = false;
     int charSelectCursor = 0, charSelectAnim = 0, chosenPair = 1, charSelectPage = 0;
     struct StartPage { // StartPrc / StartPut: the second scenario's page, pulled down by its cord
-        int phase = 0;             // 0 still, 1 falling, 2 / 3 its bounce, 4 going back up
+        int phase = 0;             // 0 still, 1 falling, 2 / 3 its bounce, 4 going back up, 5 / 6 the card in / out
+        float card = -160;         // serect 28's x (DAT_e59a8): in on the second page once flag 0x643 is set
         int t = 0;                 // frames into the fall (DAT_e596c)
         float y = -440;            // its offset (DAT_e5994): from e59b0 down to 0
         bool shown = false;        // window 1 on
@@ -7413,6 +7414,12 @@ void openCharSelect(App& app) {
 constexpr float kPageSpeed = 20;
 float pageTop(const App& app) { return app.renderer.phoneLayout() ? -388.0f : -440.0f; }
 
+// StartSet: flag 0x643 - the card (serect 28 at (DAT_e59a8, 24)) slides in, 16 a frame, as the second
+// page settles (StartPrc 7) and out before it goes back up (5); __Start_ChangeModeCardProc's ends,
+// the iPad's (e59bc / e59b8): -16 / -176 (the iPhone's 0 / -160)
+bool modeCard(const App& app) { return allPairsFlags(app).flag(0x643); }
+float cardIn(const App& app) { return app.renderer.phoneLayout() ? 0.0f : -16.0f; }
+float cardOut(const App& app) { return app.renderer.phoneLayout() ? -160.0f : -176.0f; }
 void charSelectTurn(App& app) { // the second page, once it's open
     App::StartPage& sp = app.startPage;
     if (!laterPairsOpen(app) || !app.charSelectArt2.id) { menuSound(app, se::kBuzzer); return; }
@@ -7425,6 +7432,8 @@ void charSelectTurn(App& app) { // the second page, once it's open
         sp.phase = 1;
         playBgm(app, 0x13);
         menuSound(app, 0xf8);
+    } else if (modeCard(app)) {
+        sp.phase = 6; // StartPrc 5: the card out first
     } else {
         sp.phase = 4;
         playBgm(app, 0x1d);
@@ -7447,7 +7456,19 @@ void stepCharSelect(App& app) {
         break;
     case 3:
         sp.y += kPageSpeed / 2;
-        if (sp.y >= 0) sp.y = 0, sp.phase = 0, app.charSelectPage = 1;
+        if (sp.y >= 0) sp.y = 0, sp.phase = modeCard(app) ? 5 : 0, app.charSelectPage = sp.phase ? 0 : 1;
+        break;
+    case 5: // StartPrc 7, then 8: the page is the second's
+        sp.card += 16;
+        if (sp.card >= cardIn(app)) sp.card = cardIn(app), sp.phase = 0, app.charSelectPage = 1;
+        break;
+    case 6: // StartPrc 5, then 4: the way back up
+        sp.card -= 16;
+        if (sp.card <= cardOut(app)) {
+            sp.card = cardOut(app), sp.phase = 4;
+            playBgm(app, 0x1d);
+            menuSound(app, 0x91);
+        }
         break;
     case 4:
         sp.y -= kPageSpeed;
@@ -7552,7 +7573,7 @@ void drawCharSelect(App& app) {
         r.drawQuadUVRotated(sp.serect, 2 * (16 + 260 + q[2] / 2.0f), 2 * (32 + std::max(sp.pull, 0.0f) - 205 + q[3] / 2.0f),
                             2.0f * q[2], 2.0f * q[3], q[0] * k, q[1] * k, q[2] * k, q[3] * k, sp.sway * 6.2831853f, t);
         if (sp.holding) outPicture(m, sp.serect, 30, 406, 178 - float(sp.bob), t);
-        outPicture(m, sp.serect, 28, -160, 24, t);
+        outPicture(m, sp.serect, 28, sp.card, 24, t);
     }
     { // window 3: the banner over it all (z -4) - chara3's once the second page is open
         const int page = app.charSelectPage;
@@ -13771,6 +13792,37 @@ int runSelfTest(App& app) {
         std::printf("entry scripts: %d areas, %d rooms; %d dialogue pages, %d choices, %d battles, %d warped, %d errors, %d stuck, "
                     "longest %d frames\n", areasRun, roomsRun, pages, choices, battles, warps, errors, stuck, longest);
         mapErrors += errors + stuck;
+    }
+    { // Select Scenario's pages: with flag 0x643 the card (serect 28) comes in once the second page has
+      // settled and goes before it rises again; without, it stays off the screen
+        const cr::GameState keep = app.game;
+        const bool keepBooting = app.booting;
+        app.booting = false;
+        int problems = 0;
+        float cardOn = 0, cardOff = 0, plain = 0;
+        int pageOn = -1, pageOff = -1;
+        for (int withCard = 0; withCard < 2; ++withCard) {
+            app.game = cr::GameState();
+            app.game.setFlag(31, true);
+            app.game.setFlag(0x643, withCard != 0);
+            openCharSelect(app);
+            auto settle = [&] { for (int f = 0; f < 400 && app.startPage.phase; ++f) stepCharSelect(app); };
+            charSelectTurn(app);
+            settle();
+            if (withCard) cardOn = app.startPage.card, pageOn = app.charSelectPage;
+            else plain = app.startPage.card;
+            charSelectTurn(app);
+            settle();
+            if (withCard) cardOff = app.startPage.card, pageOff = app.charSelectPage;
+            app.charSelectOpen = false;
+        }
+        const bool iPad = !app.renderer.phoneLayout();
+        problems += plain != -160 || cardOn != (iPad ? -16 : 0) || pageOn != 1 || cardOff != (iPad ? -176 : -160) || pageOff != 0;
+        std::printf("select scenario: the card without flag 0x643 at %.0f, with it in to %.0f (page %d), out to %.0f (page %d); %d problems\n",
+                    plain, cardOn, pageOn, cardOff, pageOff, problems);
+        mapErrors += problems;
+        app.game = keep;
+        app.booting = keepBooting;
     }
     // New game: talk to everyone in the Ark's hall, frame by frame (pages turned, choices answered yes)
     {
