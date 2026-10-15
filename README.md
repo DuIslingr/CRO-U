@@ -53,8 +53,6 @@ Done so far:
       counters, drops, steals, genes, plates by species from `_btlanmtbl`), the pair and story
       line-ups of `btl_prty_init`, the party's models and names, cameras on the actors' node 1003;
       the opening's deck battle (group 737) frames as the reference does
-- [x] native calls 2036..2046 (SetPrtyNo, SetPrtyLv_Add, TBox, SaveEvent, Chk / Chg_BtlFld,
-      Chg_MsgSkip, Chg_char, Add_OMU_ITEM, NpcShadow_onoff, puzzle_teleport_cnt)
 - [x] the Camp: main screen (five plates, the Scenarios / Collection buttons, the scenario's
       boards), Omega's eight item categories, the Status page (portrait and state board), the
       equipment's seven slots (the Human Genes slot takes the characters' own plates); the shop
@@ -63,7 +61,9 @@ Done so far:
 - [x] Omega's genes (plates 474..504, skills to 198, `_geneplate`), its 38-byte battle actions,
       the story battles' talks and HP floors (`chk_karaok_*`), the defeat warp, the encounter
       level, battle voices' speakers (3.1.0 / Vita), the talk window's parchment (`window_cutin`)
-- [x] native calls 2036..2047 and 2015 FireWall
+- [x] native calls 2036..2047 (SetPrtyNo, SetPrtyLv_Add, TBox, SaveEvent, Chk / Chg_BtlFld,
+      Chg_MsgSkip, Chg_char, Add_OMU_ITEM, NpcShadow_onoff, puzzle_teleport_cnt, EquipAcce) and
+      2015 FireWall
 - [x] puzzle rooms' stages (16, maps 153..168) from Omega's `PUZZLE_ROOM_DATA`
 - [x] the story plays by itself (`--explore`) from the opening through its first battles to the
       Ark, the first dungeon and back
