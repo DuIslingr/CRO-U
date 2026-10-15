@@ -345,6 +345,9 @@ private:
     int levelBand(int lv);
 
     int bonusFor(const int actors[2], bool magic) const;
+    // _is_btl_warrior / _is_btl_sorcerer: a living party fighter by its character (+0xa2 = its
+    // record's slot + 8: Vieg's and Olgar's slots and the guest's warriors, Vahti's - 10 - the sorceress)
+    bool fighterKind(int i, bool sorcerer) const;
     int elementScale(const BattleActionDef& a, int user, int target, int& type) const;
     int resist(const BattleActionDef& a, int user, int target, int amount, bool magic, int& type) const;
     void enemyChoice(int enemy, bool asPair, Entry& e, const BattleActionTable& actions, int exclude = 0);

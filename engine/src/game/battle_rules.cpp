@@ -300,12 +300,19 @@ void BattleRules::breakEvent(int who, int event, int target) {
     breakFlags |= unsigned(event);
 }
 
+bool BattleRules::fighterKind(int i, bool sorcerer) const {
+    if (i < 0 || i >= 2 || !f[size_t(i)].alive()) return false;
+    const int c = f[size_t(i)].character;
+    const int slot = c >= 4 ? (c - 4) % 3 : c; // (records 4..6 / 7..9: each scenario's three in that order)
+    return sorcerer ? slot == 2 : slot != 2;
+}
+
 int BattleRules::bonusFor(const int actors[2], bool magic) const {
     const int first = actors[0];
     if (first < 2) {
         int b = breakGauge > 0 ? 75 : 0;
         if (pair) b += 25;
-        else if (first == (magic ? 1 : 0)) b += 50;
+        else if (fighterKind(first, magic)) b += 50; // a warrior's attack, a sorcerer's gene
         return b;
     }
     return breakGauge < 0 ? 125 : 50;
@@ -432,7 +439,7 @@ BattleHit BattleRules::heal(const BattleActionDef& a, const int actors[2], int t
     int bonus;
     if (target < 2) {
         bonus = breakGauge > 0 ? 100 : 0;
-        if (actors[0] == 1 || actors[1] == 1) bonus += 50;
+        if (fighterKind(actors[0], true) || fighterKind(actors[1], true)) bonus += 50; // (either a sorcerer)
     } else
         bonus = breakGauge < 0 ? 150 : 50;
     h.amount = -((bonus + a.power) * lckSum / 100);
