@@ -739,16 +739,19 @@ struct App {
     } mapScreen;
     struct StaffRoll {                     // __menuu_StaffRoll* (Util 7): the credits over the ending's picture
         bool open = false;
-        int state = 0, mode = 0, timer = 0;
-        int next = 21;                     // +0x10: the next of block 9's 336 lines
-        int countdown = 0;                 // +0x14: frames after the last line, then the panel goes
-        bool fast = false;                 // +0x18: the corner button held (10 x)
-        float panel = 0;                   // +0x1c: the black panel's x (tex2d), sliding to -280
-        float picY = 0;                    // +0x174: the picture's y (logical pixels), up to -1022
-        bool phone = false;                // the iPhone layout (2.2.0): tex2d units, 17 lines, its timing
-        struct Line { bool on = false; float y = 0; int entry = 0; } lines[21];
+        int state = 0, mode = 0, timer = 0; // _gstMuStaffRoll, _geStaffRollMode, DAT_000e5c20
+        int next = 17;                     // DAT_000e5c28: the next of block 9's lines
+        int countdown = 0;                 // DAT_000e5c2c: frames after the last line
+        int hold = 0, endAlpha = 0;        // DAT_000e5c38 (to 120), 5c30: the end picture's alpha
+        bool fast = false;                 // DAT_000e5c34: the corner button held (10 x)
+        float picY = 0;                    // DAT_000e5d5c: the picture's y (tex2d), up to -(1024 - the screen)
+        bool phone = false;                // the iPhone layout (_is_iPadDisplay 0): its numbers
+        struct Line { bool on = false; float y = 0; int entry = 0; } lines[17];
         float win[5] = {}, winTo[5] = {};  // ComUty_WinDispOn / Off: each window's alpha
-        cr::Texture tex;                   // EndBack0<mode + 1>_hd.mct
+        float fade = 1, fadeFrom = 1, fadeTo = 1; // SetFade: white (the first scenario) or black over it all
+        int fadeAt = 0, fadeFrames = 1;
+        bool fadeWhite = true;
+        cr::Texture tex, endTex;           // slot 0x10 EndBack0n, 0x11 EndBack01_end (mode 0)
         float clock = 0;
     } staffRoll;
     struct WorldSelect {                   // __menuu_WldChoice* (Util 1): a gate, then its level band
@@ -1247,6 +1250,7 @@ int plateIcon(int word);
 // text at the top), nor in the iPhone layout - its screen has no room below
 bool keyHints(const App& app);
 void openManual(App& app, int intro);
+void outPicture(cr::MenuPainter& m, const cr::Texture& tex, int pict, float x, float y, float a, int frame = 0);
 void openScenarios(App& app);
 void openScenarios(App& app, int mode);
 void openCollection(App& app);
@@ -5269,50 +5273,52 @@ void drawPuzzleBanner(App& app) {
 }
 
 // ---- The staff roll (Util 7: ModeStaffRollMenu(var 0), __menuu_StaffRollSet / Prc / Put) ----
-// EndBack0<var 0 + 1>_hd.mct (sheet 1) behind it all: its picture 10 (1024 x 1790 at (0, y): the
-// HD build draws that slot 1:1 on the 1024 x 768 screen) scrolls up 0.222 a frame (2.22 fast) to
-// y -1022; over its left a black panel (tex2d (x - 16, -32), 280 x 384) carries the credits -
-// system text block 9's 336 lines, 21 at a time, 40 apart from y 800, x 32, rising 2.826 a frame
-// (10 steps a frame while the corner button (460, -32, 32 x 32: sheet 0 picture 114) is held),
-// each past y -40 taking the next line at 800 (a line of < 3 characters is a gap). Once all have
-// gone and the picture is at the bottom: 100 frames (the text and the button fade at 5 left),
-// the panel slides out (3 a frame, 9 fast) to -280, the end card shows (sheet 1 picture 11 -
-// mode 2: 12 - at (0, 328): the sheet's strips below the picture), and after 4 frames a tap (sound
-// 2) fades it all out and the menu ends. Sheet 1 (MuTex_GetTexInfo 1, 0xca490): 8 shorts a picture.
+// Omega's: the picture (sheet 1 picture 12, 512 x 1024, of EndBack01 / EndBack02 / EndBack01_end
+// by mode, _gkpachEndBack) at tex2d (-16, y; the iPad - 32) under 17 lines of system text block 9
+// (x 16, 20 apart from y 352 - the iPhone 320 -, each past -52 / -20 taking the next line of 316;
+// a line of < 3 characters is a gap), over a white fade (the first scenario; black the second)
+// clearing over 60 frames. The lines rise 2 a frame (the second scenario 1.413), the picture 0.2
+// ((1024 - 384) / 4600, the iPhone 320) to -(1024 - 384 / 320); the corner button (window picture
+// 115 at (460, -32) / (444, 0)) held runs both 10 times over. Once the lines are through and the
+// picture down: 100 frames (the text and the button go at 5), 120 more, then (mode 0) the end
+// picture (EndBack01_end's picture 14 at (176, 128)) fades in, 6 a frame over 80 frames, the
+// screen fades to black over 120 and 130 frames on the windows go and the script goes on - no tap
 namespace staffroll {
-constexpr float kLine = 2.826087f, kPic = 0.22217391f, kPicFast = 2.2217391f, kPicEnd = -1022, kPanelEnd = -280;
-constexpr int kLines = 336;
-// 2.2.0's (tex2d units): 17 lines 20 apart from y 320 (x 16), rising 1.9217 a frame, the next at
-// 320 past -20; the picture 0.125 (1.25) a frame up to -575; its block 9 has 434 lines
-constexpr float kPhoneLine = 1.92174f, kPhonePic = 0.125f, kPhonePicFast = 1.25f, kPhonePicEnd = -575;
-constexpr int kPhoneShown = 17, kPhoneLines = 434;
+constexpr int kShown = 17, kLines = 316;
+float lineStart(bool phone) { return phone ? 320.0f : 352.0f; }
+float lineEnd(bool phone) { return phone ? -20.0f : -52.0f; }
+float screenH(bool phone) { return phone ? 320.0f : 384.0f; }
 }
-int staffLines(const App& app) { // the scripts': 2.2.0's and the Vita's (voiced: sys.evt's +0x40) or 1.0.1's
-    return app.phoneData || !app.battleVoiceTable.empty() ? staffroll::kPhoneLines : staffroll::kLines;
-}
-float staffPicEnd(const App::StaffRoll& st) { return st.phone ? staffroll::kPhonePicEnd : staffroll::kPicEnd; }
+int staffLines(const App&) { return staffroll::kLines; }
+float staffPicEnd(const App::StaffRoll& st) { return -(1024 - staffroll::screenH(st.phone)); }
 
 void staffWin(App& app, int w, bool on) { app.staffRoll.winTo[w] = on ? 1.0f : 0.0f; }
+void staffFade(App::StaffRoll& st, bool white, float from, float to, int ms) { // SetFade(colour, from, to, ms): 50 ms a frame
+    st.fadeWhite = white, st.fadeFrom = from, st.fadeTo = to, st.fadeAt = 0, st.fadeFrames = std::max(1, ms / 50);
+    st.fade = from;
+}
+
+std::string staffLine(const App& app, int entry) { return sysText(app, 60000 + entry); } // font block 9
 
 void openStaffRoll(App& app, int mode) {
+    using namespace staffroll;
     App::StaffRoll& st = app.staffRoll;
     app.renderer.destroy(st.tex);
+    app.renderer.destroy(st.endTex);
     st = App::StaffRoll();
     st.open = true;
     st.mode = std::clamp(mode, 0, 2);
     st.phone = app.renderer.phoneLayout();
-    const int shown = st.phone ? staffroll::kPhoneShown : 21;
-    st.next = shown;
-    for (int i = 0; i < shown; ++i)
-        st.lines[i] = st.phone ? App::StaffRoll::Line{true, 320.0f + 20.0f * float(i), i} : App::StaffRoll::Line{true, 800.0f + 40.0f * float(i), i};
+    staffFade(st, app.game.scenario == 0, 1, 1, 1); // SetFade(colour, 0, 255, 1): covered
+    for (int i = 0; i < kShown; ++i)
+        st.lines[i] = App::StaffRoll::Line{staffLine(app, i).size() >= 3, lineStart(st.phone) + 20.0f * float(i), i};
+    st.next = kShown;
     cr::Image img;
-    static const char* const kBack[3] = {"EndBack01", "EndBack02", "EndBack03"}; // _hd (iPad), else the iPhone's
-    if (loadImage(app, std::string(kBack[st.mode]) + "_hd.mct", img) || loadImage(app, std::string(kBack[st.mode]) + ".mct", img))
-        st.tex = app.renderer.upload(img);
+    static const char* const kBack[3] = {"EndBack01.mct", "EndBack02.mct", "EndBack01_end.mct"}; // _gkpachEndBack
+    if (loadImage(app, kBack[st.mode], img)) st.tex = app.renderer.upload(img);
+    if (st.mode == 0 && loadImage(app, "EndBack01_end.mct", img)) st.endTex = app.renderer.upload(img);
     staffWin(app, 1, true);
 }
-
-std::string staffLine(const App& app, int entry) { return sysText(app, 60000 + entry); } // font block 9
 
 void stepStaffRoll(App& app) {
     using namespace staffroll;
@@ -5320,102 +5326,85 @@ void stepStaffRoll(App& app) {
     if (!st.open) return;
     for (int w = 0; w < 5; ++w) // the windows fade 4 frames
         st.win[w] = st.win[w] < st.winTo[w] ? std::min(st.winTo[w], st.win[w] + 0.25f) : std::max(st.winTo[w], st.win[w] - 0.25f);
+    if (st.fadeAt < st.fadeFrames) st.fade = st.fadeFrom + (st.fadeTo - st.fadeFrom) * float(++st.fadeAt) / float(st.fadeFrames);
+    const bool first = app.game.scenario == 0;
     switch (st.state) {
-    case 0: st.state = 1; break; // the texture read
+    case 0: st.state = 1; break; // the textures read
     case 1:
         staffWin(app, 0, true), staffWin(app, 3, true), staffWin(app, 2, true);
         st.state = 2;
         break;
-    case 2:
+    case 2: staffFade(st, first, 1, 0, 3000), st.timer = 60, st.state = 3; break;
+    case 3: if (--st.timer < 0) st.state = 4, --st.timer; break;
+    case 4:
         if (st.countdown < 1) {
-            const int total = staffLines(app), shown = st.phone ? kPhoneShown : 21;
-            if (st.next <= total) {
+            if (st.next < kLines + 1) {
+                const float speed = first ? 2.0f : 1.4130435f;
                 const int steps = st.fast ? 10 : 1;
-                for (int i = 0; i < shown; ++i) {
-                    auto& l = st.lines[i];
+                for (auto& l : st.lines)
                     for (int k = 0; k < steps; ++k) {
-                        l.y -= st.phone ? kPhoneLine : kLine;
-                        if (l.y > (st.phone ? -20 : -40)) continue;
+                        l.y -= speed;
+                        if (l.y > lineEnd(st.phone)) continue;
                         const int e = st.next++;
-                        l.y = st.phone ? 320 : 800;
-                        l.on = e < total && staffLine(app, e).size() >= 3;
+                        l.y = lineStart(st.phone);
+                        l.on = e < kLines && staffLine(app, e).size() >= 3;
                         l.entry = e;
                     }
-                }
             }
-            const float end = staffPicEnd(st);
-            st.picY = std::max(end, st.picY - (st.phone ? (st.fast ? kPhonePicFast : kPhonePic) : (st.fast ? kPicFast : kPic)));
-            if (st.next > total && st.picY == end) st.countdown = 100;
+            const float step = first ? 0.2f : (1024 - screenH(st.phone)) / 4600.0f, end = staffPicEnd(st);
+            st.picY = std::max(end, st.fast ? st.picY + step * -10 : st.picY - step);
+            if (st.next > kLines && st.picY == end) st.countdown = 100;
         } else {
             if (st.countdown == 5) staffWin(app, 3, false), staffWin(app, 2, false);
-            if (--st.countdown < 1) st.state = 4;
+            if (--st.countdown < 1) st.state = 6;
         }
         break;
-    case 4:
-        st.panel -= st.fast ? 9.0f : 3.0f;
-        if (st.panel < kPanelEnd) st.state = 5;
+    case 6: if (++st.hold >= 120) st.state = 7; break;
+    case 7: staffWin(app, 4, true), st.timer = 80, st.state = 8; break;
+    case 8:
+        st.endAlpha = std::min(255, st.endAlpha + 6);
+        if (--st.timer < 0) staffFade(st, false, 0, 1, 6000), st.timer = 130, st.state = 9;
         break;
-    case 5: staffWin(app, 4, true); st.timer = 4, st.state = 6; break;
-    case 6: if (st.timer-- < 0) st.state = 7; break;
-    case 7: break; // a tap (staffRollTap)
-    case 8: staffWin(app, 0, false), staffWin(app, 1, false); st.timer = 4, st.state = 9; break;
-    case 9: if (st.timer-- < 0) st.state = 3; break;
-    case 3: // __mc_SetMenuStat(0xc, 4): the script goes on
+    case 9: if (--st.timer < 0) st.state = 10, --st.timer; break;
+    case 10: staffWin(app, 0, false), staffWin(app, 1, false), st.timer = 4, st.state = 11; break;
+    case 11: if (st.timer-- < 0) st.state = 5; break;
+    case 5: // __mc_SetMenuStat(0xc, 4): the script goes on
         app.renderer.destroy(st.tex);
+        app.renderer.destroy(st.endTex);
         st = App::StaffRoll();
         break;
     default: break;
     }
 }
 
-void staffRollTap(App& app) {
-    App::StaffRoll& st = app.staffRoll;
-    if (!st.open || st.state != 7) return;
-    menuSound(app, 2);
-    st.state = 8;
-}
+void staffRollTap(App&) {} // (Omega's staff roll takes no tap; CR1's end card did)
 
 void drawStaffRoll(App& app) {
     const App::StaffRoll& st = app.staffRoll;
     if (!st.open) return;
     cr::Renderer& r = app.renderer;
-    const float W = r.screenW(), H = cr::Renderer::kLogicalH, ox = r.uiX();
+    const float W = r.screenW(), H = cr::Renderer::kLogicalH;
     r.setOrigin(0);
     r.fillRect(0, 0, W, H, 0, 0, 0, 1);
-    if (st.phone) { // 2.2.0: the picture (512 x 895) at tex2d (0, y); the panel (x, 0) 280 x 320
-        r.setOrigin(ox);
-        if (st.tex.id && st.win[0] > 0) {
-            const float k = float(st.tex.width) / 1024.0f;
-            r.drawQuadUV(st.tex, 32, 64 + 2 * st.picY, 1024, 1790, 0, 0, 1024 * k, 1790 * k, 1, 1, 1, st.win[0]);
-        }
-        if (st.win[1] > 0) r.fillRect(32 + 2 * st.panel, 64, 560, 640, 0, 0, 0, st.win[1]);
-        r.setOrigin(0);
-    } else {
-    if (st.tex.id && st.win[0] > 0) { // picture 10: (0, 0, 1024, 1790) of the 1024 x 2048 sheet
-        const float k = float(st.tex.width) / 1024.0f;
-        r.drawQuadUV(st.tex, ox, st.picY, 1024, 1790, 0, 0, 1024 * k, 1790 * k, 1, 1, 1, st.win[0]);
-    }
-    if (st.win[1] > 0) r.fillRect(ox + 2 * st.panel, 0, 560, H, 0, 0, 0, st.win[1]); // tex2d (x - 16, -32) 280 x 384
-    }
+    r.setOrigin(r.uiX());
     cr::MenuPainter& m = app.menu;
-    if (app.windowTex.id) m.begin(r, app.windowTex, &app.font);
-    r.setOrigin(ox);
-    if (st.win[3] > 0)
-        for (const auto& l : st.lines) {
-            if (!l.on) continue;
-            if (st.phone) { if (l.y > -20 && l.y < 320) m.text(staffLine(app, l.entry), 16 + 16, l.y + 32, false, st.win[3], 13); }
-            else if (l.y > -40 && l.y < 800) m.text(staffLine(app, l.entry), 16, l.y / 2, false, st.win[3], 13);
-        }
-    if (st.win[2] > 0 && app.windowTex.id) // the fast button (2.2.0: (444, 0))
-        m.picture(114, (st.phone ? 444 : 460) + 16, (st.phone ? 0 : -32) + 32, st.win[2]);
-    if (st.tex.id && st.win[4] > 0) { // the end card: picture 11 (0, 1936, 1024, 112) / 12 (0, 1824, 1024, 114)
-        const float k = float(st.tex.width) / 1024.0f;
-        r.setOrigin(0);
-        const float ex = st.phone ? ox + 32 : ox, ey = st.phone ? 2.0f * 144 + 64 : 328; // 2.2.0: (0, 144)
-        if (st.mode == 2) r.drawQuadUV(st.tex, ex, ey - 1, 1024, 114, 0, 1824 * k, 1024 * k, 114 * k, 1, 1, 1, st.win[4]);
-        else r.drawQuadUV(st.tex, ex, ey, 1024, 112, 0, 1936 * k, 1024 * k, 112 * k, 1, 1, 1, st.win[4]);
+    if (!app.windowTex.id) return;
+    m.begin(r, app.windowTex, &app.font);
+    {
+        const PhoneMenu phoneMenu(app, m);
+        if (st.win[0] > 0) outPicture(m, st.tex, 12, -16, st.picY + (st.phone ? 0 : -32), st.win[0]);
+        if (st.win[3] > 0)
+            for (const auto& l : st.lines)
+                if (l.on) m.text(staffLine(app, l.entry), 16, float(int(l.y)), false, st.win[3], 13);
+        if (st.win[2] > 0) m.picture(115, st.phone ? 444 : 460, st.phone ? 0 : -32, st.win[2]); // the fast button
+        if (st.mode == 0 && st.win[4] > 0 && st.endAlpha > 0) outPicture(m, st.endTex, 14, 176, 128, st.win[4] * float(st.endAlpha) / 255);
     }
-    r.setOrigin(ox);
+    r.setOrigin(0);
+    if (st.fade > 0) {
+        const float c = st.fadeWhite ? 1.0f : 0.0f;
+        r.fillRect(0, 0, W, H, c, c, c, st.fade);
+    }
+    r.setOrigin(r.uiX());
 }
 
 // ---- The last battle's pair choice (Util 8; __menuu_LastBtSet / Prc / Put / Clr) ----
@@ -6479,8 +6468,6 @@ int doorIcon(const App& app, const short* ic) {
     return -1;
 }
 } // namespace mapui
-
-void outPicture(cr::MenuPainter& m, const cr::Texture& tex, int pict, float x, float y, float a, int frame = 0);
 
 void openMapScreen(App& app) {
     using namespace mapui;
@@ -15696,21 +15683,22 @@ int runSelfTest(App& app) {
         app.playerChar = keepChar;
         playBgm(app, 1u << 29);
     }
-    { // The staff roll (Util 7), fast: the credits run out, the picture reaches its bottom, the panel
-      // slides away, the end card waits for a tap, then it all closes
+    { // The staff roll (Util 7, mode 0): the lines through, the picture down, the end picture in,
+      // the fade to black, then it closes by itself
         int problems = 0;
         openStaffRoll(app, 0);
         App::StaffRoll& st = app.staffRoll;
         int lines = 0;
         for (int e = 0; e < staffLines(app); ++e) lines += staffLine(app, e).size() >= 3;
-        const bool tex = st.tex.id != 0;
-        st.fast = true;
-        int frames = 0, shot = 0;
-        while (st.open && st.state != 7 && frames < 3000) {
+        const bool tex = st.tex.id != 0 && st.endTex.id != 0;
+        int frames = 0, shot = 0, endAt = -1, endAlpha = 0;
+        while (st.open && frames < 6000) {
             st.fast = true; // (drawFrame reads the keys)
             stepStaffRoll(app);
             ++frames;
-            if (frames == 150) { // a look mid-way
+            if (st.state == 8 && endAt < 0) endAt = frames;
+            endAlpha = std::max(endAlpha, st.endAlpha);
+            if (frames == 150 || (st.state == 9 && shot == 1)) { // a look mid-way, then at the end picture
                 app.lastTicks = 0;
                 drawFrame(app, false);
                 const char* path = SDL_getenv(shot == 0 ? "CR_STAFF_SHOT_A" : "CR_STAFF_SHOT_B");
@@ -15718,19 +15706,9 @@ int runSelfTest(App& app) {
                 ++shot;
             }
         }
-        for (int f = 0; f < 4; ++f) stepStaffRoll(app); // the end card faded in, waiting
-        if (const char* path = SDL_getenv("CR_STAFF_SHOT_B")) {
-            app.lastTicks = 0;
-            drawFrame(app, false);
-            saveFrame(app, path);
-        }
-        const bool ended = st.state == 7 && st.picY == staffPicEnd(st) && st.panel < staffroll::kPanelEnd && st.next > staffLines(app) &&
-                           st.win[4] == 1.0f;
-        staffRollTap(app);
-        for (int f = 0; f < 20 && st.open; ++f) stepStaffRoll(app);
-        problems += !tex || lines < 100 || !ended || st.open || app.renderer.takeErrors();
-        std::printf("staff roll: picture %s, %d of block 9's %d lines with text, end card after %d fast frames %s, closed %s; %d problems\n",
-                    tex ? "read" : "MISSING", lines, staffLines(app), frames, ended ? "reached" : "NOT reached",
+        problems += !tex || lines < 100 || endAt < 0 || endAlpha != 255 || st.open || app.renderer.takeErrors();
+        std::printf("staff roll: pictures %s, %d of block 9's %d lines with text, the end picture after %d fast frames, closed "
+                    "after %d %s; %d problems\n", tex ? "read" : "MISSING", lines, staffLines(app), endAt, frames,
                     st.open ? "NO" : "yes", problems);
         mapErrors += problems;
     }

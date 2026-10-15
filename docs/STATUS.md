@@ -150,3 +150,10 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
       (419..473, given as the story goes), by name, each one's page 56000 + (item - 419); a page's
       centred lines (code 0x17) centred, and the header Omega's picture 103 - it listed CR1's fixed
       topics with an introduction and showed 102 ("Sold Out!")
+- [x] the staff roll as Omega's `__menuu_StaffRollSet` / `Prc` / `Put` run it: EndBack01 / 02 /
+      01_end's picture 12 behind 17 lines of block 9 (20 apart, x 16, from y 352 - the iPhone 320 -,
+      316 in all) under a white (first scenario) or black fade clearing over 60 frames; lines 2 a
+      frame (the second scenario 1.413) and the picture 0.2 (640 / 4600), the corner button (115)
+      held 10 x; then 100 + 120 frames, mode 0's end picture (EndBack01_end's 14 at (176, 128)) in at
+      6 a frame, a 120-frame fade to black and the windows go - no tap. It was CR1's (the black
+      panel sliding away, 21 lines from y 800, the end card waiting for a tap)
