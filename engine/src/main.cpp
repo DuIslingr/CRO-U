@@ -14765,10 +14765,11 @@ int runSelfTest(App& app) {
         ViewerHost host(app);
         const cr::GameState keepGame = app.game;
         const int keepChar = app.playerChar;
-        app.playerChar = 2; // the second pair
+        app.game.scenario = 1; // the second scenario, its pair records 0 and 2 (Omega: the scenario's pair, _prty + 8)
+        app.game.pairs[1] = {0, 2};
         for (auto& m : app.game.party) m.hp = 1, m.mp = 1;
         host.recoverPair();
-        const bool healed = app.game.party[2].hp < 0 && app.game.party[3].mp < 0 && app.game.party[0].hp == 1;
+        const bool healed = app.game.party[0].hp < 0 && app.game.party[2].mp < 0 && app.game.party[1].hp == 1;
         const bool pair = host.pairNo() == 1;
         host.playMusic(7);
         const bool bgm = host.bgmNo() == 7;
