@@ -13935,7 +13935,7 @@ int runSelfTest(App& app) {
         problems += after.map != before.map || after.area != before.area || !app.game.flag(3333) ||
                     app.game.items[7] != 3 || app.game.vars[100] != -42 || app.game.oz != 777 ||
                     app.game.party[1].level != 5 || app.game.party[1].exp != 600 || app.game.party[0].equip[cr::kJewel] != 426 || app.game.party[0].seeds[2] != 7 || app.game.party[0].genes[2] != 485 ||
-                    app.game.party[2].equip[cr::kWeapon] != 257 ||
+                    app.game.party[2].equip[cr::kWeapon] != before.game.party[2].equip[cr::kWeapon] ||
                     std::fabs(app.playSeconds - 1234.5) > 1e-6 ||
                     std::fabs(after.pos[0] - before.pos[0]) > 1e-3f || app.titleOpen || app.booting;
         for (int f = 0; f < 60; ++f) stepSaveScreen(app);
@@ -14006,7 +14006,7 @@ int runSelfTest(App& app) {
         openSaveScreen(app, true);
         App::SaveScreen& ssc = app.saveScreen;
         problems += !ssc.cleared || ssc.allClear || savePlates(app) != std::vector<int>{1, 2};
-        saveScreenChoose(app, 2); // New: with the clear data?
+        saveScreenChoose(app, 1); // New: with the clear data?
         problems += ssc.kind != 3 || ssc.message != 57086 || ssc.lines[0] != 57087 || ssc.lines[1] != 57088;
         saveScreenKey(app, SDLK_ESCAPE); // No: a plain new game, then?
         problems += ssc.phase != 1 || ssc.kind != 2 || ssc.message != 57089 || ssc.lines[1] != 57091;
