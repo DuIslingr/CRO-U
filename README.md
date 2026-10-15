@@ -85,7 +85,8 @@ Next (the self-test's remaining failures are mostly checks still written for CR1
 
 - [ ] the battle stage's own motion during a staged action (440: `mdl_set_act_nextanm2` on the
       stage model) and `btlcalc_prc_0404` before 430 / 436 / 442
-- [ ] `--explore` past the first gate's second half (it doesn't yet find the way on from map 6)
+- [ ] `--explore` on to the second gate (it clears the first, then doesn't talk the Ark's crew
+      through - flags 1338..1361 - before the World Select, so the second world isn't offered)
 - [ ] the rest of the self-test moved onto Omega's data (battle rules, saves, the save screen)
 
 ## Reverse-engineering groundwork
