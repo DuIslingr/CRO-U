@@ -78,11 +78,15 @@ Done so far:
 - [x] worn equipment stays in the bag, as Omega's `prty_init` / `__ChangeEquipItem` have it
 - [x] the bosses' staged actions (`btlact_main`'s kinds 10..22: 430..443, 509) with Omega's
       effects, sounds and camera chains, and the story battles' set moves (`_btlque_special`)
+- [x] Omega's own battle calcs (38..44: the kiss, Down and the Ward, 437's blow, MP / HP x power),
+      its stat formula (`btlpcparam_*` with Down / the Ward) and warrior / sorcerer by character
 
-Next (the CR1 self-test's checks that fail on Omega point at most of these):
+Next (the self-test's remaining failures are mostly checks still written for CR1's data):
 
 - [ ] the battle stage's own motion during a staged action (440: `mdl_set_act_nextanm2` on the
       stage model) and `btlcalc_prc_0404` before 430 / 436 / 442
+- [ ] `--explore` past the first gate's second half (it doesn't yet find the way on from map 6)
+- [ ] the rest of the self-test moved onto Omega's data (battle rules, saves, the save screen)
 
 ## Reverse-engineering groundwork
 
