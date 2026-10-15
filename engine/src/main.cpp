@@ -15695,6 +15695,8 @@ int runExplore(App& app, int maxActions) {
     setMode(app, Mode::Maps);
     startNewGame(app);
     int totalFrames = 0, pagesRead = 0;
+    bool worldAsked = false;                  // the last action opened the World Select
+    std::set<std::pair<int, int>> worldDoors; // (map, id) that do: tried last, once the rooms about are done
     auto settle = [&](int limit) {
         int f = 0;
         for (; f < limit && (app.runner.running() || app.pendingEntry != App::Entry::None || app.battle.active); ++f) {
@@ -15711,7 +15713,10 @@ int runExplore(App& app, int maxActions) {
             stepEvents(app);
             if (!app.dialogue.empty()) { pagesRead += int(app.dialogue.size()); app.dialogue.clear(); }
             if (app.choiceFlag >= 0) answerChoice(app, true);
-            if (app.worldChoiceOpen) answerWorldChoice(app, int(app.worldSelect.worlds.size()) - 1, true); // the newest world, its first half skipped once done
+            if (app.worldChoiceOpen) { // the newest world, its first half skipped once done
+                answerWorldChoice(app, int(app.worldSelect.worlds.size()) - 1, true);
+                worldAsked = true;
+            }
             if (app.shop.open && !app.shop.talkRunning) closeShop(app); // (it buys nothing)
             if (app.saveScreen.open && !app.booting) closeSaveScreen(app);
             if (app.itemWindowOpen) app.game.setFlag(0, true);
@@ -15751,7 +15756,8 @@ int runExplore(App& app, int maxActions) {
             if (!npcActive(app, n)) continue;
             const bool parked = (n.pos[1] >= 900.0f || (n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) &&
                                 !app.placedNpcs.count(n.id);
-            if ((n.kind & 8) && !parked) cands.push_back({n.id, true, rankOf(n.treasure & 3 ? n.id + 1 : n.id, 0)});
+            if ((n.kind & 8) && !parked)
+                cands.push_back({n.id, true, worldDoors.count({app.mapNumber, n.id}) ? 60 : rankOf(n.treasure & 3 ? n.id + 1 : n.id, 0)});
             if (n.touchTrigger()) cands.push_back({n.id, false, rankOf(n.id, 1)});
         }
         // (at the same rank walk-in triggers first: they're the rooms' ways on more often than doors)
@@ -15784,6 +15790,8 @@ int runExplore(App& app, int maxActions) {
         }
         if (!pick) { stuckReason = 1; break; }
         tried.insert({app.mapNumber, pick->id * 2 + pick->examine, key});
+        const int pickMap = app.mapNumber, pickId = pick->id;
+        worldAsked = false;
         const int fromMap = app.mapNumber, flagsBefore = flagCount(), pagesBefore = pagesRead;
         const size_t unsupportedBefore = app.unsupported.size();
         const cr::FieldNpc* n = findNpc(app, pick->id);
@@ -15815,6 +15823,7 @@ int runExplore(App& app, int maxActions) {
         std::string extra;
         for (size_t u = unsupportedBefore; u < app.unsupported.size(); ++u) extra += ", " + app.unsupported[u];
         if (app.runner.running()) extra += ", STILL RUNNING (" + app.runner.where() + ")";
+        if (worldAsked) worldDoors.insert({pickMap, pickId});
         std::printf("%4d map %3d %s %4d: %+d flags, %d pages, %d frames%s%s\n", step, fromMap,
                     pick->examine ? "talk " : "touch", pick->id, flagCount() - flagsBefore, pagesRead - pagesBefore,
                     frames, app.mapNumber != fromMap ? (" -> map " + std::to_string(app.mapNumber)).c_str() : "",
