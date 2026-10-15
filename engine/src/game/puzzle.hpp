@@ -1,9 +1,9 @@
 #pragma once
 // Puzzle rooms (PuzzleManager and its PuzzleObjects; the "Puzzle" rooms on the gates' maps).
 //
-// Area 1 (j001_p01) holds the 64 puzzle stages, maps 114..177 (_get_stgno: map - 114 while in
-// area 1). Each has a record (PUZZLE_ROOM_DATA, filled by its static initializer at 0x214c, 7
-// words): the touch ability its pair uses there, the ESP count (uses of it, shown on the field
+// Area 1 (j001_p01) holds Omega's 16 puzzle stages, maps 153..168 (_get_stgno: map - _stgtbl[1]
+// while in area 1). Each has a record (PUZZLE_ROOM_DATA, filled by its static initializer at
+// 0x4b134, 7 words): the touch ability its pair uses there, the ESP count (uses of it, shown on the field
 // menu; -1 = no limit), the grid (rows along z, columns along x, 10-unit cells) and its corner.
 // The room's NPCs become the grid's objects by their NPC table +20 bits (createPuzzleObject).
 
@@ -19,8 +19,8 @@ struct PuzzleStage {
     float x0 = -25, y = 10, z0 = -25; // the grid's corner; y the objects' height
 };
 
-constexpr int kPuzzleStages = 64, kFirstPuzzleMap = 114, kPuzzleArea = 1;
-constexpr float kPuzzleCell = 10.0f;      // 0xca8d8
+constexpr int kPuzzleStages = 16, kFirstPuzzleMap = 153, kPuzzleArea = 1;
+constexpr float kPuzzleCell = 10.0f;      // _PUZZLE_FIELD_CELL_WIDTH
 constexpr float kPuzzleSwitchRise = 2.5f; // 0xca8dc: an object standing on a weigh switch
 // Object types (getType) and what holds them
 enum PuzzleType { kTypeNormal = 1, kTypeFixed = 2, kTypeFragile = 3, kTypeCandle = 4, kTypeRed = 5, kTypeBlue = 6,
