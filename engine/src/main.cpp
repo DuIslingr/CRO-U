@@ -122,7 +122,8 @@ struct App {
     bool vitaOnly = false;                 // no iOS data: the Vita copy is the whole game
     cr::PsarcArchive vita;
     cr::PsarcArchive vitaBgm, vitaVoice[2];
-    int vitaTextures = 0;                // how many images / model packages came from it
+    int vitaTextures = 0;
+    int ipadImages = 0, hdImages = 0;    // base names loaded as <base>_ipad.mct / <base>_hd.mct (chk_hd_name)                // how many images / model packages came from it
     Mode mode = Mode::Textures;
 
     std::vector<std::string> textures;
@@ -222,7 +223,8 @@ struct App {
     int soundTestEntry = 0;
     std::vector<int> voiceEntries;         // bank entries marked as voice (sound test, T)
     cr::Hud optionsHud;
-    cr::Texture windowTex;                 // window_hd.mct: the game's UI atlas (panels, badges, …)
+    cr::Texture windowTex;                 // window.mct (chk_hd_name: window_ipad on the iPad): the UI atlas
+    cr::Texture titleArt[2];               // __menuu_TitleSet: title1.mct (MuCom slot 0x11), chaos.mct (0x12)
     float footPrev = 0;                    // player's animation time last frame (footsteps)
     std::vector<uint32_t> soundLog;        // every sound started (self-test)
     std::vector<uint32_t> menuSoundLog;    // the menus' sounds, latest last (self-test)
@@ -865,7 +867,16 @@ bool loadOriginalImage(App& app, const std::string& mct, cr::Image& img) {
         std::vector<uint8_t> g;
         if (app.vita.read(mct.substr(0, mct.size() - 4) + ".gxt", g) && cr::decodeGxt(g, img)) { ++app.vitaTextures; return true; }
     }
+    // chk_hd_name (Omega): a base name loads <base>_ipad.mct on an iPad when the data has one - the
+    // iPad's own art (window_ipad, title1_ipad, chara1..3_ipad, ...) -, else <base>_hd.mct, else
+    // the name itself; names that already say _hd / _ipad are taken as they are
     std::vector<uint8_t> data;
+    const std::string base = mct.size() > 4 && mct.compare(mct.size() - 4, 4, ".mct") == 0 ? mct.substr(0, mct.size() - 4) : "";
+    const auto ends = [&](const char* sfx) { const size_t n = SDL_strlen(sfx); return base.size() > n && base.compare(base.size() - n, n, sfx) == 0; };
+    if (!base.empty() && !ends("_hd") && !ends("_ipad")) {
+        if (cr::readFile(app.dataDir + base + "_ipad.mct", data) && cr::decodeMct(data, img)) { ++app.ipadImages; return true; }
+        if (cr::readFile(app.dataDir + base + "_hd.mct", data) && cr::decodeMct(data, img)) { ++app.hdImages; return true; }
+    }
     return cr::readFile(app.dataDir + mct, data) && cr::decodeMct(data, img);
 }
 
@@ -1156,6 +1167,7 @@ void showMap(App& app, int index, int forcedMap, int forcedArea) {
     app.booting = false;
     app.titleOpen = false;
     app.renderer.destroy(app.charSelectArt); // (the title's save screen showed it)
+    for (cr::Texture& t : app.titleArt) app.renderer.destroy(t); // (the title's own art)
     app.mapIndex = wrap(index, app.maps.size());
     unloadModel(app);
     const std::string& name = app.maps[app.mapIndex];
@@ -2779,7 +2791,7 @@ void adjustVideo(App& app, int row, int dir) {
     case 12: { // HD textures: what loads from now on (the next room); the UI atlas at once
         v.hdTextures = !v.hdTextures;
         cr::Image wi;
-        if (app.rendererReady && loadImage(app, "window_hd.mct", wi)) {
+        if (app.rendererReady && loadImage(app, "window.mct", wi)) {
             app.renderer.destroy(app.windowTex);
             app.windowTex = app.renderer.upload(wi);
         }
@@ -6780,26 +6792,54 @@ void charSelectClick(App& app, float px, float py) {
 }
 
 // ---- The title menu (Util 0: __menuu_Title*) ----
-// Three plates (ComUty_ChoicePlateDraw) at (328, 114 + 56k): Start, Scenarios, Options (words 2,
-// 32, 3; icons kanIconNoTbl - 1), the cursor's lit, and the emblems (pictures 155 and 124) at
-// (320, 16) / (380, 16), over the title picture the script showed in Tex2d slot 0.
+// __menuu_TitlePut (Omega): over the title picture the script shows in Tex2d slot 0, the menu's
+// own art from TitleSet's two sheets - title1 (slot 0x11) and chaos (0x12), group-1 pictures
+// (kOutReadPicture): on the iPad chaos's 6 (the logo) at (0, -32), title1's 9 at (184, 252) and
+// 10 at (0, 312); on the iPhone 6 at (0, 0), 7 at (184, 220), 8 at (0, 280) - then three plates
+// (ComUty_ChoicePlateDraw) at (328, 114 + 56k): Start, Scenarios, Options (words 2, 32, 3,
+// gnPlateNameTbl), and down the left pictures 125 / 126 at (8, 16) / (8, 96) (127 at (8, 176)
+// only with Game Center)
 constexpr int kTitleWords[3] = {2, 32, 3};
 constexpr int kTitleIcons[3] = {2, 27, 3};
 
 bool titleChoiceReady(int) { return true; }
 
+// A group-1 picture (MuTex_GetTexInfo(1, pict), half-scale units) of one of a menu's own sheets
+// at (x, y): the _hd / _ipad sheets (1024 wide and up) hold them at twice those units
+void outPicture(cr::MenuPainter& m, const cr::Texture& tex, int pict, float x, float y, float a) {
+    if (!tex.id || pict < 0 || pict >= cr::kNumOutReadPictures) return;
+    const short* p = cr::kOutReadPicture[pict];
+    const float k = tex.width >= 1024 ? 2.0f : 1.0f;
+    m.imagePieceTo(tex, x, y, p[2], p[3], p[0] * k, p[1] * k, p[2] * k, p[3] * k, a);
+}
+
 void drawTitleMenu(App& app) {
     cr::MenuPainter& m = app.menu;
+    static const char* const kTitleSheet[2] = {"title1.mct", "chaos.mct"};
+    for (int k = 0; k < 2; ++k)
+        if (!app.titleArt[k].id) {
+            cr::Image img;
+            if (loadImage(app, kTitleSheet[k], img)) app.titleArt[k] = app.renderer.upload(img);
+        }
     m.begin(app.renderer, app.windowTex, &app.font);
     const PhoneMenu phoneMenu(app, m); // the iPhone layout: its screen's menu coordinates
     const float t = std::min(1.0f, app.titleAnim / 10.0f), ease = 1 - (1 - t) * (1 - t);
-    app.renderer.setOrigin(wideRight(app)); // (widescreen: the emblems and plates to the screen's right)
-    m.picture(155, 320, 16, t);
-    m.picture(124, 380, 16, t);
+    if (app.renderer.phoneLayout()) {
+        outPicture(m, app.titleArt[0], 7, 184, 220, t);
+        outPicture(m, app.titleArt[1], 6, 0, 0, t);
+        outPicture(m, app.titleArt[0], 8, 0, 280, t);
+    } else {
+        outPicture(m, app.titleArt[0], 9, 184, 252, t);
+        outPicture(m, app.titleArt[1], 6, 0, -32, t);
+        outPicture(m, app.titleArt[0], 10, 0, 312, t);
+    }
+    app.renderer.setOrigin(wideRight(app)); // (widescreen: the plates to the screen's right)
     for (int i = 0; i < 3; ++i)
         m.plate(328 + 240 * (1 - ease), 114 + 56.0f * float(i), kTitleIcons[i], kTitleWords[i], app.titleCursor == i, t,
                 !titleChoiceReady(i));
-    app.renderer.setOrigin(wideLeft(app));
+    app.renderer.setOrigin(wideLeft(app)); // (... and the pictures down the left to its left)
+    m.picture(125, 8, 16, t);
+    m.picture(126, 8, 96, t);
     if (keyHints(app)) // (our key hints)
         m.text("Up/Down  Enter  V: Options  Esc: quit", 20, 360, false, t * 0.8f, 9);
     app.renderer.setOrigin(app.renderer.uiX());
@@ -12654,7 +12694,7 @@ int runSelfTest(App& app) {
                 endBattle(app, true);
             }
             cr::Image wi;
-            if (loadImage(app, "window_hd.mct", wi) && wi.logicalW) {
+            if (loadImage(app, "window.mct", wi) && wi.logicalW) {
                 const cr::Texture t = app.renderer.upload(wi);
                 problems += t.width != wi.logicalW || t.height != wi.logicalH;
                 cr::Texture tt = t;
@@ -15072,6 +15112,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         if (found < app.captureTalk) std::printf("talk-portrait: only %d moments with a portrait\n", found + 1);
     }
     if (app.vita.isOpen()) std::printf("vita textures used: %d\n", app.vitaTextures);
+    if (app.ipadImages || app.hdImages) std::printf("images by chk_hd_name: %d _ipad, %d _hd\n", app.ipadImages, app.hdImages);
     if (app.video.hdTextures) std::printf("hd textures: %d replaced, %d without one (%s)\n", app.hdLoaded, app.hdMissing, app.hdDir.c_str());
     if (app.captureTitle) {
         std::printf("title: script %s, title menu %s, fade grey %.2f alpha %.2f", app.runner.running() ? app.runner.where().c_str() : "done",
@@ -15599,7 +15640,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     applyLanguage(*app);
     {
         cr::Image wi;
-        if (loadImage(*app, "window_hd.mct", wi)) app->windowTex = app->renderer.upload(wi);
+        if (loadImage(*app, "window.mct", wi)) app->windowTex = app->renderer.upload(wi);
     }
     std::sort(app->textures.begin(), app->textures.end());
     std::sort(app->models.begin(), app->models.end());

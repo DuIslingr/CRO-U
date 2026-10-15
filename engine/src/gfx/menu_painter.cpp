@@ -42,14 +42,20 @@ void MenuPainter::imagePiece(const Texture& tex, float x, float y, float u, floa
     r_->drawQuadUV(tex, X(x) * kScale, Y(y) * kScale, w * K() * kScale, h * K() * kScale, u, v, w, h, 1, 1, 1, alpha);
 }
 
+void MenuPainter::imagePieceTo(const Texture& tex, float x, float y, float w, float h, float u, float v, float uw, float vh,
+                               float alpha) {
+    if (!r_ || !tex.id || alpha <= 0.001f) return;
+    r_->drawQuadUV(tex, X(x) * kScale, Y(y) * kScale, w * K() * kScale, h * K() * kScale, u, v, uw, vh, 1, 1, 1, alpha);
+}
+
 void MenuPainter::picture(int pict, float x, float y, float alpha) {
-    if (pict < 0 || pict >= 156) return;
+    if (pict < 0 || pict >= kNumMenuPictures) return;
     const short* p = kMenuPicture[pict];
     piece(x, y, p[0], p[1], p[2], p[3], alpha);
 }
 
 void MenuPainter::stretch(int pict, float x, float y, float w, float h, float alpha) {
-    if (pict < 0 || pict >= 156 || !r_ || !sheet_ || !sheet_->id || alpha <= 0.001f) return;
+    if (pict < 0 || pict >= kNumMenuPictures || !r_ || !sheet_ || !sheet_->id || alpha <= 0.001f) return;
     const short* p = kMenuPicture[pict];
     r_->drawQuadUV(*sheet_, X(x) * kScale, Y(y) * kScale, w * K() * kScale, h * K() * kScale, p[0] * kScale, p[1] * kScale,
                    p[2] * kScale, p[3] * kScale, 1, 1, 1, alpha);
