@@ -342,12 +342,28 @@ struct App {
     cr::ItemTable itemTable;               // sys.evt: item prices, icons, kinds
     // Character Select (Util 4, __menuu_Start*): the boot script's pair choice before the save /
     // load screen; the chosen pair (1..4) goes to var 1 through that screen
-    bool scenariosOpen = false;            // Scenarios (the title's; __menuu_History*): the story flow chart
-    float scenariosScroll = 0;
-    float scenariosHScroll = 0;            // the iPhone layout's (2.2.0): sideways, tex2d 0..-120
-    int scenariosAnim = 0;
-    cr::Texture scenariosSheet;            // flow_hd.mct
-    cr::GameState scenariosFlags;          // every pair's saves together (the original's system data)
+    // Scenarios (__menuu_Sccnarios*): the bingo cards - from the title (mode 0, to look at) or the
+    // Camp (mode 1, where a cell the bag has a present for opens)
+    struct Scenarios {
+        bool open = false;
+        int mode = 0;
+        int anim = 0;                      // frames since the page came up
+        int card = -1;                     // the card shown, -1 the overview
+        int cursor = 0;                    // (keys) the overview's card, a card's cell
+        std::array<int, 16> cell{};        // __SetBingoPushAndOpen: 0 shut, 1 opening, 2 open
+        std::array<bool, 16> canPush{};    // a present in the bag for it not yet used on any card
+        int pushing = -1, pushClock = 0;   // the cell opening (states 0xf..0x11)
+        float zoom = 1, panX = 0, panY = 0; // a whole card's picture: tap to zoom, drag about (tex2d)
+        int zoomDir = 0;                   // 1 in, 2 out (DAT_e60f8)
+        int bob = 0;                       // ComUty_PictMove: the Touch! / PUSH! pictures' 0..4
+        bool bobBack = false;
+        bool keys = false;                 // (the port's) a key moved the cursor: show it
+        float clock = 0;
+        float dragMoved = 0;
+        cr::Texture sheet, cardTex, photo; // tex_scenario, tex_card_<colour>, present0N_hd
+        int cardLoaded = -1;
+        cr::GameState flags;               // the title's: every save's flags together
+    } scc;
     bool manualOpen = false;               // Options > Instruction Manual
     int manualCursor = 0, manualTop = 0, manualAnim = 0;
     bool charSelectOpen = false;
@@ -1167,6 +1183,7 @@ int plateIcon(int word);
 bool keyHints(const App& app);
 void openManual(App& app);
 void openScenarios(App& app);
+void openScenarios(App& app, int mode);
 void openShop(App& app);
 void startBattle(App& app, const cr::BattleStart& start, int flags);
 int partyLevel(const App& app);
@@ -4836,6 +4853,7 @@ void campKey(App& app, SDL_Keycode key) {
     switch (c.page) {
     case App::Camp::Main:
         if (step) { c.cursor = (c.cursor + step + campEntries(app)) % campEntries(app); menuSound(app, se::kCursor); }
+        else if (key == SDLK_Q) { menuSound(app, se::kChoose); openScenarios(app, 1); } // (keys: the Scenarios picture)
         return;
     case App::Camp::Items:
     case App::Camp::Equip:
@@ -4888,10 +4906,13 @@ void campClick(App& app, float px, float py) {
     auto inAt = [&](float at, float x, float y, float w, float h) { return at >= x && at < x + w && my >= y && my < y + h; };
     if (inAt(cx, kBackX, campBackY(app), 232, 24)) { campBack(app); return; }
     switch (c.page) {
-    case App::Camp::Main:
+    case App::Camp::Main: {
         for (int i = 0; i < campEntries(app); ++i)
             if (in(kPlateX, kPlateY + kPlateStep * float(i), 136, 40)) { c.cursor = i; campChoose(app); return; }
+        const short* sp = cr::kMenuPicture[162]; // __menuu_CampMainPut's Scenarios picture (CampMainPrc case 5)
+        if (inAt(lx0, 12, 236, sp[2], sp[3])) { menuSound(app, se::kChoose); openScenarios(app, 1); }
         return;
+    }
     default: break;
     }
     if (c.phase == App::Camp::Member || (c.page == App::Camp::Status && c.phase == App::Camp::Slot)) {
@@ -6609,271 +6630,395 @@ cr::GameState allPairsFlags(const App& app) {
     return g;
 }
 
-// ---- Scenarios (__menuu_HistorySet / HistoryPut, flow_hd.mct) ----
-// A column per pair (x -2 + 256k), ten chapters each in the order that pair meets the gates, and
-// the finale across the bottom. All numbers are the binary's tables: kHistoryPiece the sheet
-// rectangles (gkastHistoryMct), kHistoryEntry {x, y, kind (0 banner, 1 tall, 2 wide), picture}
-// (0xc8c60), kHistoryState {reached, cleared} flags (0xc8ef0), kHistoryNext {before, this}
-// (0xc9110: "next" when the one before is done and this isn't begun), kHistoryPoints {flag,
-// points} (0xc9260: the Achievements %).
-constexpr short kHistoryPiece[38][4] = {
-    {0, 934, 432, 80}, {856, 0, 72, 24}, {928, 0, 72, 24}, {840, 24, 24, 72}, {864, 24, 24, 72},
-    {588, 472, 300, 84}, {588, 560, 300, 84}, {588, 648, 300, 84}, {588, 736, 300, 84}, {588, 824, 300, 84},
-    {588, 912, 300, 84}, {528, 160, 264, 80}, {528, 320, 264, 152}, {0, 776, 26, 152}, {204, 776, 168, 152},
-    {546, 776, 26, 152}, {28, 776, 80, 152}, {0, 0, 264, 80}, {0, 80, 264, 80}, {0, 160, 264, 80},
-    {0, 240, 264, 80}, {528, 0, 264, 80}, {264, 0, 264, 80}, {264, 80, 264, 80}, {264, 160, 264, 80},
-    {264, 240, 264, 80}, {528, 80, 264, 80}, {0, 320, 264, 152}, {264, 320, 264, 152}, {0, 472, 588, 148},
-    {0, 624, 588, 148}, {832, 0, 18, 20}, {792, 0, 40, 48}, {528, 240, 136, 80}, {792, 320, 136, 152},
-    {792, 128, 192, 152}, {720, 280, 304, 40}, {976, 464, 48, 56}};
-// 2.2.0's flow_hd.mct (its table at 0xbac00, in tex2d: these doubled) is the same sheet but for the
-// finale's "?" bar: wider caps 13 / 15 and a narrower body 16
-constexpr short kPhoneDataHistoryPiece[3][4] = {{0, 776, 144, 152}, {432, 776, 144, 152}, {144, 776, 72, 152}};
-constexpr short kHistoryEntry[41][4] = {
-    {-2, 96, 0, 17}, {-2, 192, 0, 18}, {-2, 288, 0, 25}, {-2, 384, 0, 19}, {-2, 480, 0, 20}, {-2, 576, 0, 23},
-    {-2, 672, 1, 27}, {-2, 840, 0, 21}, {-2, 936, 1, 28}, {-2, 1272, 0, 26},
-    {254, 96, 0, 18}, {254, 192, 0, 19}, {254, 288, 0, 24}, {254, 384, 0, 17}, {254, 480, 0, 20}, {254, 576, 0, 22},
-    {254, 672, 1, 27}, {254, 840, 0, 21}, {254, 936, 1, 28}, {254, 1272, 0, 26},
-    {510, 96, 0, 20}, {510, 192, 0, 19}, {510, 288, 0, 22}, {510, 384, 0, 18}, {510, 480, 0, 17}, {510, 576, 0, 25},
-    {510, 672, 1, 27}, {510, 840, 0, 21}, {510, 936, 1, 28}, {510, 1272, 0, 26},
-    {766, 96, 0, 19}, {766, 192, 0, 17}, {766, 288, 0, 23}, {766, 384, 0, 18}, {766, 480, 0, 20}, {766, 576, 0, 24},
-    {766, 672, 1, 27}, {766, 840, 0, 21}, {766, 936, 1, 28}, {766, 1272, 0, 26},
-    {-2, 1104, 2, 29}};
-constexpr short kHistoryState[41][2] = {
-    {1092, 1093}, {1094, 1095}, {1096, 1097}, {1098, 1099}, {1100, 1101}, {1101, 1102}, {1103, 1104}, {1109, 1207}, {1207, 1207}, {-1, -1},
-    {1492, 1493}, {1494, 1495}, {1496, 1497}, {1498, 1499}, {1500, 1501}, {1501, 1502}, {1503, 1504}, {1509, 1607}, {1607, 1607}, {-1, -1},
-    {2292, 2293}, {2294, 2295}, {2296, 2297}, {2298, 2299}, {2300, 2301}, {2301, 2302}, {2303, 2304}, {2309, 2407}, {2407, 2407}, {-1, -1},
-    {1892, 1893}, {1894, 1895}, {1896, 1897}, {1898, 1899}, {1900, 1901}, {1901, 1902}, {1903, 1904}, {1909, 2007}, {2007, 2007}, {-1, -1},
-    {-1, -1}};
-constexpr short kHistoryNext[41][2] = {
-    {-1, -1}, {1093, 1094}, {1095, 1096}, {1097, 1098}, {1099, 1100}, {1101, 1101}, {1102, 1103}, {1104, 1109}, {1107, 1207}, {-1, -1},
-    {-1, -1}, {1493, 1494}, {1495, 1496}, {1497, 1498}, {1499, 1500}, {1501, 1501}, {1502, 1503}, {1504, 1509}, {1507, 1607}, {-1, -1},
-    {-1, -1}, {2293, 2294}, {2295, 2296}, {2297, 2298}, {2299, 2300}, {2301, 2301}, {2302, 2303}, {2304, 2309}, {2307, 2407}, {-1, -1},
-    {-1, -1}, {1993, 1894}, {1995, 1896}, {1897, 1898}, {1899, 1900}, {1901, 1901}, {1902, 1903}, {1904, 1909}, {1907, 2007}, {-1, -1},
-    {-1, -1}};
-constexpr short kHistoryPoints[41][2] = {
-    {1093, 3}, {1095, 3}, {1097, 2}, {1099, 3}, {1101, 3}, {1102, 2}, {1104, 3}, {1207, 3}, {32, 0}, {1061, 2},
-    {1493, 3}, {1495, 3}, {1497, 2}, {1499, 3}, {1501, 3}, {1502, 2}, {1504, 3}, {1607, 3}, {34, 0}, {1461, 2},
-    {2293, 3}, {2295, 3}, {2297, 2}, {2299, 3}, {2301, 3}, {2302, 2}, {2304, 3}, {2407, 3}, {38, 0}, {2261, 2},
-    {1893, 3}, {1895, 3}, {1897, 2}, {1899, 3}, {1901, 3}, {1902, 2}, {1904, 3}, {2007, 3}, {36, 0}, {1861, 2},
-    {39, 12}};
-constexpr short kHistoryCleared[4] = {32, 34, 38, 36}; // each pair's story done; 39: all of them
-constexpr float kHistoryTop = 32, kHistoryBottom = 634;  // between the black bands
-// 2.2.0's (__menuu_HistoryPut, 0xbe3d0 in its binary; tex2d): the same chart at half scale, the
-// columns 152 apart and scrolling sideways too (0..-120); y from the scroll + 62; black bands
-// (0, 0, 480, 48) and (0, 285, 480, 35); the heading (8, 4), the clock and Oz, the arrows
-// (218, 92) / (218, 276) / (0, 174) / (469, 174), "Achievements" (4, 296) and its digits from
-// (66, 288), 24 apart; Back
-constexpr short kPhoneHistoryEntry[41][2] = {
-    {6, 48}, {6, 96}, {6, 144}, {6, 192}, {6, 240}, {6, 288}, {6, 336}, {6, 420}, {6, 468}, {6, 636},
-    {158, 48}, {158, 96}, {158, 144}, {158, 192}, {158, 240}, {158, 288}, {158, 336}, {158, 420}, {158, 468}, {158, 636},
-    {310, 48}, {310, 96}, {310, 144}, {310, 192}, {310, 240}, {310, 288}, {310, 336}, {310, 420}, {310, 468}, {310, 636},
-    {462, 48}, {462, 96}, {462, 144}, {462, 192}, {462, 240}, {462, 288}, {462, 336}, {462, 420}, {462, 468}, {462, 636},
-    {6, 552}};
-constexpr float kPhoneHistoryLowest = 285 - (62 + 636 + 40) - 8; // the vertical scroll's end (tex2d)
+// ---- Scenarios (__menuu_SccnariosSet / Put / Prc: the bingo cards) ----
+// The overview (windows 0..5): the eight faces (tex_scenario picture 0) with an X over those whose
+// day has passed (flags 0x518.., the first two never), the two Achievement rates and, once flag
+// 0x642 is set, the cards (four; five with flags 0x1f, 0x65 and 0x665 too). A card (windows 6..11):
+// its picture (present0N_hd) behind sixteen cells; a cell opens with one of its five presents
+// (_ganItemTbl) not yet used on another card (_ganPushFlgTop), only from the Camp (mode 1). All
+// sixteen open: the card's done (flag 0x64b + card, var 0x16 + 1) and its picture zooms.
+// Positions are the iPhone screen's (480 x 320 menu units, at the iPad's (16, 32)); the pictures'
+// rectangles (_gkastScc*Mct, groups 3 / 4) are the SD sheets', the _hd sheets twice that
+namespace bingo {
+constexpr short kSheetPict[16][4] = { // group 3, tex_scenario
+    {0, 0, 455, 106}, {462, 0, 50, 100}, {368, 221, 144, 35}, {240, 221, 128, 35}, {352, 192, 160, 29},
+    {0, 230, 24, 26}, {160, 181, 20, 18}, {0, 168, 90, 62}, {180, 168, 72, 40}, {0, 106, 90, 62},
+    {90, 106, 90, 62}, {180, 106, 90, 62}, {270, 106, 90, 62}, {360, 106, 90, 62}, {90, 168, 59, 60},
+    {471, 117, 20, 34}};
+constexpr short kCardPict[54][4] = { // group 4, tex_card_<colour>
+    {64, 473, 224, 39}, {0, 0, 480, 7}, {0, 228, 480, 8}, {0, 7, 129, 221}, {350, 7, 130, 221}, {0, 480, 55, 32},
+    {129, 7, 55, 55}, {184, 7, 55, 55}, {239, 7, 55, 55}, {294, 7, 56, 55}, {129, 62, 55, 55}, {184, 62, 55, 55},
+    {239, 62, 55, 55}, {294, 62, 56, 55}, {129, 117, 55, 55}, {184, 117, 55, 55}, {239, 117, 55, 55},
+    {294, 117, 56, 55}, {129, 172, 55, 56}, {184, 172, 55, 56}, {239, 172, 55, 56}, {294, 172, 56, 56},
+    {0, 240, 55, 55}, {55, 240, 55, 55}, {110, 240, 55, 55}, {165, 240, 56, 55}, {0, 295, 55, 55},
+    {55, 295, 55, 55}, {110, 295, 55, 55}, {165, 295, 56, 55}, {0, 350, 55, 55}, {55, 350, 55, 55},
+    {110, 350, 55, 55}, {165, 350, 56, 55}, {0, 405, 55, 56}, {55, 405, 55, 56}, {110, 405, 55, 56},
+    {165, 405, 56, 56}, {224, 240, 55, 55}, {279, 240, 55, 55}, {334, 240, 55, 55}, {389, 240, 56, 55},
+    {224, 295, 55, 55}, {279, 295, 55, 55}, {334, 295, 55, 55}, {389, 295, 56, 55}, {224, 350, 55, 55},
+    {279, 350, 55, 55}, {334, 350, 55, 55}, {389, 350, 56, 55}, {224, 405, 55, 56}, {279, 405, 55, 56},
+    {334, 405, 55, 56}, {389, 405, 56, 56}};
+constexpr int kPushFlag[5] = {2001, 2017, 2033, 2049, 2065}; // + cell: that cell's n-th present used
+constexpr int kOpenFlag[5] = {2101, 2117, 2133, 2149, 2165}; // + cell: open on card k
+constexpr short kItems[16][5] = {
+    {552, 555, 588, 599, 605}, {553, 557, 562, 573, 574}, {559, 568, 583, 597, 607}, {558, 561, 589, 614, 618},
+    {563, 572, 604, 620, 621}, {564, 570, 587, 623, 630}, {551, 565, 575, 580, 592}, {566, 567, 569, 615, 619},
+    {571, 586, 609, 622, 625}, {576, 579, 590, 613, 626}, {578, 581, 591, 598, 617}, {554, 582, 584, 602, 608},
+    {560, 593, 606, 611, 612}, {594, 595, 600, 616, 627}, {556, 596, 610, 624, 628}, {577, 585, 601, 603, 629}};
+constexpr short kBirthday[15][2] = { // {flag, points}: the first rate
+    {1162, 5}, {1163, 5}, {1202, 5}, {1203, 5}, {1116, 5}, {1242, 10}, {1182, 5}, {1183, 5},
+    {1222, 5}, {1223, 5}, {1262, 10}, {1265, 5}, {1244, 10}, {1267, 10}, {1269, 10}};
+constexpr short kFestival[14][2] = { // the second, with a point per open cell
+    {1693, 3}, {1695, 3}, {1692, 6}, {1694, 6}, {1696, 6}, {1691, 0}, {1697, 6},
+    {1698, 6}, {1700, 1}, {1701, 1}, {1702, 1}, {1703, 1}, {1704, 1}, {1699, 4}};
+constexpr const char* kCardFile[5] = {"tex_card_red.mct", "tex_card_blue.mct", "tex_card_yellow.mct",
+                                      "tex_card_green.mct", "tex_card_violet.mct"};
+// The cells (_kgnBingoWindowPosXY) and their PUSH! marks (_kgnBingoPushPosXY)
+inline float cellX(int i) { return 129 + 55.0f * float(i % 4); }
+inline float cellY(int i) { return 55 + 55.0f * float(i / 4); }
+constexpr int kCardFlag = 0x64b; // + card: done
+constexpr int kDoneVar = 0x16;
+// The photo's zoom (iPad: 1 .. 2, 0.2 a frame) and how far it pans when zoomed (tex2d)
+constexpr float kZoomMin = 1, kZoomMax = 2, kZoomStep = 0.2f, kPanX = 480, kPanUp = -152, kPanDown = 320;
 
-void openScenarios(App& app) {
-    app.scenariosOpen = true;
-    app.scenariosScroll = 0;
-    app.scenariosHScroll = 0;
-    app.scenariosAnim = 0;
-    app.scenariosFlags = allPairsFlags(app);
-    if (!app.scenariosSheet.id) {
-        cr::Image img;
-        if (loadImage(app, "flow_hd.mct", img)) app.scenariosSheet = app.renderer.upload(img);
+cr::GameState& flags(App& app) { return app.scc.mode == 1 ? app.game : app.scc.flags; }
+bool shown(App& app) { return flags(app).flag(0x642); } // the cards' row and the second rate
+int cards(App& app) {
+    const cr::GameState& g = flags(app);
+    return shown(app) && g.flag(0x1f) && g.flag(0x65) && g.flag(0x665) ? 5 : 4;
+}
+bool done(App& app, int card) {
+    for (int i = 0; i < 16; ++i)
+        if (!flags(app).flag(kOpenFlag[card] + i)) return false;
+    return true;
+}
+int birthdayRate(App& app) {
+    int p = 0;
+    for (const auto& e : kBirthday) p += flags(app).flag(e[0]) ? e[1] : 0;
+    return p;
+}
+int festivalRate(App& app) { // (__GetFestivalProgressNum)
+    int p = 0;
+    for (const auto& e : kFestival) p += flags(app).flag(e[0]) ? e[1] : 0;
+    for (int k = 0; k < 5; ++k)
+        for (int i = 0; i < 16; ++i) p += flags(app).flag(kOpenFlag[k] + i);
+    return p;
+}
+int presentsUsed(App& app) { // the card page's N / 64 (80)
+    int n = 0;
+    for (int i = 0; i < 16; ++i)
+        for (int k = 0; k < 5; ++k) n += flags(app).flag(kPushFlag[k] + i);
+    return n;
+}
+// __SetBingoPushAndOpen
+void refresh(App& app) {
+    App::Scenarios& s = app.scc;
+    const cr::GameState& g = flags(app);
+    for (int i = 0; i < 16; ++i) {
+        s.cell[size_t(i)] = s.card >= 0 && g.flag(kOpenFlag[s.card] + i) ? 2 : 0;
+        s.canPush[size_t(i)] = false;
+        if (s.cell[size_t(i)] == 2 || s.mode != 1) continue;
+        int held = 0, used = 0;
+        for (short item : kItems[i]) held += ownedCount(app, item) > 0;
+        for (int k = 0; k < 5; ++k) used += g.flag(kPushFlag[k] + i);
+        s.canPush[size_t(i)] = held - used > 0;
     }
 }
+void loadCard(App& app, int card) {
+    App::Scenarios& s = app.scc;
+    if (s.cardLoaded != card) {
+        app.renderer.destroy(s.cardTex);
+        app.renderer.destroy(s.photo);
+        cr::Image img;
+        if (loadImage(app, kCardFile[card], img)) s.cardTex = app.renderer.upload(img);
+        char name[32];
+        std::snprintf(name, sizeof name, "present%02d_hd.mct", card + 1);
+        if (loadImage(app, name, img)) s.photo = app.renderer.upload(img);
+        s.cardLoaded = card;
+    }
+    s.card = card;
+    s.anim = 0;
+    s.zoom = kZoomMin, s.panX = s.panY = 0, s.zoomDir = 0;
+    s.pushing = -1;
+    s.cursor = std::clamp(s.cursor, 0, 15);
+    refresh(app);
+}
+} // namespace bingo
+
+void openScenarios(App& app, int mode) {
+    App::Scenarios& s = app.scc;
+    s.open = true;
+    s.mode = mode;
+    s.anim = 0;
+    s.card = -1;
+    s.cursor = 0;
+    if (mode == 0) s.flags = allPairsFlags(app);
+    if (!s.sheet.id) {
+        cr::Image img;
+        if (loadImage(app, "tex_scenario.mct", img)) s.sheet = app.renderer.upload(img);
+    }
+}
+void openScenarios(App& app) { openScenarios(app, 0); }
 
 void closeScenarios(App& app) {
-    app.scenariosOpen = false;
-    app.renderer.destroy(app.scenariosSheet);
+    App::Scenarios& s = app.scc;
+    s.open = false;
+    app.renderer.destroy(s.sheet);
+    app.renderer.destroy(s.cardTex);
+    app.renderer.destroy(s.photo);
+    s.cardLoaded = -1;
 }
 
-// 0 locked, 1 next, 2 reached, 3 cleared (HistorySet)
-int scenarioState(const cr::GameState& g, int i) {
-    auto f = [&](int n) { return n >= 0 && g.flag(n); };
-    if (i == 40) { // the finale: all four stories done, cleared with 39
-        if (g.flag(39)) return 3;
-        for (short c : kHistoryCleared)
-            if (!g.flag(c)) return 0;
-        return 2;
+// A frame of the screen (Prc's per-frame parts): the bobbing pictures, the zoom, a cell opening
+void stepScenarios(App& app) {
+    using namespace bingo;
+    App::Scenarios& s = app.scc;
+    ++s.anim;
+    if (!s.bobBack) { if (++s.bob >= 4) s.bobBack = true; }
+    else if (--s.bob <= 0) s.bobBack = false;
+    if (s.zoomDir == 1) {
+        s.zoom = std::min(kZoomMax, s.zoom + kZoomStep);
+        if (s.zoom >= kZoomMax) s.zoomDir = 0;
+    } else if (s.zoomDir == 2) { // back to the middle over the way out
+        s.zoom = std::max(kZoomMin, s.zoom - kZoomStep);
+        s.panX -= s.panX / 5, s.panY -= s.panY / 5;
+        if (s.zoom <= kZoomMin) s.zoomDir = 0, s.panX = s.panY = 0;
     }
-    int st = f(kHistoryState[i][1]) ? 3 : f(kHistoryState[i][0]) ? 2 : 0;
-    if (f(kHistoryNext[i][0]) && !f(kHistoryNext[i][1])) st = 1;
-    return st;
-}
-
-int scenarioPercent(const cr::GameState& g) {
-    int p = 0;
-    for (const auto& e : kHistoryPoints)
-        if (g.flag(e[0])) p += e[1];
-    return std::min(p, 100);
+    if (s.pushing >= 0 && ++s.pushClock >= 2) { // states 0xf / 0x10: shut -> opening -> open
+        const size_t i = size_t(s.pushing);
+        if (s.cell[i] == 0) s.cell[i] = 1, s.pushClock = 0;
+        else {
+            s.cell[i] = 2;
+            cr::GameState& g = flags(app);
+            g.setFlag(kOpenFlag[s.card] + s.pushing, true);
+            for (int k = 0; k < 5; ++k)
+                if (!g.flag(kPushFlag[k] + s.pushing)) { g.setFlag(kPushFlag[k] + s.pushing, true); break; }
+            s.pushing = -1;
+            if (done(app, s.card) && !g.flag(kCardFlag + s.card)) { // 0x12..0x14 (the card's own flourish: ours a flash)
+                g.setFlag(kCardFlag + s.card, true);
+                g.vars[kDoneVar] = (g.vars.count(kDoneVar) ? g.vars[kDoneVar] : 0) + 1;
+                menuSound(app, 0x128);
+                s.anim = 0;
+            }
+            refresh(app);
+        }
+    }
 }
 
 void drawScenarios(App& app) {
+    using namespace bingo;
+    App::Scenarios& s = app.scc;
     cr::Renderer& r = app.renderer;
-    const cr::Texture& t = app.scenariosSheet;
+    cr::MenuPainter& m = app.menu;
     r.setOrigin(0);
     r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 1);
     r.setOrigin(r.uiX());
-    if (!t.id) return;
-    const float a = std::min(1.0f, app.scenariosAnim / 8.0f);
-    auto rect = [&](int n) -> const short* {
-        if (app.phoneData && (n == 13 || n == 15 || n == 16)) return kPhoneDataHistoryPiece[n == 13 ? 0 : n == 15 ? 1 : 2];
-        return kHistoryPiece[n];
+    m.begin(r, app.windowTex, &app.font);
+    const PhoneMenu pm(app, m);
+    const float a = std::min(1.0f, float(s.anim) / 6.0f); // (ComUty_WinDispOn's fade)
+    auto sheet = [&](int p, float x, float y, float alpha) {
+        const short* q = kSheetPict[p];
+        const float k = s.sheet.width >= 1024 ? 2.0f : 1.0f;
+        m.imagePieceTo(s.sheet, x, y, q[2], q[3], q[0] * k, q[1] * k, q[2] * k, q[3] * k, alpha);
     };
-    auto piece = [&](int n, float x, float y, float alpha = -1) {
-        const short* p = rect(n);
-        r.drawQuadUV(t, x, y, p[2], p[3], p[0], p[1], p[2], p[3], 1, 1, 1, alpha < 0 ? a : alpha);
+    auto card = [&](int p, float x, float y, float alpha) {
+        const short* q = kCardPict[p];
+        const float k = s.cardTex.width >= 1024 ? 2.0f : 1.0f;
+        m.imagePieceTo(s.cardTex, x, y, q[2], q[3], q[0] * k, q[1] * k, q[2] * k, q[3] * k, alpha);
     };
-    // The finale's long "?" (not yet open): cap 13, body 16 repeated up to the mark 14 at mid, body
-    // again up to cap 15 at right
-    auto bar = [&](float x, float y, float mid, float right) {
-        piece(13, x, y);
-        auto body = [&](float from, float to) {
-            const short* m = rect(16);
-            for (float px = from; px < to; px += m[2]) {
-                const float w = std::min(float(m[2]), to - px);
-                r.drawQuadUV(t, px, y, w, m[3], m[0], m[1], w, m[3], 1, 1, 1, a);
-            }
-        };
-        body(x + rect(13)[2], mid);
-        piece(14, mid, y);
-        body(mid + rect(14)[2], right);
-        piece(15, right, y);
+    // A rate: its strip of 24 (picture 15) and the two lines under it (_C_84_13820: grey 0x565853
+    // at the ends to white in the middle, 1 high), its label and "Achievement NNN %"
+    auto rate = [&](int which, int value, float alpha) {
+        const float y = which ? 248 : 131;
+        for (int k = 0; k < 24; ++k) sheet(15, 20.0f * float(k), y, alpha);
+        const float edge[4] = {0x56 / 255.0f, 0x58 / 255.0f, 0x53 / 255.0f, alpha}, white[4] = {1, 1, 1, alpha};
+        m.quad(1, y + 34, 239, 1, edge, white);
+        m.quad(240, y + 34, 240, 1, white, edge);
+        // (__Birthday_PictNumDraw: three digits from (385, y), the first at z -2, under the label)
+        const int d[3] = {value / 100 % 10, value / 10 % 10, value % 10};
+        const short* q = kSheetPict[5];
+        const float k = s.sheet.width >= 1024 ? 2.0f : 1.0f;
+        for (int i = 0; i < 3; ++i)
+            m.imagePieceTo(s.sheet, 385 + 24.0f * float(i), which ? 254 : 136, q[2], q[3], (q[0] + q[2] * d[i]) * k, q[1] * k,
+                           q[2] * k, q[3] * k, alpha);
+        sheet(4, 315, which ? 254 : 136, alpha);
+        sheet(which ? 3 : 2, which ? 4 : 8, which ? 248 : 138, alpha);
     };
-    const cr::GameState& g = app.scenariosFlags;
-    const bool laterPairs = g.flag(32) || g.flag(34); // +0x20: the third and fourth pairs shown
-    if (r.phoneLayout()) { // 2.2.0's iPhone chart (kPhoneHistoryEntry), tex2d -> layout
-        auto at = [&](int n, float tx, float ty, float alpha = -1) { piece(n, 2 * tx + 32, 2 * ty + 64, alpha); };
-        const float hs = app.scenariosHScroll, vs = app.scenariosScroll / 2;
-        // (z: the entries -8 under the pairs' strips -4 and the way-in locks -4; the bands -3)
-        std::vector<std::array<float, 3>> over;
-        for (int i = 0; i < 41; ++i) {
-            const short* e = kHistoryEntry[i];
-            const float tx = hs + kPhoneHistoryEntry[i][0], ty = vs + 62 + kPhoneHistoryEntry[i][1];
-            const float x = 2 * tx + 32, y = 2 * ty + 64;
-            const float h = e[2] == 0 ? 80.0f : e[2] == 1 ? 152.0f : 148.0f;
-            if (y > 2 * 285 + 64 || y + h < 2 * 48 + 64) continue;
-            const int st = scenarioState(g, i);
-            if (e[2] == 2) { // the finale: its two halves (29 / 30), or the "?" across all four columns
-                if (st >= 2) piece(29, x, y), piece(30, x + 588, y);
-                else bar(x, y, x + 504, x + 1032);
-                static constexpr short kShut[4] = {60, 212, 365, 516}, kOpen[4] = {67, 219, 371, 523};
-                for (int k = 0; k < 4; ++k)
-                    if (st == 0 && !g.flag(kHistoryCleared[k])) at(32, tx - 6 + kShut[k], ty - 17);
-                    else at(31, tx - 6 + kOpen[k], ty - 10);
-            } else {
-                piece(st <= 1 ? (e[2] == 1 ? 12 : 11) : e[3], x, y);
-                if (st != 0) at(31, tx + 61, ty - 10);
-                else if (ty - 17 < 91) over.push_back({31, tx + 61, ty - 10}); // (by the strips: the open one)
-                else if (ty - 17 < 280) over.push_back({32, tx + 54, ty - 17});
-                else at(32, tx + 54, ty - 17);
-            }
-            if (st == 3) at(e[2] == 0 ? 33 : e[2] == 1 ? 34 : 35, tx + (e[2] == 2 ? 244 : 66), ty);
-        }
-        for (const auto& o : over) at(int(o[0]), o[1], o[2]);
-        // (0, 48)-(480, 64): an unseen quad at z -4 (tex2d_add4, alpha 0) that keeps the chart out of the
-        // gap above the strips
-        r.fillRect(32, 2 * 48 + 64, 960, 32, 0, 0, 0, 1);
-        for (int k = 0; k < 4; ++k) at(k >= 2 && !laterPairs ? 7 + k : 5 + k, hs + 150.0f * float(k), 58);
-        r.fillRect(32, 64, 960, 96, 0, 0, 0, 1);               // (0, 0, 480, 48)
-        r.fillRect(32, 2 * 285 + 64, 960, 70, 0, 0, 0, 1);      // (0, 285, 480, 35)
-        at(0, 8, 4);
-        if (vs < 0) at(1, 218, 92);
-        if (vs > kPhoneHistoryLowest) at(2, 218, 276);
-        if (hs < 0) at(3, 0, 174);
-        if (hs > -120) at(4, 469, 174);
-        at(36, 4, 296);
-        const int pct = scenarioPercent(g);
-        const int digits[3] = {pct / 100, pct / 10 % 10, pct % 10};
-        for (int k = 0; k < 3; ++k) {
-            if ((k == 0 && pct < 100) || (k == 1 && pct < 10)) continue;
-            const short* d = kHistoryPiece[37];
-            r.drawQuadUV(t, 2 * (66 + 24.0f * float(k)) + 32, 2 * 288 + 64, d[2], d[3], d[0], d[1] + d[3] * float(digits[k]), d[2], d[3],
-                         1, 1, 1, a);
-        }
-        cr::MenuPainter& m = app.menu;
-        m.begin(r, app.windowTex, &app.font);
-        const PhoneMenu phoneMenu(app, m);
+    if (s.card < 0) { // __menuu_SccnariosPut, windows 0..5
         drawClockAndOz(app, m, a);
-        m.backButton(192, 286, false, 0, a);
+        m.picture(160, 8, 4, a);
+        sheet(0, 13, 48, a);
+        for (int i = 2; i < 8; ++i)
+            if (flags(app).flag(0x518 + i - 2)) sheet(1, 15 + 57.0f * float(i), 50, a);
+        rate(0, birthdayRate(app), a);
+        if (shown(app)) {
+            rate(1, festivalRate(app), a);
+            const int n = cards(app);
+            for (int i = 0; i + 1 < n; ++i) sheet(6, 89 + 94.0f * float(i), 200, a);
+            for (int i = 0; i < n; ++i) {
+                const float x = 94.0f * float(i);
+                if (done(app, i)) {
+                    sheet(9 + i, 8 + x, 177, a);
+                    sheet(14, 42 + x, 185, a);
+                } else {
+                    sheet(7, 8 + x, 177, a);
+                    sheet(8, 30 + x, 168 - float(s.bob), a);
+                }
+                if (s.cursor == i && s.keys) { // (keys: the port's cursor)
+                    const float lime[4] = {0xEB / 255.0f, 1, 0x4B / 255.0f, 0.35f * a};
+                    m.quad(8 + x, 177, 90, 62, lime, lime);
+                }
+            }
+        }
+        m.backBar(192, 288, false, a);
         return;
     }
-    // (z: the entries -8 under the pairs' strips -4; the way-in locks -4 over them while above y 688;
-    // the bands -3)
-    std::vector<std::array<float, 3>> over;
-    const float sy = app.scenariosScroll;
-    for (int i = 0; i < 41; ++i) {
-        const short* e = kHistoryEntry[i];
-        const float x = e[0] - 32, y = e[1] + 40 + sy;
-        const float h = e[2] == 0 ? 80.0f : e[2] == 1 ? 152.0f : 148.0f;
-        if (y > kHistoryBottom || y + h < kHistoryTop) continue;
-        const int st = scenarioState(g, i);
-        if (e[2] == 2) { // the wide finale: its two halves (29 / 30, past the screen's sides), or the long "?"
-            if (st >= 2) { // (kept to the 1024 layout: wider screens show past it)
-                auto half = [&](int n, float hx) {
-                    const short* p = rect(n);
-                    const float l = std::max(hx, 0.0f), rr = std::min(hx + p[2], 1024.0f);
-                    if (rr > l) r.drawQuadUV(t, l, y, rr - l, p[3], p[0] + (l - hx), p[1], rr - l, p[3], 1, 1, 1, a);
-                };
-                half(29, x - 72), half(30, x + 516);
-            } else bar(x + 4, y, x + 430, x + 998);
-            for (int k = 0; k < 4; ++k) // the four stories leading in: open or shut
-                if (st == 0 && !g.flag(kHistoryCleared[k])) piece(32, x + 108 + 256.0f * float(k), y - 34);
-                else piece(31, x + 121 + 256.0f * float(k), y - 20);
-        } else {
-            piece(st <= 1 ? (e[2] == 1 ? 12 : 11) : e[3], x, y);
-            if (st != 0) piece(31, x + 122, y - 20); // the way in: open / shut (the open one by the strips)
-            else if (y - 34 < 97) over.push_back({31, x + 122, y - 20});
-            else if (y - 34 < 688) over.push_back({32, x + 108, y - 34});
-            else piece(32, x + 108, y - 34);
+    // A card (windows 6..11): the picture (tex2d_add_sca at (pan, 96 + pan), 960 x 640, scaled
+    // about its middle; the sheet's 512 rows are all there is of it)
+    if (s.photo.id) {
+        const float w = 480 * s.zoom, h = 320 * s.zoom;
+        const float cx = 240 + s.panX / 2, cy = 48 + 160 + s.panY / 2;
+        m.imagePieceTo(s.photo, cx - w / 2, cy - h / 2, w, 256 * s.zoom, 0, 0, 960, 512, a);
+    }
+    const bool whole = done(app, s.card);
+    if (!whole && s.cardTex.id) { // window 7: the frame and the cells
+        card(1, 0, 48, a);
+        card(2, 0, 276, a);
+        card(3, 0, 55, a);
+        card(4, 350, 55, a);
+        for (int i = 0; i < 16; ++i) {
+            const int st = s.cell[size_t(i)];
+            card((st == 0 ? 6 : st == 1 ? 0x16 : 0x26) + i, cellX(i), cellY(i), a);
         }
-        if (st == 3) piece(e[2] == 0 ? 33 : e[2] == 1 ? 34 : 35, x + (e[2] == 2 ? 416 : 128), y); // cleared: the star
+        if (s.mode == 1)
+            for (int i = 0; i < 16; ++i)
+                if (s.canPush[size_t(i)]) card(5, cellX(i) - 13, cellY(i) - 3 - float(s.bob), a);
+        if (s.keys && s.mode == 1) {
+            const float lime[4] = {0xEB / 255.0f, 1, 0x4B / 255.0f, 0.35f * a};
+            m.quad(cellX(s.cursor), cellY(s.cursor), 55, 55, lime, lime);
+        }
     }
-    for (int k = 0; k < 4; ++k) // the pairs' strips over their columns (5..8; 9 / 10 not yet open)
-        piece(k >= 2 && !laterPairs ? 7 + k : 5 + k, -54 + 256.0f * float(k), kHistoryTop);
-    for (const auto& o : over) piece(int(o[0]), o[1], o[2]);
-    // The black bands, the heading, the arrows while there's more, Achievements %
-    r.fillRect(-32, -64, 1088, 96, 0, 0, 0, 1);
-    r.fillRect(-32, kHistoryBottom, 1088, 768 - kHistoryBottom, 0, 0, 0, 1);
-    piece(0, 8, -12); // ("Scenarios": the binary's -28 clips the word on this sheet)
-    if (sy < 0) piece(1, 436, 100);
-    if (sy > kHistoryBottom - (1272 + 40 + 80)) piece(2, 436, 616);
-    piece(36, 8, 656);
-    const int pct = scenarioPercent(g);
-    const int digits[3] = {pct / 100, pct / 10 % 10, pct % 10};
-    for (int k = 0; k < 3; ++k) {
-        if (k == 0 && pct < 100) continue;
-        if (k == 1 && pct < 10) continue;
-        const short* d = kHistoryPiece[37];
-        r.drawQuadUV(t, 132 + 48.0f * float(k), 640, d[2], d[3], d[0], d[1] + d[3] * float(digits[k]), d[2], d[3], 1, 1, 1, a);
+    // The bands over the picture's overhang (window 2; ours the whole screen's edges)
+    {
+        r.setOrigin(0);
+        const float L = r.uiX() + 2 * 16, R = r.uiX() + 2 * (480 + 16), T = 2 * (48 + 32), B = 2 * (284 + 32);
+        r.fillRect(0, 0, r.screenW(), T, 0, 0, 0, 1);
+        r.fillRect(0, B, r.screenW(), cr::Renderer::kLogicalH - B, 0, 0, 0, 1);
+        r.fillRect(0, T, L, B - T, 0, 0, 0, 1);
+        r.fillRect(R, T, r.screenW() - R, B - T, 0, 0, 0, 1);
+        r.setOrigin(r.uiX());
     }
-    cr::MenuPainter& m = app.menu;
-    m.begin(r, app.windowTex, &app.font);
-    m.backButton(272, 330, false, 0, a);
-    if (keyHints(app)) // (our key hints)
-        m.text("Up/Down: scroll  Esc: back", 300, 372, false, a * 0.8f, 9);
+    if (s.cardTex.id) card(0, 0, 0, a); // window 6: the card's name
+    if (whole && s.anim < 20) { // (the port's: the card done)
+        const float f = 1 - float(s.anim) / 20.0f;
+        const float wc[4] = {1, 1, 1, f};
+        m.quad(0, 48, 480, 236, wc, wc);
+    }
+    m.backButton(192, 288, false, s.bob, a); // window 10: < Back >
+    drawShopNumber(m, presentsUsed(app), 0, 296, 2, 12, a); // window 11: presents used / all
+    m.picture(66, 24, 296, a);
+    drawShopNumber(m, cards(app) == 5 ? 80 : 64, 36, 296, 2, 12, a);
 }
 
-void scenariosScrollBy(App& app, float d) {
-    const float lowest = app.renderer.phoneLayout() ? 2 * kPhoneHistoryLowest : kHistoryBottom - (1272 + 40 + 80) - 16;
-    app.scenariosScroll = std::clamp(app.scenariosScroll + d, lowest, 0.0f);
+void scenariosCard(App& app, int dir) { // the Back bar's < > (-3 / -2): the next card along
+    App::Scenarios& s = app.scc;
+    const int n = bingo::cards(app);
+    menuSound(app, se::kBack);
+    bingo::loadCard(app, (s.card + dir + n) % n);
 }
-void scenariosScrollSideways(App& app, float d) { // the iPhone layout's chart (tex2d)
-    if (app.renderer.phoneLayout()) app.scenariosHScroll = std::clamp(app.scenariosHScroll + d, -120.0f, 0.0f);
+
+void scenariosBack(App& app) {
+    App::Scenarios& s = app.scc;
+    menuSound(app, se::kBack);
+    if (s.card >= 0) { s.cursor = s.card; s.card = -1; s.anim = 0; } // (states 9 / 10: to the overview)
+    else closeScenarios(app);
+}
+
+void scenariosChoose(App& app) {
+    using namespace bingo;
+    App::Scenarios& s = app.scc;
+    if (s.card < 0) {
+        if (!shown(app)) return;
+        menuSound(app, se::kChoose);
+        const int c = std::clamp(s.cursor, 0, cards(app) - 1);
+        s.cursor = 0;
+        loadCard(app, c);
+        return;
+    }
+    if (done(app, s.card)) { // a whole picture: zoom in / out (state 8)
+        if (s.zoomDir) return;
+        s.zoomDir = s.zoom < kZoomMax ? 1 : 2;
+        menuSound(app, se::kChoose);
+        return;
+    }
+    if (s.mode != 1 || s.pushing >= 0) return;
+    if (s.canPush[size_t(s.cursor)] && s.cell[size_t(s.cursor)] == 0) {
+        menuSound(app, 0xaf);
+        s.canPush[size_t(s.cursor)] = false;
+        s.pushing = s.cursor, s.pushClock = 0;
+    } else menuSound(app, se::kBuzzer);
 }
 
 void scenariosKey(App& app, SDL_Keycode key) {
+    App::Scenarios& s = app.scc;
+    const bool zoomed = s.card >= 0 && s.zoom > bingo::kZoomMin;
     switch (key) {
-    case SDLK_UP: case SDLK_W: scenariosScrollBy(app, 96); break;
-    case SDLK_DOWN: case SDLK_S: scenariosScrollBy(app, -96); break;
-    case SDLK_PAGEUP: scenariosScrollBy(app, 480); break;
-    case SDLK_PAGEDOWN: scenariosScrollBy(app, -480); break;
-    case SDLK_LEFT: case SDLK_A: scenariosScrollSideways(app, 40); break;
-    case SDLK_RIGHT: case SDLK_D: scenariosScrollSideways(app, -40); break;
-    case SDLK_ESCAPE: case SDLK_BACKSPACE: case SDLK_AC_BACK: case SDLK_RETURN: menuSound(app, se::kBack); closeScenarios(app); break;
+    case SDLK_ESCAPE: case SDLK_BACKSPACE: case SDLK_AC_BACK: scenariosBack(app); return;
+    case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: case SDLK_E: scenariosChoose(app); return;
+    case SDLK_PAGEUP: case SDLK_Q: if (s.card >= 0 && !zoomed) scenariosCard(app, -1); return;
+    case SDLK_PAGEDOWN: case SDLK_R: if (s.card >= 0 && !zoomed) scenariosCard(app, 1); return;
     default: break;
     }
+    int dx = 0, dy = 0;
+    if (key == SDLK_LEFT || key == SDLK_A) dx = -1;
+    else if (key == SDLK_RIGHT || key == SDLK_D) dx = 1;
+    else if (key == SDLK_UP || key == SDLK_W) dy = -1;
+    else if (key == SDLK_DOWN || key == SDLK_S) dy = 1;
+    if (!dx && !dy) return;
+    s.keys = true;
+    if (s.card < 0) {
+        if (!dx || !bingo::shown(app)) return;
+        const int n = bingo::cards(app);
+        s.cursor = (s.cursor + dx + n) % n;
+        menuSound(app, se::kCursor);
+    } else if (zoomed) { // the photo pans (ComUty_PadPhotoProc's limits)
+        s.panX = std::clamp(s.panX - 96.0f * float(dx), -bingo::kPanX, bingo::kPanX);
+        s.panY = std::clamp(s.panY - 96.0f * float(dy), bingo::kPanUp, bingo::kPanDown);
+    } else if (s.mode == 1 && !bingo::done(app, s.card)) {
+        s.cursor = (s.cursor % 4 + dx + 4) % 4 + 4 * ((s.cursor / 4 + dy + 4) % 4);
+        menuSound(app, se::kCursor);
+    } else if (dx) scenariosCard(app, dx);
+}
+
+// A tap (menu units, the iPhone screen's): Prc's touch boxes
+void scenariosClick(App& app, float mx, float my) {
+    using namespace bingo;
+    App::Scenarios& s = app.scc;
+    auto in = [&](float x, float y, float w, float h) { return mx >= x && mx < x + w && my >= y && my < y + h; };
+    if (s.card < 0) {
+        if (shown(app))
+            for (int i = 0; i < cards(app); ++i)
+                if (in(8 + 94.0f * float(i), 177, 90, 62)) { s.cursor = i; scenariosChoose(app); return; }
+        if (in(192, 286, 256, 34)) scenariosBack(app); // BackButtonProc(1)
+        return;
+    }
+    if (in(248, 286, 120, 34)) { scenariosBack(app); return; } // BackButtonProc(2)
+    if (in(192, 286, 51, 34)) { scenariosCard(app, -1); return; }
+    if (in(373, 286, 51, 34)) { scenariosCard(app, 1); return; }
+    if (done(app, s.card)) {
+        if (in(0, 48, 480, 236)) scenariosChoose(app);
+        return;
+    }
+    if (s.mode == 1)
+        for (int i = 0; i < 16; ++i)
+            if (in(cellX(i), cellY(i), 55, 55)) { s.cursor = i; scenariosChoose(app); return; }
+}
+
+// A drag over a zoomed picture (tex2d units)
+void scenariosDrag(App& app, float dx, float dy) {
+    App::Scenarios& s = app.scc;
+    if (s.card < 0 || s.zoom <= bingo::kZoomMin || s.zoomDir) return;
+    s.panX = std::clamp(s.panX + dx, -bingo::kPanX, bingo::kPanX);
+    s.panY = std::clamp(s.panY + dy, bingo::kPanUp, bingo::kPanDown);
 }
 
 // ---- The Instruction Manual (Options; MuScrList + MsgUty: the topics, then the page) ----
@@ -7177,7 +7322,7 @@ void titleChoose(App& app, int i) {
     if (!titleChoiceReady(i)) { menuSound(app, se::kBuzzer); return; }
     menuSound(app, se::kChoose);
     if (i == 2) { openOptions(app, 0); return; } // SetOptionMenu + ModeOptionMenu(1)
-    if (i == 1) { openScenarios(app); return; }  // SetHistoryMenu
+    if (i == 1) { openScenarios(app, 0); return; }  // ModeSccnariosMenu(0), SetSccnariosMenu
     // Start: the boot script goes on (flag 0 clear) to Character Select (Util 4), then the pair's
     // save / load screen (Util 5)
     if (app.booting && app.runner.running()) {
@@ -11617,7 +11762,7 @@ void drawFrame(App& app, bool present = true) {
     }
     if (app.mode == Mode::Maps && app.battle.active) drawBattleHud(app, W, H);
     if (app.mode == Mode::Maps && app.titleOpen && !app.optionsOpen && !app.saveScreen.open && !app.resumePrompt &&
-        !app.charSelectOpen && !app.scenariosOpen && !app.manualOpen)
+        !app.charSelectOpen && !app.scc.open && !app.manualOpen)
         drawTitleMenu(app);
     if (app.optionsOpen) {
         for (app.optionsClock += dt; app.optionsClock >= 1.0f / kFramesPerSecond; app.optionsClock -= 1.0f / kFramesPerSecond)
@@ -11672,11 +11817,12 @@ void drawFrame(App& app, bool present = true) {
         ++app.charSelectAnim;
         drawCharSelect(app);
     }
-    if (app.scenariosOpen) {
-        ++app.scenariosAnim;
-        drawScenarios(app);
+    if (app.scc.open) {
+        for (app.scc.clock += dt; app.scc.clock >= 1.0f / kFramesPerSecond; app.scc.clock -= 1.0f / kFramesPerSecond)
+            stepScenarios(app);
+        if (app.scc.open) drawScenarios(app);
     }
-    if (app.campOpen && !app.optionsOpen) {
+    if (app.campOpen && !app.optionsOpen && !app.scc.open) {
         ++app.camp.anim;
         drawCamp(app);
     }
@@ -13374,21 +13520,49 @@ int runSelfTest(App& app) {
         manualKey(app, SDLK_ESCAPE);
         problems += app.manualOpen;
         problems += expectSounds("manual", {4, 4, 5, 3});
-        cr::GameState chart;
-        chart.setFlag(1092, true);
-        chart.setFlag(1093, true);
-        problems += scenarioState(chart, 0) != 3 || scenarioState(chart, 1) != 1 || scenarioState(chart, 2) != 0 ||
-                    scenarioState(chart, 40) != 0 || scenarioPercent(chart) != 3;
+        // Scenarios: the title's (mode 0, to look at) then the Camp's, a cell opened with a present
         openScenarios(app);
-        problems += !app.scenariosOpen || !app.scenariosSheet.id;
+        problems += !app.scc.open || !app.scc.sheet.id;
         app.lastTicks = 0;
         drawFrame(app, false);
-        scenariosKey(app, SDLK_DOWN);
-        problems += app.scenariosScroll >= 0;
         scenariosKey(app, SDLK_ESCAPE);
-        problems += app.scenariosOpen;
-        problems += expectSounds("scenarios", {3}); // scrolling is silent
-        std::printf("manual: %d topics; scenarios chart drawn\n", topics);
+        problems += app.scc.open;
+        problems += expectSounds("scenarios", {3});
+        int bingoProblems = 0;
+        {
+            const cr::GameState keepGame = app.game;
+            app.game.setFlag(0x642, true);
+            app.game.items[bingo::kItems[5][2]] = 1;
+            openScenarios(app, 1);
+            scenariosKey(app, SDLK_RIGHT);            // the second card
+            scenariosKey(app, SDLK_RETURN);
+            bingoProblems += app.scc.card != 1 || !app.scc.cardTex.id || !app.scc.photo.id || !app.scc.canPush[5] ||
+                             app.scc.canPush[4];
+            for (int k = 0; k < 5; ++k) scenariosKey(app, SDLK_RIGHT); // cell 0 -> 1 (wraps), down to 5
+            scenariosKey(app, SDLK_DOWN);
+            scenariosKey(app, SDLK_RETURN);
+            for (int f = 0; f < 10; ++f) stepScenarios(app);
+            bingoProblems += app.scc.cursor != 5 || app.scc.cell[5] != 2 || !app.game.flag(bingo::kOpenFlag[1] + 5) ||
+                             !app.game.flag(bingo::kPushFlag[0] + 5) || app.scc.canPush[5] || bingo::presentsUsed(app) != 1;
+            scenariosKey(app, SDLK_RETURN); // used: refused
+            for (int i = 0; i < 16; ++i) app.game.setFlag(bingo::kOpenFlag[1] + i, true);
+            bingo::refresh(app);
+            scenariosKey(app, SDLK_RETURN); // the whole picture: zoom
+            for (int f = 0; f < 10; ++f) stepScenarios(app);
+            bingoProblems += app.scc.zoom != bingo::kZoomMax;
+            scenariosKey(app, SDLK_LEFT);
+            bingoProblems += app.scc.panX <= 0;
+            app.lastTicks = 0;
+            drawFrame(app, false);
+            scenariosKey(app, SDLK_ESCAPE);
+            bingoProblems += app.scc.card != -1 || !app.scc.open;
+            scenariosKey(app, SDLK_ESCAPE);
+            bingoProblems += app.scc.open;
+            app.game = keepGame;
+        }
+        problems += bingoProblems;
+        std::printf("manual: %d topics; scenarios: bingo cards drawn, a cell opened from the Camp %s\n", topics,
+                    bingoProblems ? "NO" : "yes");
         std::printf("saves: save -> title Start -> load %s (map %d, flags, items, vars, Oz, party, play time, position); "
                     "resume point written, offered at the title and resumed, saved as you go %s; %d problems\n", loaded ? "ok" : "FAILED",
                     after.map, asYouGo ? "yes" : "NO", problems);
@@ -14555,16 +14729,14 @@ int runSelfTest(App& app) {
         drawFrame(app, false);
         errs += r.takeErrors();
         app.dialogue.clear();
-        openScenarios(app); // 2.2.0's chart scrolls sideways too, to -120, and down to its own end
-        for (int k = 0; k < 5; ++k) scenariosKey(app, SDLK_RIGHT);
-        for (int k = 0; k < 8; ++k) scenariosKey(app, SDLK_PAGEDOWN);
-        const bool chart = app.scenariosHScroll == -120 && app.scenariosScroll == 2 * kPhoneHistoryLowest;
+        openScenarios(app);
+        const bool chart = app.scc.sheet.id != 0;
         drawFrame(app, false);
         errs += r.takeErrors();
         closeScenarios(app);
         problems += !frame || !fills || !inverse || !corner || entries != 5 || !chart || errs;
         std::printf("iphone layout: 3:2 screen %s, the safe area fills it %s, taps map back %s, the corner button %s, "
-                    "camp %d plates, History scrolls both ways %s, %d render API errors; %d problems\n", frame ? "yes" : "NO",
+                    "camp %d plates, Scenarios drawn %s, %d render API errors; %d problems\n", frame ? "yes" : "NO",
                     fills ? "yes" : "NO", inverse ? "yes" : "NO", corner ? "opens" : "DOESN'T open", entries,
                     chart ? "yes" : "NO", errs, problems);
         mapErrors += problems;
@@ -15895,8 +16067,11 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         openLastBattle(app);
         for (int f = 0; f < 40 && app.lastBattle.open; ++f) stepLastBattle(app);
     }
-    if (app.captureMenu == 5) { openScenarios(app); app.scenariosAnim = 100; app.scenariosScroll = app.captureAt[0] == app.captureAt[0] ? -app.captureAt[0] : 0;
-        if (app.captureAt[1] == app.captureAt[1]) scenariosScrollSideways(app, -app.captureAt[1]); }
+    if (app.captureMenu == 5) { // --scenarios [--at card [mode]]
+        openScenarios(app, app.captureAt[1] == app.captureAt[1] ? int(app.captureAt[1]) : 0);
+        if (app.captureAt[0] == app.captureAt[0] && app.captureAt[0] >= 0) bingo::loadCard(app, std::clamp(int(app.captureAt[0]), 0, 4));
+        app.scc.anim = 100;
+    }
     if (app.captureMenu == 6) {
         openManual(app);
         app.manualAnim = 100;
@@ -16350,7 +16525,7 @@ namespace {
 // A screen that takes the cursor keys (else, on the field, the stick walks and the arrows would be
 // the viewer's own keys)
 bool padMenus(const App& app) {
-    return app.optionsOpen || app.manualOpen || app.scenariosOpen || app.saveScreen.open || app.charSelectOpen || app.campOpen ||
+    return app.optionsOpen || app.manualOpen || app.scc.open || app.saveScreen.open || app.charSelectOpen || app.campOpen ||
            app.lastBattle.open || (app.shop.open && app.shop.phase != App::Shop::Talk) || app.resumePrompt ||
            (app.mode == Mode::Maps && (app.titleOpen || app.battle.active || app.worldChoiceOpen || app.choiceFlag >= 0)) ||
            app.puzzle.pkState == 1;
@@ -16452,7 +16627,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             break;
         }
         if (event->key.key == SDLK_F3) { app.showHud = !app.showHud; break; } // the status / key help at the top
-        if (event->key.key == SDLK_V && !app.manualOpen && !app.scenariosOpen) { // the Options screen
+        if (event->key.key == SDLK_V && !app.manualOpen && !app.scc.open) { // the Options screen
             if (app.optionsOpen) app.optionsOpen = false;
             else openOptions(app, 0);
             break;
@@ -16465,7 +16640,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             optionsKey(app, event->key.key);
             break;
         }
-        if (app.scenariosOpen) {
+        if (app.scc.open) {
             scenariosKey(app, event->key.key);
             break;
         }
@@ -16637,7 +16812,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             if (app.vitaLogo.phase == 2) app.vitaLogo.skip = true;
             break;
         }
-        if (app.manualOpen || app.scenariosOpen) {
+        if (app.manualOpen || app.scc.open) {
             int ww = 0, wh = 0;
             SDL_GetWindowSize(app.window, &ww, &wh);
             const float kx = ww > 0 ? float(app.renderer.frameWidth()) / float(ww) : 1.0f;
@@ -16647,10 +16822,12 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
                 float lx, ly;
                 app.renderer.toLogical(event->button.x * kx, event->button.y * ky, lx, ly);
                 float mx, my;
-    menuPoint(app, lx, ly, mx, my);
-                const float backX = app.renderer.phoneLayout() ? 192 : 272, backY = app.renderer.phoneLayout() ? 286 : 330;
-                if (my >= backY && my < backY + 24 && mx >= backX && mx < backX + 232) { menuSound(app, se::kBack); closeScenarios(app); }
-                else app.dragging = true; // drag to scroll
+                menuPoint(app, lx, ly, mx, my);
+                App::Scenarios& sc = app.scc;
+                if (sc.card >= 0 && sc.zoom > bingo::kZoomMin && my >= 48 && my < 284) { // a zoomed picture: drag, or tap to zoom out
+                    app.dragging = true;
+                    sc.dragMoved = 0;
+                } else scenariosClick(app, mx, my);
             }
             break;
         }
@@ -16738,6 +16915,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         }
         break;
     case SDL_EVENT_MOUSE_BUTTON_UP:
+        if (app.dragging && app.scc.open && app.scc.dragMoved < 8) scenariosChoose(app);
         app.dragging = false;
         if (app.mode == Mode::Maps && app.puzzle.pkState == 1) {
             int ww = 0, wh = 0;
@@ -16748,18 +16926,19 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         }
         break;
     case SDL_EVENT_MOUSE_MOTION:
-        if (app.dragging && app.scenariosOpen) { // the chart follows the finger
+        if (app.dragging && app.scc.open) { // the zoomed picture follows the finger (tex2d: 640 high)
             int wh = 0;
             SDL_GetWindowSize(app.window, nullptr, &wh);
-            scenariosScrollBy(app, event->motion.yrel * (wh > 0 ? 768.0f / float(wh) : 1.0f));
-            scenariosScrollSideways(app, event->motion.xrel * (wh > 0 ? 384.0f / float(wh) : 0.5f)); // (tex2d)
+            const float k = wh > 0 ? 768.0f / float(wh) : 1.0f;
+            app.scc.dragMoved += std::abs(event->motion.xrel * k) + std::abs(event->motion.yrel * k);
+            scenariosDrag(app, event->motion.xrel * k, event->motion.yrel * k);
         } else if (app.dragging && app.mode != Mode::Textures) {
             app.yaw -= event->motion.xrel * 0.01f;
             app.pitch = std::clamp(app.pitch + event->motion.yrel * 0.01f, -1.5f, 1.5f);
         }
         break;
     case SDL_EVENT_MOUSE_WHEEL:
-        if (app.scenariosOpen) { scenariosScrollBy(app, event->wheel.y * 96); break; }
+        if (app.scc.open) break;
         if (app.manualOpen) { manualKey(app, event->wheel.y > 0 ? SDLK_UP : SDLK_DOWN); break; }
         app.zoom = std::clamp(app.zoom * (event->wheel.y > 0 ? 0.9f : 1.1f), 0.1f, 10.0f);
         break;

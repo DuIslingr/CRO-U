@@ -19,8 +19,9 @@ namespace cr {
 
 // Save-game state the scripts read and write.
 struct GameState {
+    static constexpr int kFlagCount = 0x1400; // ChkFlag / SetFlag: 0..0x13ff
     std::unordered_map<int, int32_t> vars; // var(n); EvtStart sets var 62 = area, 63 = map
-    std::vector<uint32_t> flags = std::vector<uint32_t>(128, 0); // flag(0..4095)
+    std::vector<uint32_t> flags = std::vector<uint32_t>(kFlagCount / 32, 0); // flag(0..5119)
 
     std::unordered_map<int, int> items;      // item number -> count (Uty_AddItem / Uty_DelItem)
     std::vector<int> openedBoxes;            // per area*1000 + box id (Uty_SetOpenedTresureBox)
@@ -46,9 +47,9 @@ struct GameState {
     uint32_t frmScene = 0;                   // file offset of the scene, 0 = none
     uint32_t frmRecord = 0;                  // file offset of the current record
 
-    bool flag(int n) const { return n >= 0 && n < 4096 && (flags[n >> 5] >> (n & 31) & 1); }
+    bool flag(int n) const { return n >= 0 && n < kFlagCount && (flags[n >> 5] >> (n & 31) & 1); }
     void setFlag(int n, bool on) {
-        if (n < 0 || n >= 4096) return;
+        if (n < 0 || n >= kFlagCount) return;
         if (on) flags[n >> 5] |= 1u << (n & 31);
         else flags[n >> 5] &= ~(1u << (n & 31));
     }
