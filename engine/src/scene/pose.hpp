@@ -15,8 +15,9 @@ void computeWorld(const Skeleton& skel, const Action* action, float time, std::v
 
 // True if `action` animates this skeleton (one segment per node).
 bool actionFits(const Skeleton& skel, const Action& action);
-// One to four segments short of it: a package's motions that leave a model's last nodes at rest
-// (Escher's gene casts 56 of 58, m103's staged attack 148 of 149). Motions with more segments
+// One to six segments short of it: a package's motions that leave a model's last nodes at rest
+// (Escher's gene casts 56 of 58, m103's staged attack 148 of 149; Omega's m222a..c / c222a 136 of
+// 142 - m222b, group 725's, has no .mca of its own). Motions with more segments
 // than nodes (m104's 150 of 148, c109 / c111) stay out: their mapping isn't known.
 bool actionNearlyFits(const Skeleton& skel, const Action& action);
 

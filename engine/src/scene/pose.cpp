@@ -60,7 +60,7 @@ bool actionFits(const Skeleton& skel, const Action& action) {
 
 bool actionNearlyFits(const Skeleton& skel, const Action& action) {
     const long d = long(skel.nodes.size()) - long(action.segments.size());
-    return !action.segments.empty() && d >= 1 && d <= 4;
+    return !action.segments.empty() && d >= 1 && d <= 6;
 }
 
 void computeWorld(const Skeleton& skel, const Action* action, float time, std::vector<Mat4>& world) {

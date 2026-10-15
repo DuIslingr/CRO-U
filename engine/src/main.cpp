@@ -8780,7 +8780,9 @@ void stepEvents(App& app) {
     // Finished: report, and refresh what the script's flags changed (an opened box loses its lid)
     trackerSceneEnd(app);
     const cr::EventResult& r = app.runner.result();
-    if (!r.error.empty()) SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "event: %s", r.error.c_str());
+    if (!r.error.empty())
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "event (%s, area %d map %d): %s", app.runnerWhat.c_str(), app.area,
+                    app.mapNumber, r.error.c_str());
     if (!app.runnerWhat.empty()) {
         app.lastEvent = app.runnerWhat;
         for (int item : r.itemsGained) {
@@ -13600,6 +13602,8 @@ int runSelfTest(App& app) {
                     (withKey ? gotWith : gotWithout) = app.game.items.count(row.item) ? app.game.items[row.item] : 0;
                 }
                 keysLeft = app.game.items.count(2) ? app.game.items[2] : 0;
+                app.runner.stop();
+                app.dialogue.clear();
             }
         }
         const bool ok = gotWithout == 0 && gotWith == 1 && keysLeft == 0;
@@ -13741,7 +13745,7 @@ int runSelfTest(App& app) {
         std::printf("new game: the opening took %d frames, %d pages, %d voice lines, ends on map %d%s\n", openingFrames,
                     openingPages, app.voicesPlayed, app.mapNumber, app.runner.running() ? " (STILL RUNNING)" : "");
         const int voicesBefore = app.voicesPlayed;
-        if (app.runner.running() || app.mapNumber != 97) ++mapErrors;
+        if (app.runner.running() || app.mapNumber != 70) ++mapErrors; // (Omega: the planet 69, 71, then the Ark's deck 70)
         int talked = 0, pages = 0, choices = 0, maxPortraits = 0, plates = 0, unfinished = 0;
         std::vector<int> ids;
         for (const cr::FieldNpc& n : app.npcs)
