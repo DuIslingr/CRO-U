@@ -296,6 +296,10 @@ void Renderer::screenToLayout(float& x, float& y) const {
     y = y / kPhoneScale + 64.0f;
 }
 
+void Renderer::setAdditive(bool on) {
+    if (dev_) dev_->setQuadAdditive(on);
+}
+
 void Renderer::setColorWrite(bool on) { dev_->setColorWrite(on); }
 
 } // namespace cr

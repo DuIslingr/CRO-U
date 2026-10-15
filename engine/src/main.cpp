@@ -1835,7 +1835,7 @@ void placePlayer(App& app) {
 // field-only effects need the field's bit (G+0x364 & 0x40) - in a battle (bit 0x20) the weather
 // uses its own copies. Layers at z -1998 (the magma, the elevator shaft, the space and sky
 // backdrops: 11..22, 26..28, 30) go behind the field's painting, the rest over it.
-// (Not done: 0x4a's / 0x4d's additive blending.)
+// 0x4a / 0x4d (fireflies, smoke) blend additively (mceAppearance_setBlendMode 1).
 namespace scenefx {
 struct SetTexture { int set; const char* file; int slot; int w, h; };
 // ScnEffectRead's sets (Omega 1.0.0): file, slot, tex2d_read's logical size
@@ -2048,6 +2048,9 @@ void drawSceneLayer(App& app, int slot, float x, float y, float w, float h, floa
     if (w >= 512) { mx -= extra; u -= extra; w += 2 * extra; }
     const float a = float(alpha & 255) / 255.0f;
     const float u0 = u - std::floor(u / lw) * lw, v0 = v - std::floor(v / lh) * lh;
+    // ScnEffectRead: d03's fireflies (0x4a) and d06's smoke (0x4d) get mceAppearance_setBlendMode(1)
+    const bool additive = slot == 0x4a || slot == 0x4d;
+    if (additive) r.setAdditive(true);
     for (float dy = 0; dy < h;) {
         const float vv = std::fmod(v0 + dy, lh), sh = std::min(lh - vv, h - dy);
         for (float dx = 0; dx < w;) {
@@ -2057,6 +2060,7 @@ void drawSceneLayer(App& app, int slot, float x, float y, float w, float h, floa
         }
         dy += sh;
     }
+    if (additive) r.setAdditive(false);
 }
 
 // ScnEffectProc's layers at z -1998, drawn before the field's painting: 11 / 12 the magma, 13..22,

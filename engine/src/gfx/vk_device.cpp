@@ -69,6 +69,7 @@ constexpr VkFormat kReactiveFormat = VK_FORMAT_R8_UNORM;    // scene: reactive m
 constexpr uint32_t kScenePipeline = 1u << 16;               // pipeline key: the scene's
 constexpr uint32_t kSceneDepthWrite = 1u << 2;              // scene key: the draw writes depth
 constexpr uint32_t kQuadKey = 1u | 2u | 4u << 4 | 5u << 8;  // colour writes, src alpha / 1 - src alpha
+constexpr uint32_t kQuadAddKey = 1u | 2u | 4u << 4 | 1u << 8; // colour writes, src alpha / one (additive)
 // What can have written a colour target last (attachment stores, an upscaler, a blit)
 constexpr VkAccessFlags kColorWrites =
     VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -749,13 +750,15 @@ public:
     }
 
     void setColorWrite(bool on) override { colorWrite_ = on; }
+    void setQuadAdditive(bool on) override { quadAdditive_ = on; }
+    bool quadAdditive_ = false;
 
     void drawQuad(const Texture& tex, const float* v, const float* proj, const float* rgba) override {
         if (!cmd_ || !tex.id || tex.id > textures_.size() || !textures_[tex.id - 1].image) return;
         VkBuffer buf;
         VkDeviceSize off;
         if (!ringWrite(v, sizeof(float) * 24, buf, off)) return;
-        bind(inScene_ ? sceneQuadPipeline_ : quadPipeline_);
+        bind(quadAdditive_ ? (inScene_ ? sceneQuadAddPipeline_ : quadAddPipeline_) : inScene_ ? sceneQuadPipeline_ : quadPipeline_);
         vkCmdSetCullMode(cmd_, VK_CULL_MODE_NONE);
         vkCmdSetFrontFace(cmd_, VK_FRONT_FACE_COUNTER_CLOCKWISE);
         vkCmdSetDepthTestEnable(cmd_, VK_FALSE);
@@ -1121,8 +1124,12 @@ private:
     // 2D quads: alpha blending (GL's BlendFunc applies to alpha too)
     bool createQuadPipelines() {
         quadPipeline_ = makePipeline(true, kQuadKey);
-        if (upscaleCaps_) sceneQuadPipeline_ = makePipeline(true, kQuadKey | kScenePipeline);
-        return quadPipeline_ != VK_NULL_HANDLE;
+        quadAddPipeline_ = makePipeline(true, kQuadAddKey);
+        if (upscaleCaps_) {
+            sceneQuadPipeline_ = makePipeline(true, kQuadKey | kScenePipeline);
+            sceneQuadAddPipeline_ = makePipeline(true, kQuadAddKey | kScenePipeline);
+        }
+        return quadPipeline_ != VK_NULL_HANDLE && quadAddPipeline_ != VK_NULL_HANDLE;
     }
 
     void destroyPipelines() {
@@ -1130,7 +1137,9 @@ private:
         pipelines_.clear();
         if (quadPipeline_) vkDestroyPipeline(device_, quadPipeline_, nullptr);
         if (sceneQuadPipeline_) vkDestroyPipeline(device_, sceneQuadPipeline_, nullptr);
-        quadPipeline_ = sceneQuadPipeline_ = VK_NULL_HANDLE;
+        if (quadAddPipeline_) vkDestroyPipeline(device_, quadAddPipeline_, nullptr);
+        if (sceneQuadAddPipeline_) vkDestroyPipeline(device_, sceneQuadAddPipeline_, nullptr);
+        quadPipeline_ = sceneQuadPipeline_ = quadAddPipeline_ = sceneQuadAddPipeline_ = VK_NULL_HANDLE;
     }
 
     // key: bit 0 colour writes, bit 1 blending, bits 4-7 source factor, bits 8-11 destination,
@@ -1696,6 +1705,7 @@ private:
     VkShaderModule quadVert_ = VK_NULL_HANDLE, quadFrag_ = VK_NULL_HANDLE, meshVert_ = VK_NULL_HANDLE,
                    meshFrag_ = VK_NULL_HANDLE;
     VkPipeline quadPipeline_ = VK_NULL_HANDLE, bound_ = VK_NULL_HANDLE;
+    VkPipeline quadAddPipeline_ = VK_NULL_HANDLE, sceneQuadAddPipeline_ = VK_NULL_HANDLE;
     VkDescriptorSet boundSet_ = VK_NULL_HANDLE;
     std::map<uint32_t, VkPipeline> pipelines_;
     std::array<VkSampler, 32> samplers_{};

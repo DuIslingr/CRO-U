@@ -73,6 +73,8 @@ public:
     virtual void setViewport(float x, float y, float w, float h) = 0;
     virtual void clearDepth() = 0;
     virtual void setColorWrite(bool on) = 0;
+    // 2D quads drawn additively (src alpha, one) until switched back - the scene effects' tex2d flag
+    virtual void setQuadAdditive(bool /*on*/) {}
     // A textured quad: six vertices of (x, y, u, v); `proj` maps them to clip space (GL style)
     virtual void drawQuad(const Texture& tex, const float* vertices24, const float* proj16, const float* rgba) = 0;
     virtual void drawMesh(const GpuMesh& mesh, const Texture* tex, const float* mvp16, const MeshShading& shading,

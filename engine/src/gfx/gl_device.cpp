@@ -285,12 +285,14 @@ public:
         const GLboolean v = on ? GL_TRUE : GL_FALSE;
         gl::ColorMask(v, v, v, v);
     }
+    void setQuadAdditive(bool on) override { quadAdditive_ = on; }
+    bool quadAdditive_ = false;
 
     void drawQuad(const Texture& tex, const float* v, const float* proj, const float* rgba) override {
         gl::Disable(GL_DEPTH_TEST);
         gl::Disable(GL_CULL_FACE);
         gl::Enable(GL_BLEND);
-        gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        gl::BlendFunc(GL_SRC_ALPHA, quadAdditive_ ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
         gl::UseProgram(program_);
         gl::UniformMatrix4fv(uProj_, 1, GL_FALSE, proj);
         gl::Uniform1i(uTex_, 0);

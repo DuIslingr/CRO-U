@@ -86,6 +86,7 @@ public:
     void end3D();
     // Colour writes on/off (glColorMask); off draws depth only, e.g. field occluders.
     void setColorWrite(bool on);
+    void setAdditive(bool on); // 2D quads added onto what's there (src alpha, one) until switched off
     float aspect() const { return screenW_ / kLogicalH; }
     float screenW() const { return screenW_; }         // logical width of the whole screen
     float uiX() const { return (screenW_ - kLogicalW) * 0.5f; } // where the 1024-wide layout starts
