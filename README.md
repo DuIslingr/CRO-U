@@ -121,6 +121,7 @@ every function's C), names carried between builds by `tools/ghidra/match_functio
 | `docs/STATUS.md` | each part of the port and the original's functions it follows |
 | `docs/ENGINE.md` | the engine's notes inherited from CR1:U: building, tools, the viewer, CR1's status |
 | `docs/FORMATS.md` | the file formats (CR1's; Omega's differences added as they're found) |
+| `docs/ANDROID.md` | the Android release's APK: what it holds, its screen layout (`tools/re_setup_android.sh`) |
 | `engine/` | the C++17 / SDL3 engine and `crtool` |
 | `tools/` | analysis / extraction tools; they work on your own copy |
 | `re/`, `extracted/` | (not in the repository) local RE output and decoded assets - never commit or share |
