@@ -17,6 +17,9 @@ struct StageCamera {
     int hitRadius = -1;                // player wall-sphere radius (+68), <= 0 = default 5
     int rect[4] = {0, 0, 0, 0};        // +44: x, y, w, h of the painting in the view (the scroll limits)
     int lookHeight = 0;                // +70: added to the player's height + 7 when the camera follows
+    // +60 / +62: the painting and the layer over it (fldread_prc: read_img_set of kTex2dImage[n]
+    // into slots 0 / 1), +64: the stage's alpha model (_stgalphaname); -1 none
+    int background = -1, foreground = -1, alphaModel = -1;
     std::string eventFile;
     int area = -1;      // index of the area (event file) the record came from
     int mapNumber = -1;

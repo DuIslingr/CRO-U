@@ -78,6 +78,9 @@ bool loadStageCamera(const std::string& dataDir, int mapNumber, StageCamera& out
         int16_t look = 0;
         rd(f, rec + 70, look);
         out.lookHeight = look;
+        int16_t layer[3] = {-1, -1, -1};
+        for (int k = 0; k < 3; ++k) rd(f, rec + 60 + 2 * size_t(k), layer[k]);
+        out.background = layer[0], out.foreground = layer[1], out.alphaModel = layer[2];
         std::memcpy(out.eye, f.data() + rec, 12);
         std::memcpy(out.target, f.data() + rec + 12, 12);
         std::memcpy(&out.fovDegrees, f.data() + rec + 24, 4);

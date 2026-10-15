@@ -264,21 +264,22 @@ struct App {
         int t = 0, frames = 0;
         int mapScrolls = 0;                // Mapscroll ops seen (self-test)
     } scroll;
-    // Scene effects (ScnEffectRead / ScnEffectStart / ScnEffectProc): a dungeon's weather drawn over
-    // the field - fog, snow, rain, sun. The set's textures (Tex2d slots 49..72), which effects are on,
-    // their frame counters and UpdateRandom's three fading alpha channels
+    // Scene effects (Omega's ScnEffectRead / ScnEffectStart / ScnEffectProc): a field's weather and
+    // backdrops. The set's textures (tex2d slots 0x30..0x58, with tex2d_read's logical sizes), which
+    // effects are on (1..30), each effect's two counters (+0x178 / +0x180 of its own slot) and
+    // UpdateRandom's fading alpha channels
     struct SceneFx {
         int set = -1;
-        std::array<cr::Texture, 24> tex;   // slot 49 + i
-        std::array<bool, 21> on{};
-        std::array<int, 21> timerA{}, timerB{};
-        struct Channel {
-            int marker = -1, state = 0, count = 0, holdLen = 0;
-            int alpha = 255, inc = 0, fadeIn = 1, fadeOut = 1, hold2 = 1;
+        std::array<cr::Texture, 41> tex;   // slot 0x30 + i
+        std::array<float, 41> texW{}, texH{};
+        std::array<bool, 31> on{};
+        std::array<int, 31> timerA{}, timerB{};
+        struct Channel { // InitRandom / UpdateRandom: _s_type, _s_alpha, _s_speed, _s_interval0..3, _s_mode, _s_count
+            int type = -1, alpha = 0, speed = 0, iv[4] = {}, mode = 0, count = 0;
         } ch[3];
-        int holdMin = 60, holdMax = 120;
+        int maxTime = 0, minTime = 0;      // _s_maxTime / _s_minTime (shared)
         uint32_t rng = 12345;
-        int spaceDrift = 0, spaceRise = 0; // 0xddfb8: the fog's drift (0..480); 0xddfb4: the rise (Up +1, Down -1)
+        int frameCt = 0, frameCt1 = 0;     // _g_nFrameCt / _g_nFrameCt1: effect 28's scroll (not reset by a set)
     } fx;
     struct Portrait {                      // Tex2d slots (+0xbd10 + slot * 0x70 in the original)
         cr::Texture tex;
@@ -1278,6 +1279,17 @@ void showMap(App& app, int index, int forcedMap, int forcedArea) {
     for (size_t k = 1; k < app.stageFit.size(); ++k)
         if (app.stageFit[k] > app.stageFit[app.stageCamIndex] + 1e-4f) app.stageCamIndex = int(k);
     if (app.haveStageCam) app.stageCam = app.stageCams[app.stageCamIndex];
+    // fldread_prc: the painting and its overlay as the stage record names them (Tex2d's image list) -
+    // d0530's are -b00b00 / -b00b01 - in place of the names guessed from the field's
+    if (app.haveStageCam && app.stageCam.background >= 0 && app.stageCam.background < cr::kNumTex2dImages) {
+        cr::Texture keep[2] = {app.background, app.foreground};
+        app.background = app.foreground = cr::Texture();
+        loadLayer(cr::kTex2dImage[app.stageCam.background], app.background);
+        if (app.stageCam.foreground >= 0 && app.stageCam.foreground < cr::kNumTex2dImages)
+            loadLayer(cr::kTex2dImage[app.stageCam.foreground], app.foreground);
+        if (app.background.id) { app.renderer.destroy(keep[0]); app.renderer.destroy(keep[1]); }
+        else { app.renderer.destroy(app.foreground); app.background = keep[0], app.foreground = keep[1]; }
+    }
     app.collisionPolys = int(col.polygons.size());
     // Frame the collision (props live inside it)
     const auto& b0 = col.boundsMin;
@@ -1808,243 +1820,374 @@ void placePlayer(App& app) {
 }
 
 // The viewer's side of a running script (see cr::EventHost).
-// ---- Scene effects (ScnEffectRead / ScnEffectStart / ScnEffectProc) ----
-// A dungeon's weather: call 2020 loads its set's textures into Tex2d slots 49..72 (the "(128)"
-// copies are the battles'), call 2009 turns effect n on or off. Every frame each effect on draws
-// its layers: 512 x 384 windows of a wrapping texture over the whole screen (tex2d_add at
-// (-16, -32) in the iPhone's 480 x 320 space, which the iPad centres in its 512 x 384), one texel
-// to a menu unit, moving by fixed steps each frame and by half the field's scroll the other way;
-// some layers' alpha breathes (UpdateRandom: fade in to 255, hold a random while, fade out,
-// hold). In battles (G+0x2c0 bit 5 instead of the field's bit 6) the weather uses the "(128)"
-// copies, each in the slot after its own, with no field scroll. Effects 6..8 / 12..20 are the
-// tower's Space backdrop (ScnEffProc_Space_Stop / Up / Down, variants 0..2): set 4's 512 x 1024
-// paintings drawn screen-fixed at the back (z -1998), scrolling up or down, the later variants
-// with their fog drifting both ways over the top 256 rows. Effect 1 (a blinking overlay from
-// slot 47, which nothing found loads) isn't drawn.
+// ---- Scene effects (Omega: ScnEffectRead / ScnEffectStart / ScnEffectStop / ScnEffectProc) ----
+// Call 2020 (Uty_ScnEffectRead) reads set var 0's textures into tex2d slots 0x30..0x58, call 2009
+// (Uty_ScnEffect_Init) turns effect n (1..30) on or off. Every 30 Hz frame ScnEffectProc runs each
+// effect on: its counters, UpdateRandom's fading alpha channels, and its layers - tex2d_add over
+// the screen's rectangle (the iPad's adj = (-16, -32) 512 x 384 in tex2d units), the texture's
+// (u, v) window wrapping, moving with its counters and by half the field's scroll the other way.
+// The weather (2..10, 23's grass, 29) runs only with the Options' Environment Effects on (GetScreenEffectState);
+// field-only effects need the field's bit (G+0x364 & 0x40) - in a battle (bit 0x20) the weather
+// uses its own copies. Layers at z -1998 (the magma, the elevator shaft, the space and sky
+// backdrops: 11..22, 26..28, 30) go behind the field's painting, the rest over it.
+// (Not done: effect 1, a blinking overlay of syuutyuusen's pieces (bkanTexUv); 0x4a's / 0x4d's
+// additive blending.)
 namespace scenefx {
-struct SetTexture { int set; const char* file; int slot; };
+struct SetTexture { int set; const char* file; int slot; int w, h; };
+// ScnEffectRead's sets (Omega 1.0.0): file, slot, tex2d_read's logical size
 constexpr SetTexture kSetTextures[] = {
-    {0, "d0101_snow", 61}, {0, "d0101_fog", 64}, {0, "d0117_fog", 51},
-    {0, "d0101_snow(128)", 62}, {0, "d0101_fog(128)", 65}, {0, "d0117_fog(128)", 52},
-    {1, "d0201_sun", 69}, {1, "d0209_fog", 53}, {1, "d0209_fog(128)", 54},
-    {2, "d0307_fog", 49}, {2, "d0307_fog(128)", 50},
-    {3, "d0401_rain01", 55}, {3, "d0401_rain02", 57}, {3, "d0401_fog", 59},
-    {3, "d0401_rain01(128)", 56}, {3, "d0401_rain02(128)", 58}, {3, "d0401_fog(128)", 60},
-    {4, "d0501-b00a00", 66}, {4, "d0507-b00a00", 67}, {4, "d0511-b00a00", 68}, {4, "d0507_fog", 71}, {4, "d0511_fog", 72},
-    {5, "p0001_fog", 70},
+    {0, "t01_Emergency", 0x46, 4, 4}, {0, "t01_Emergency", 0x47, 4, 4}, {0, "t01_Emergency", 0x48, 4, 4},
+    {1, "d01_cr2snow02", 0x3c, 128, 128}, {1, "d01_cr2fog02", 0x3e, 256, 256}, {1, "d01_cr2smoke", 0x32, 256, 256},
+    {1, "d01_cr2snow02", 0x3d, 256, 256}, {1, "d01_cr2fog02", 0x3f, 256, 256}, {1, "d01_cr2smoke", 0x33, 256, 256},
+    {1, "d01_frame01", 0x45, 512, 512}, // (_ipad on the iPad: chk_hd_name)
+    {2, "d02_cr2rain01", 0x36, 256, 256}, {2, "d02_cr2rain02", 0x38, 256, 256}, {2, "d02_cr2fog", 0x3a, 256, 256},
+    {2, "d02_cr2rain01", 0x37, 256, 256}, {2, "d02_cr2rain02", 0x39, 256, 256}, {2, "d02_cr2fog", 0x3b, 256, 256},
+    {3, "d03_cr2fog", 0x30, 256, 256}, {3, "d03_cr2fog", 0x31, 256, 256}, {3, "d03_cr2Firefly", 0x4a, 256, 256},
+    {4, "d04_cr2Ash", 0x4b, 256, 256}, {4, "d04_cr2fog", 0x4c, 256, 256},
+    {5, "p0001_fog", 0x44, 512, 256}, {5, "d0530_bg01", 0x58, 1024, 1024},
+    {6, "d06_smoke", 0x4d, 256, 256}, {6, "d06_Magma", 0x4e, 256, 256}, {6, "d0602_Magma", 0x4f, 256, 256},
+    {7, "d06_elv01", 0x50, 512, 1024}, {7, "d06_elv02", 0x51, 512, 1024}, {7, "d06_elv03", 0x52, 512, 1024},
+    {8, "d06_canv", 0x53, 512, 512}, {8, "d0612_grass", 0x54, 256, 256},
+    {9, "d06_frame01", 0x55, 512, 512}, {9, "d06_frame02", 0x56, 512, 512},
+    {10, "d0501-b00a00", 0x40, 512, 1024},
 };
-// UpdateRandom's channels as each effect sets them up (marker = the effect that did)
-struct ChannelInit { int inc, fadeIn, fadeOut, hold2, alpha; };
+constexpr int kFirstSlot = 0x30, kSlots = 41;
+// The iPad's screen rectangle (ScnEffectStart's _adj_xx / yy / ww / hh) in tex2d units
+constexpr float kAdjX = -16, kAdjY = -32, kAdjW = 512, kAdjH = 384;
 } // namespace scenefx
 
-void loadSceneEffectSet(App& app, int set) {
+void loadSceneEffectSet(App& app, int set) { // ScnEffectRead: slots 0x30..0x58 cleared, the set's read
     App::SceneFx& fx = app.fx;
-    set = std::clamp(set, 0, 5);
-    if (fx.set == set) return;
+    if (set < 0 || set > 10) return;
     for (cr::Texture& t : fx.tex) app.renderer.destroy(t);
+    fx.texW.fill(0), fx.texH.fill(0);
     fx.set = set;
     for (const auto& st : scenefx::kSetTextures) {
         if (st.set != set) continue;
         cr::Image img;
-        if (loadImage(app, std::string(st.file) + ".mct", img)) fx.tex[size_t(st.slot - 49)] = app.renderer.upload(img);
+        const size_t k = size_t(st.slot - scenefx::kFirstSlot);
+        if (loadImage(app, std::string(st.file) + ".mct", img)) fx.tex[k] = app.renderer.upload(img);
+        fx.texW[k] = float(st.w), fx.texH[k] = float(st.h);
     }
 }
 
-void endSceneEffects(App& app) { // ScnEffectEnd (and the textures with it)
+void endSceneEffects(App& app) { // ScnEffectEnd: every effect stopped, the textures gone
     for (cr::Texture& t : app.fx.tex) app.renderer.destroy(t);
     const uint32_t rng = app.fx.rng;
+    const int ct = app.fx.frameCt, ct1 = app.fx.frameCt1;
     app.fx = App::SceneFx();
-    app.fx.rng = rng;
+    app.fx.rng = rng, app.fx.frameCt = ct, app.fx.frameCt1 = ct1;
 }
 
 void setSceneEffect(App& app, bool on, int id) { // ScnEffectStart / ScnEffectStop
-    if (id < 0 || id >= 21) return;
+    if (id < 0 || id >= 31) return;
     App::SceneFx& fx = app.fx;
-    if (on && !fx.on[size_t(id)]) { fx.timerA[size_t(id)] = fx.timerB[size_t(id)] = 0; }
-    fx.on[size_t(id)] = on;
-}
-
-// The effect's channels, set up the first time it runs (its marker)
-void initSceneChannels(App& app, int id) {
-    using scenefx::ChannelInit;
-    App::SceneFx& fx = app.fx;
-    const int marker = id == 9 ? 2 : id; // effect 9 shares effect 2's setup
-    std::vector<ChannelInit> init;
-    int holdMin = 60, holdMax = 120;
-    if (marker == 2) init = {{3, 40, 40, 60, 135}, {3, 40, 40, 60, 135}};
-    else if (marker == 4) init = {{5, 40, 40, 30, 55}, {3, 40, 40, 30, 135}};
-    else if (marker == 5) { init = {{5, 40, 40, 30, 55}, {1, 120, 120, 60, 135}, {1, 120, 120, 60, 135}}; holdMin = 120; holdMax = 240; }
-    else return;
-    bool any = false;
-    for (size_t c = 0; c < init.size(); ++c) {
-        App::SceneFx::Channel& ch = fx.ch[c];
-        if (ch.marker == marker) continue;
-        any = true;
-        ch = App::SceneFx::Channel();
-        ch.marker = marker;
-        ch.inc = init[c].inc;
-        ch.fadeIn = init[c].fadeIn;
-        ch.fadeOut = init[c].fadeOut;
-        ch.hold2 = init[c].hold2;
-        ch.alpha = init[c].alpha;
+    const size_t k = size_t(id);
+    if (on) {
+        if (fx.on[k]) return; // (already on: left as it is)
+        fx.on[k] = true;
+        fx.timerA[k] = fx.timerB[k] = 0;
+    } else if (fx.on[k]) {
+        fx.on[k] = false;
+        fx.timerA[k] = 0;
     }
-    if (any) { fx.holdMin = holdMin; fx.holdMax = holdMax; }
 }
 
-// UpdateRandom: channels 0 and 1 (2 keeps its starting alpha)
+// InitRandom(channel, type, alpha, max, speed, intervals 0..3, max / min time): set up when the
+// channel's type changes
+void initSceneChannel(App& app, int c, int type, int alpha, int speed, int iv0, int iv1, int iv2, int iv3, int maxT, int minT) {
+    App::SceneFx& fx = app.fx;
+    App::SceneFx::Channel& ch = fx.ch[c];
+    if (ch.type == type) return;
+    ch.type = type, ch.alpha = alpha & 255, ch.speed = speed;
+    ch.iv[0] = iv0, ch.iv[1] = iv1, ch.iv[2] = iv2, ch.iv[3] = iv3;
+    ch.mode = ch.count = 0;
+    fx.maxTime = maxT, fx.minTime = minT;
+}
+
+// UpdateRandom: channels 0 and 1 fade in by speed for interval 0 frames, hold a random while
+// (min .. max time), fade out for interval 2, hold for interval 3 (bytes: alpha wraps)
 void updateSceneChannels(App& app) {
     App::SceneFx& fx = app.fx;
     for (int c = 0; c < 2; ++c) {
         App::SceneFx::Channel& ch = fx.ch[c];
-        switch (ch.state) {
+        switch (ch.mode) {
         case 0:
-            ch.alpha = (ch.alpha + ch.inc) & 255;
-            if (++ch.count == ch.fadeIn) {
-                ch.count = 0;
-                ch.state = 1;
-                fx.rng = fx.rng * 1103515245u + 12345u;
-                const int span = std::max(1, fx.holdMax - fx.holdMin);
-                ch.holdLen = int((fx.rng >> 16) % uint32_t(span)) + fx.holdMin;
-            }
+            ch.alpha = (ch.alpha + ch.speed) & 255;
+            if (((ch.count + 1) & 255) == ch.iv[0]) {
+                ch.count = 0, ch.mode = 1;
+                if (fx.maxTime == fx.minTime) ch.iv[1] = fx.maxTime;
+                else {
+                    fx.rng = fx.rng * 1103515245u + 12345u;
+                    ch.iv[1] = (fx.minTime + int((fx.rng >> 16) % uint32_t(std::max(1, fx.maxTime - fx.minTime)))) & 255;
+                }
+            } else ch.count = (ch.count + 1) & 255;
             break;
-        case 1: if (++ch.count == ch.holdLen) { ch.count = 0; ch.state = 2; } break;
+        case 1:
+            if (((ch.count + 1) & 255) == ch.iv[1]) ch.count = 0, ch.mode = 2;
+            else ch.count = (ch.count + 1) & 255;
+            break;
         case 2:
-            ch.alpha = (ch.alpha - ch.inc) & 255;
-            if (++ch.count == ch.fadeOut) { ch.count = 0; ch.state = 3; }
+            ch.alpha = (ch.alpha - ch.speed) & 255;
+            if (((ch.count + 1) & 255) == ch.iv[2]) ch.count = 0, ch.mode = 3;
+            else ch.count = (ch.count + 1) & 255;
             break;
-        default: if (++ch.count == ch.hold2) { ch.count = 0; ch.state = 0; } break;
+        default:
+            if (((ch.count + 1) & 255) == ch.iv[3]) ch.count = 0, ch.mode = 0;
+            else ch.count = (ch.count + 1) & 255;
+            break;
         }
     }
 }
 
-// One 30 Hz frame of every effect on: the channels, then the counters (as ScnEffectProc: drawn first)
-// Effects 2..5, 9 and 11 run (and draw) only with the Options' Environment Effects on
-// (__GetScreenEffectState, G+0x31dd4 - the option's +0x37); so do the tower's fogs
-bool weatherEffect(int id) { return (id >= 2 && id <= 5) || id == 9 || id == 11; }
+// The weather runs only with the Options' Environment Effects on (GetScreenEffectState)
+bool weatherEffect(int id) { return (id >= 2 && id <= 10) || id == 29; } // (23's grass too, not its canvas)
 
+// A counter that wraps to 0 past `last`
+void sceneTick(int& t, int last) { if (++t > last) t = 0; }
+
+// One 30 Hz frame of every effect on: its channels and counters (ScnEffectProc's bookkeeping;
+// drawSceneBack / drawSceneEffects draw from the same state). `battle`: in a battle (field-only
+// effects stand still)
 void stepSceneEffects(App& app) {
     App::SceneFx& fx = app.fx;
-    for (int id = 0; id < 21; ++id) {
+    const bool battle = app.battle.active;
+    for (int id = 1; id < 31; ++id) {
         if (!fx.on[size_t(id)]) continue;
-        if (!app.environmentEffects && weatherEffect(id)) continue;
+        const bool weatherOn = app.environmentEffects;
         int& a = fx.timerA[size_t(id)];
         int& b = fx.timerB[size_t(id)];
         switch (id) {
-        case 2: initSceneChannels(app, 2); updateSceneChannels(app); if (++a > 512) a = 0; break;
-        case 3: if (++a > 400) a = 0; if (++b > 440) b = 0; break;
-        case 4: initSceneChannels(app, 4); updateSceneChannels(app); if (++a > 200) a = 0; break;
-        case 5: initSceneChannels(app, 5); updateSceneChannels(app); if (++a > 79) a = 0; if (++b >= 80) b = 0; break;
-        case 9: initSceneChannels(app, 9); updateSceneChannels(app); if (++a > 120) a = 0; if (++b >= 181) b = 0; break;
-        case 11: if (++a >= 241) a = 0; break;
-        case 6: case 12: case 15: case 18: // Space_Stop
-        case 7: case 13: case 16: case 19: // Space_Up
-        case 8: case 14: case 17: case 20: { // Space_Down
-            const int kind = id <= 8 ? id - 6 : (id - 12) % 3;
-            if (kind == 1 && ++fx.spaceRise > 2000) fx.spaceRise = 0;
-            if (kind == 2 && --fx.spaceRise > 2000) fx.spaceRise = 0;
-            if (++fx.spaceDrift > 480) fx.spaceDrift = 0;
+        case 2: case 3: case 4: // the alarm lights: a 31-frame pulse, on the field
+            if (!battle && weatherOn && ++a >= 31) a = 0;
+            break;
+        case 5: case 29: // snow, the frame over it: slot 5's counters
+            if (!weatherOn) break;
+            initSceneChannel(app, 0, 5, 0x70, 3, 0x25, 0, 0x25, 0x28, 1, 1);
+            initSceneChannel(app, 1, 5, 0x87, 1, 0x78, 0, 0x78, 0x3c, 0xf0, 0x78);
+            initSceneChannel(app, 2, 5, 0x87, 1, 0x78, 0, 0x78, 0x3c, 0xf0, 0x78);
+            updateSceneChannels(app);
+            fx.ch[0].iv[1] = 0x96;
+            sceneTick(fx.timerA[5], 0x4f);
+            sceneTick(fx.timerB[5], 0x4f);
+            break;
+        case 6: // smoke and the frame
+            if (!weatherOn) break;
+            sceneTick(a, 400);
+            sceneTick(b, 0x1b8);
+            initSceneChannel(app, 0, 6, 0x70, 3, 0x25, 0, 0x25, 0x28, 1, 1);
+            updateSceneChannels(app);
+            fx.ch[0].iv[1] = 0x96;
+            break;
+        case 7: // rain
+            if (!weatherOn) break;
+            initSceneChannel(app, 0, 7, 0x37, 5, 0x28, 0, 0x28, 0x1e, 0x78, 0x3c);
+            initSceneChannel(app, 1, 7, 0x87, 3, 0x28, 0, 0x28, 0x1e, 0x78, 0x3c);
+            updateSceneChannels(app);
+            sceneTick(a, 199);
+            break;
+        case 8: // fog and fireflies
+            if (!weatherOn) break;
+            initSceneChannel(app, 0, 8, 0x19, 0xb, 0x14, 0, 0x14, 0x28, 0x28, 0x29);
+            initSceneChannel(app, 1, 8, 0, 0xc, 0x14, 0, 0x14, 1, 0, 1);
+            updateSceneChannels(app);
+            sceneTick(a, 0x200);
+            sceneTick(b, 0x2cf);
+            break;
+        case 9: // ash
+            if (!weatherOn) break;
+            initSceneChannel(app, 0, 9, 0x87, 3, 0x28, 0, 0x28, 0x3c, 0x78, 0x3c);
+            initSceneChannel(app, 1, 9, 0x40, 3, 0x28, 0, 0x28, 0x3c, 0x78, 0x3c);
+            updateSceneChannels(app);
+            sceneTick(a, 0xf0);
+            sceneTick(b, 0xb4);
+            break;
+        case 10: if (weatherOn) sceneTick(a, 0xf0); break; // the steam
+        case 11: case 12: sceneTick(fx.timerA[11], 600); break; // the magma: slot 11's counter
+        case 13: case 14: case 15: case 16: case 17: case 18: case 19: case 20: case 21: case 22: case 26: case 27: {
+            // the elevator shaft: the walls slide for 100 frames (40 for 14 / 18 / 22 / 26, which start at 60)
+            if (battle) break;
+            const int start = (id == 14 || id == 18 || id == 22 || id == 26) ? 60 : 0;
+            if (a + start < 100) ++a;
             break;
         }
+        case 23: // the grass's pulse
+            if (weatherOn) sceneTick(a, 0x50), sceneTick(b, 0x3c);
+            break;
+        case 25: sceneTick(a, 0x78); break; // the frames' blink
+        case 28: // the space backdrop scrolls (ever down)
+            if (battle) break;
+            if (--fx.frameCt > 2000) fx.frameCt = 0;
+            if (++fx.frameCt1 > int(scenefx::kAdjW)) fx.frameCt1 = 0;
+            break;
+        case 30: sceneTick(a, 0x808), sceneTick(b, 0x78); break; // the sky
         default: break;
         }
     }
 }
 
-// The Space backdrop's variant for effect id (0: d0501, 1: d0507, 2: d0511), -1 not a Space one
-int spaceVariant(int id) {
-    if (id >= 6 && id <= 8) return 0;
-    if (id >= 12 && id <= 14) return 1;
-    if (id >= 15 && id <= 20) return 2;
-    return -1;
-}
-
-void drawSceneLayer(App& app, int slot, float x, float y, float w, float h, float u, float v, int alpha);
-
-void drawSpaceBackdrop(App& app, bool battle) {
-    const App::SceneFx& fx = app.fx;
-    if (fx.set != 4) return;
-    const float sx = battle ? 0.0f : app.scroll.offX * 0.5f;
-    cr::Renderer& r = app.renderer;
-    r.setOrigin(r.uiX());
-    for (int id = 0; id < 21; ++id) {
-        const int k = spaceVariant(id);
-        if (k < 0 || !fx.on[size_t(id)]) continue;
-        const float drift = float(fx.spaceDrift) * 1.066f;
-        drawSceneLayer(app, 66 + k, -16, -32, 512, 384, 0, float(fx.spaceRise) * 1.024f, 255);
-        if (k > 0 && app.environmentEffects) { // its fog, both ways
-            drawSceneLayer(app, 70 + k, -16, -32, 512, 256, drift - sx, 0, 255);
-            drawSceneLayer(app, 70 + k, -16, -32, 512, 256, -drift - sx, 0, 255);
-        }
-    }
-}
-
-// A layer: the texture's (u, v) window, wrapping, over menu rectangle (x, y, w, h) (tex2d units:
-// 480 x 320 space, so +16 / +32 to the 512 x 384 menu units, doubled on screen); the screen's
-// extra width (widescreen) gets more of the texture
-void drawSceneLayer(App& app, int slot, float x, float y, float w, float h, float u, float v, int alpha) {
-    const cr::Texture& t = app.fx.tex[size_t(std::clamp(slot - 49, 0, 23))];
+// A layer: the texture's (u, v) window, wrapping, over tex2d rectangle (x, y, w, h) (+16 / +32 to
+// menu units, doubled on screen; the uv in the slot's logical texels, as tex2d_read sized it); the
+// screen's extra width (widescreen) gets more of the texture. `grey` tints it
+void drawSceneLayer(App& app, int slot, float x, float y, float w, float h, float u, float v, int alpha, float grey = 1) {
+    const int k = slot - scenefx::kFirstSlot;
+    if (k < 0 || k >= scenefx::kSlots) return;
+    const cr::Texture& t = app.fx.tex[size_t(k)];
     if (!t.id || alpha <= 0) return;
+    const float lw = app.fx.texW[size_t(k)] > 0 ? app.fx.texW[size_t(k)] : float(t.width);
+    const float lh = app.fx.texH[size_t(k)] > 0 ? app.fx.texH[size_t(k)] : float(t.height);
+    const float ku = float(t.width) / lw, kv = float(t.height) / lh; // (the file's texels per logical one)
     cr::Renderer& r = app.renderer;
     const float extra = r.uiX() / 2; // menu units beyond the 512 at each side
     float mx = x + 16, my = y + 32;
     if (w >= 512) { mx -= extra; u -= extra; w += 2 * extra; }
-    const float tw = float(t.width), th = float(t.height);
-    const float a = float(alpha) / 255.0f;
-    // Tiles of the texture's period: up to a 3 x 3 grid for a screen-sized window
-    const float u0 = u - std::floor(u / tw) * tw, v0 = v - std::floor(v / th) * th;
+    const float a = float(alpha & 255) / 255.0f;
+    const float u0 = u - std::floor(u / lw) * lw, v0 = v - std::floor(v / lh) * lh;
     for (float dy = 0; dy < h;) {
-        const float vv = std::fmod(v0 + dy, th), sh = std::min(th - vv, h - dy);
+        const float vv = std::fmod(v0 + dy, lh), sh = std::min(lh - vv, h - dy);
         for (float dx = 0; dx < w;) {
-            const float uu = std::fmod(u0 + dx, tw), sw = std::min(tw - uu, w - dx);
-            r.drawQuadUV(t, (mx + dx) * 2, (my + dy) * 2, sw * 2, sh * 2, uu, vv, sw, sh, 1, 1, 1, a);
+            const float uu = std::fmod(u0 + dx, lw), sw = std::min(lw - uu, w - dx);
+            r.drawQuadUV(t, (mx + dx) * 2, (my + dy) * 2, sw * 2, sh * 2, uu * ku, vv * kv, sw * ku, sh * kv, grey, grey, grey, a);
             dx += sw;
         }
         dy += sh;
     }
 }
 
-// ScnEffectProc's draws, by effect number; sx, sy = half the field's scroll. In a battle the
-// weather (effects 2..5, 9) draws the "(128)" copy in the next slot, and nothing scrolls
-void drawSceneEffects(App& app, bool battle = false) {
+// ScnEffectProc's layers at z -1998, drawn before the field's painting: 11 / 12 the magma, 13..22,
+// 26, 27 the elevator shaft's walls, 28 the space backdrop, 30 the sky. sx, sy: half the scroll
+void drawSceneBack(App& app, bool battle) {
+    using namespace scenefx;
     const App::SceneFx& fx = app.fx;
     if (fx.set < 0) return;
     const float sx = battle ? 0.0f : app.scroll.offX * 0.5f, sy = battle ? 0.0f : app.scroll.offY * 0.5f;
-    const int bo = battle ? 1 : 0; // the "(128)" copies' slot
     cr::Renderer& r = app.renderer;
     r.setOrigin(r.uiX());
-    for (int id = 0; id < 21; ++id) {
+    for (int id = 1; id < 31; ++id) {
         if (!fx.on[size_t(id)]) continue;
-        if (!app.environmentEffects && weatherEffect(id)) continue;
         const float a = float(fx.timerA[size_t(id)]), b = float(fx.timerB[size_t(id)]);
-        const int ch0 = fx.ch[0].alpha, ch1 = fx.ch[1].alpha, ch2 = fx.ch[2].alpha;
         switch (id) {
-        case 2: // d0307_fog: two layers, breathing
-            drawSceneLayer(app, 49 + bo, -16, -32, 512, 384, a - sx, 0.5f * a - sy, ch0);
-            drawSceneLayer(app, 49 + bo, -16, -32, 512, 384, a + 128 - sx, 384 - 0.5f * a - sy, ch1);
+        case 11: case 12: {
+            if (battle) break;
+            const float m = float(fx.timerA[11]);
+            if (id == 11) drawSceneLayer(app, 0x4e, kAdjX, kAdjY, kAdjW, kAdjH, 2 * m * 256 / 600 - sx, -2 * m * 256 / 600 + 256 - sy, 255);
+            else drawSceneLayer(app, 0x4f, kAdjX, kAdjY, kAdjW, kAdjH, 0, -24 * m * 256 / 600 + 256 - sy, 255);
             break;
-        case 3: // d0117_fog: two layers drifting apart
-            drawSceneLayer(app, 51 + bo, -16, -32, 512, 384, -0.64f * a - sx, 0.64f * a - sy, 255);
-            drawSceneLayer(app, 51 + bo, -16, -32, 512, 384, 0.5818182f * b - sx, 0.5818182f * b - sy, 255);
+        }
+        case 13: case 14: case 15: case 16: case 17: case 18: case 19: case 20: case 21: case 22: case 26: case 27: {
+            if (battle) break;
+            const float t = a + ((id == 14 || id == 18 || id == 22 || id == 26) ? 60 : 0);
+            const int slot = id <= 15 ? 0x50 : (id <= 19 || id >= 26) ? 0x51 : 0x52;
+            float v = 0;
+            switch (id) {
+            case 13: case 17: v = 0; break;
+            case 16: case 20: v = 704; break;
+            case 14: case 18: case 21: case 26: v = 704 - t * 7.04f; break;
+            default: v = t * 7.04f; break; // 15, 19, 22, 27
+            }
+            drawSceneLayer(app, slot, 0, sy + 300 + kAdjY, 480, 320, 16, v, 255);
             break;
-        case 4: // rain: two sheets of streaks, then fog
-            drawSceneLayer(app, 55 + bo, -16, -32, 512, 384, 0, -51.2f * a - sy, ch0);
-            drawSceneLayer(app, 57 + bo, -16, -32, 512, 384, -13.251f * a - sx, -49.455f * a - sy, ch1);
-            drawSceneLayer(app, 59 + bo, -16, -32, 512, 384, -1.28f * a - sx, 1.28f * a - sy, 255);
+        }
+        case 28:
+            if (!battle) drawSceneLayer(app, 0x40, kAdjX, kAdjY, kAdjW, kAdjH, 0, float(fx.frameCt) * 1.025f, 255);
             break;
-        case 5: // snow: d0101_fog, then two sheets of flakes
-            drawSceneLayer(app, 64 + bo, -16, -32, 512, 384, -6.4f * a - sx, 3.2f * a - sy, ch0);
-            drawSceneLayer(app, 61 + bo, -16, -32, 512, 384, -12.8f * b - sx, -12.8f * b - sy, ch1);
-            drawSceneLayer(app, 61 + bo, -16, -32, 512, 384, 128 - 6.4f * b - sx, -6.4f * b - sy, ch2);
+        case 30: { // the sky: two layers of clouds, rising and falling a little (sin, 3 degrees a frame)
+            const float v = 352 - sy + kAdjY + 5.0f * std::sin(b * 3.0f * 3.14159265f / 180.0f);
+            float h2 = sy + 256 + kAdjH / 2;
+            if (h2 < kAdjH) drawSceneLayer(app, 0x58, kAdjX, kAdjY, kAdjW, kAdjH, a * 8 - sx, v, 255);
+            if (h2 > kAdjH) h2 = kAdjH;
+            drawSceneLayer(app, 0x58, kAdjX, kAdjY, kAdjW, h2, a * 0.498f - sx, v, 255);
             break;
-        case 9: // d0209_fog: two layers, breathing
-            drawSceneLayer(app, 53 + bo, -16, -32, 512, 384, -2.1333333f * a - sx, -2.1333333f * a - sy, ch0);
-            drawSceneLayer(app, 53 + bo, -16, -32, 512, 384, 128 - 1.4222222f * b - sx, -1.4222222f * b - sy, ch1);
-            break;
-        case 10: drawSceneLayer(app, 69, -16, -32, 512, 320, 0, 0, 255); break; // the sun's glare
-        case 11: drawSceneLayer(app, 70, -16, 128, 512, 256, 2.1333333f * a - sx, 0, 255); break; // p0001_fog
+        }
         default: break;
         }
     }
+    r.setOrigin(r.uiX());
+}
+
+// (CR1:U's name for the back pass, kept for its callers)
+void drawSpaceBackdrop(App& app, bool battle) { drawSceneBack(app, battle); }
+
+// ScnEffectProc's layers over the field (z -51..-48). In a battle the weather draws its own copies
+// (the next slot) and nothing scrolls
+void drawSceneEffects(App& app, bool battle = false) {
+    using namespace scenefx;
+    const App::SceneFx& fx = app.fx;
+    if (fx.set < 0) return;
+    const float sx = battle ? 0.0f : app.scroll.offX * 0.5f, sy = battle ? 0.0f : app.scroll.offY * 0.5f;
+    cr::Renderer& r = app.renderer;
+    r.setOrigin(r.uiX());
+    const int ch0 = fx.ch[0].alpha, ch1 = fx.ch[1].alpha, ch2 = fx.ch[2].alpha;
+    for (int id = 1; id < 31; ++id) {
+        if (!fx.on[size_t(id)]) continue;
+        if (!app.environmentEffects && weatherEffect(id)) continue;
+        const float a = float(fx.timerA[size_t(id)]), b = float(fx.timerB[size_t(id)]);
+        switch (id) {
+        case 2: case 3: case 4: { // the alarm lights: a grey level 0 -> 128 -> 0, at 0xa0
+            if (battle) break;
+            const float g = a < 15 ? a / 15 * 128 : (a - 15) / 15 * -128 + 128;
+            drawSceneLayer(app, 0x44 + id, kAdjX, kAdjY, kAdjW, kAdjH, 0, 0, 0xa0, std::max(0.0f, g) / 255.0f);
+            break;
+        }
+        case 5: case 29: {
+            const float t = float(fx.timerB[5]);
+            const float u1 = t * -12.8f - sx, v1 = t * -12.8f - sy, w2 = t * -25.6f;
+            if (id == 5) {
+                drawSceneLayer(app, battle ? 0x3d : 0x3c, kAdjX, kAdjY, kAdjW, kAdjH, u1, v1, 255);
+                drawSceneLayer(app, battle ? 0x3f : 0x3e, kAdjX, kAdjY, kAdjW, kAdjH, u1, v1, ch1 - (battle ? 64 : 32));
+                drawSceneLayer(app, battle ? 0x3f : 0x3e, kAdjX, kAdjY, kAdjW, kAdjH, w2 + 128 - sx, w2 + 64 - sy, ch2 - (battle ? 64 : 32));
+            }
+            drawSceneLayer(app, 0x45, kAdjX, kAdjY, kAdjW, kAdjH, 0, 0, ch0);
+            break;
+        }
+        case 6:
+            drawSceneLayer(app, battle ? 0x33 : 0x32, kAdjX, kAdjY, kAdjW, kAdjH, a * -0.64f - sx, a * 0.64f - sy, 255);
+            drawSceneLayer(app, 0x45, kAdjX, kAdjY, kAdjW, kAdjH, 0, 0, ch0);
+            break;
+        case 7:
+            drawSceneLayer(app, battle ? 0x37 : 0x36, kAdjX, kAdjY, kAdjW, kAdjH, 0, a * -51.2f - sy, ch0);
+            drawSceneLayer(app, battle ? 0x39 : 0x38, kAdjX, kAdjY, kAdjW, kAdjH, a * -13.251f - sx, a * -49.455f - sy, ch1);
+            drawSceneLayer(app, battle ? 0x3b : 0x3a, kAdjX, kAdjY, kAdjW, kAdjH, a * -1.28f - sx, a * 1.28f - sy, 255);
+            break;
+        case 8: {
+            drawSceneLayer(app, battle ? 0x31 : 0x30, kAdjX, kAdjY, kAdjW, kAdjH, a - sx, a * 0.5f - sy, 0x80);
+            const float f = 64.0f * std::sin(b * 0.5f * 3.14159265f / 180.0f), t = b * 1.42222f;
+            drawSceneLayer(app, 0x4a, kAdjX, kAdjY, kAdjW, kAdjH, -f - sx, (t - sy) * 0.5f, ch0);
+            drawSceneLayer(app, 0x4a, kAdjX, kAdjY, kAdjW, kAdjH, f - sx, t + 64 - sy, ch1);
+            break;
+        }
+        case 9: {
+            const float m = a * -1.066f;
+            drawSceneLayer(app, 0x4b, kAdjX, kAdjY, kAdjW, kAdjH, m - sx, m - sy, ch0);
+            drawSceneLayer(app, 0x4b, kAdjX, kAdjY, kAdjW, kAdjH, 128, m - sy + 128, ch1);
+            drawSceneLayer(app, 0x4c, kAdjX, kAdjY, kAdjW, kAdjH, b * -1.42222f + 128 - sx, b * -1.42222f - sy, 255);
+            break;
+        }
+        case 10: // the steam along the deck: (-16, 128) 512 x 256 on the iPad
+            drawSceneLayer(app, 0x44, -16, 128, 512, 256, a * 2.133f - sx, 0, 255);
+            break;
+        case 11: case 12: { // the magma's smoke (with Environment Effects)
+            if (!app.environmentEffects) break;
+            const float m = float(fx.timerA[11]);
+            drawSceneLayer(app, 0x4d, kAdjX, kAdjY, kAdjW, kAdjH, 0, 2 * m * 256 / 600, 0x80);
+            drawSceneLayer(app, 0x4d, kAdjX, kAdjY, kAdjW, kAdjH, 128, m * 256 / 600 + 128, 0x60);
+            break;
+        }
+        case 23: case 24: { // the grass (23, pulsing) and the canvas over it all
+            if (id == 23 && app.environmentEffects) {
+                const int pulse = int(b) < 30 ? int(b) * 5 : (-5 * int(b) + 0x36) & 255;
+                const float gx = a * 4, gy = a * -1.25f + 100;
+                const float off[3][2] = {{0, 12}, {12, 24}, {24, 0}};
+                for (const auto& o : off) drawSceneLayer(app, 0x54, gx + o[0], gy + o[1], 256, 256, 0, 0, pulse);
+            }
+            drawSceneLayer(app, 0x53, kAdjX, kAdjY, kAdjW, kAdjH, 0, 0, 255);
+            break;
+        }
+        case 25: drawSceneLayer(app, a < 60 ? 0x55 : 0x56, kAdjX, kAdjY, kAdjW, kAdjH, 0, 0, 255); break;
+        default: break;
+        }
+    }
+    r.setOrigin(r.uiX());
 }
 
 // ---- The field camera's scroll (FieldCamera::setScrollPlayer / setScroll2D / setScroll3D, ScrollAutoCtl) ----
@@ -11064,8 +11207,9 @@ void drawFrame(App& app, bool present = true) {
             const float k = vw / viewSize, w = t.width * k, h = t.height * k;
             r.drawQuad(t, vx + (vw - w) / 2, vy + (vh - h) / 2, w, h);
         };
+        drawSceneBack(app, false); // ScnEffectProc's z -1998 layers (the sky, the shaft, ...): behind the painting
+        r.setOrigin(0);
         if (app.background.id) drawLayer(app.background);
-        drawSpaceBackdrop(app, false); // the tower's scrolling backdrop, behind the 3D
         r.setOrigin(0);
         if (have3D) {
             if (scriptCam) r.begin3DRect(app.haveStageCam && app.stageCam.viewWidth > 0 ? 0 : qx, app.haveStageCam && app.stageCam.viewWidth > 0 ? 0 : qy, SW, H);
@@ -12041,23 +12185,24 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
             glErrors += rerrs;
         }
 
-        // The weather goes on in battles with the "(128)" copies (snow: slots 62 / 65, stepped by the
-        // battle's frames), and the tower's Space backdrop scrolls (Up +1, Down -1 a frame, Stop
-        // still; the fog's drift wraps past 480), drawn on the field and in battles without errors
+        // The weather goes on in battles with its own copies (set 1's snow: slots 0x3d / 0x3f, stepped
+        // by the battle's frames; still with Environment Effects off); the field-only backdrops
+        // stand still there; on the field the space backdrop (28) scrolls ever down and the
+        // elevator's walls (13, 14) slide and stop; all of it drawn without errors
         {
             int fbad = 0, ferrs = 0;
-            loadSceneEffectSet(app, 0);
+            loadSceneEffectSet(app, 1);
             setSceneEffect(app, true, 5);
             startBattle(app, {1, 0, -1, 0}, 0);
             if (app.battle.active) {
-                fbad += !app.fx.tex[62 - 49].id || !app.fx.tex[65 - 49].id || !app.fx.tex[61 - 49].id;
+                fbad += !app.fx.tex[0x3d - 0x30].id || !app.fx.tex[0x3f - 0x30].id || !app.fx.tex[0x45 - 0x30].id;
                 const int t0 = app.fx.timerA[5];
                 for (int f = 0; f < 10; ++f) stepBattle(app);
                 fbad += app.fx.timerA[5] != t0 + 10;
-            app.environmentEffects = false; // Options: Environment Effects off - the weather stands still, undrawn
-            for (int f = 0; f < 5; ++f) stepBattle(app);
-            fbad += app.fx.timerA[5] != t0 + 10;
-            app.environmentEffects = true;
+                app.environmentEffects = false; // Options: Environment Effects off - the weather stands still, undrawn
+                for (int f = 0; f < 5; ++f) stepBattle(app);
+                fbad += app.fx.timerA[5] != t0 + 10;
+                app.environmentEffects = true;
                 app.lastTicks = 0;
                 drawFrame(app, false);
                 ferrs += app.renderer.takeErrors();
@@ -12065,20 +12210,20 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 app.runner.stop();
             } else ++fbad;
             endSceneEffects(app);
-            loadSceneEffectSet(app, 4);
-            fbad += !app.fx.tex[66 - 49].id || !app.fx.tex[68 - 49].id || !app.fx.tex[72 - 49].id;
-            setSceneEffect(app, true, 13); // d0507, rising
+            loadSceneEffectSet(app, 10);
+            fbad += !app.fx.tex[0x40 - 0x30].id;
+            setSceneEffect(app, true, 28);
+            const int ct0 = app.fx.frameCt;
             for (int f = 0; f < 100; ++f) stepSceneEffects(app);
-            const int rose = app.fx.spaceRise;
-            setSceneEffect(app, false, 13);
-            setSceneEffect(app, true, 17); // d0511, falling
-            for (int f = 0; f < 30; ++f) stepSceneEffects(app);
-            const int fell = app.fx.spaceRise;
-            setSceneEffect(app, false, 17);
-            setSceneEffect(app, true, 6); // d0501, still
-            for (int f = 0; f < 400; ++f) stepSceneEffects(app);
-            const int drift = app.fx.spaceDrift;
-            fbad += rose != 100 || fell != 70 || app.fx.spaceRise != 70 || drift != 530 - 481;
+            const int scrolled = ct0 - app.fx.frameCt;
+            endSceneEffects(app);
+            loadSceneEffectSet(app, 7);
+            fbad += !app.fx.tex[0x50 - 0x30].id || !app.fx.tex[0x51 - 0x30].id || !app.fx.tex[0x52 - 0x30].id;
+            setSceneEffect(app, true, 13);
+            setSceneEffect(app, true, 14);
+            for (int f = 0; f < 150; ++f) stepSceneEffects(app);
+            const int slid13 = app.fx.timerA[13], slid14 = app.fx.timerA[14];
+            fbad += scrolled != 100 || slid13 != 100 || slid14 != 40;
             startBattle(app, {1, 0, -1, 0}, 0);
             if (app.battle.active) {
                 app.lastTicks = 0;
@@ -12088,8 +12233,8 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 app.runner.stop();
             }
             endSceneEffects(app);
-            std::printf("battle weather: snow over a battle with its (128) copies, Space backdrop rose %d, fell to %d, "
-                        "drift %d; %d problems, %d render API errors\n", rose, fell, drift, fbad, ferrs);
+            std::printf("battle weather: snow over a battle with its own copies, the space backdrop scrolled %d, the elevator's "
+                        "walls slid %d / %d; %d problems, %d render API errors\n", scrolled, slid13, slid14, fbad, ferrs);
             problems += fbad + ferrs;
             glErrors += ferrs;
         }
@@ -13783,36 +13928,41 @@ int runSelfTest(App& app) {
         std::printf("field camera: d0101's view %gx%g follows the player (%d of 3 spots), pans %g -> %g, shots and "
                     "Mapscroll; %d problems\n",
                     fieldViewW(app), fieldViewH(app), followed, startY, panned, problems);
-        // Scene effects: the first gate's entry script loads set 0, turns everything off and starts the snow (5);
-        // d0117's fog (3) is another room's
+        // Scene effects (Omega): set 5 (the battleship's deck: the steam p0001_fog, the sky d0530_bg01),
+        // its effects 10 and 30 stepping within their counters; set 1's smoke and frame (6): UpdateRandom's
+        // channel 0 breathing between 0x70 and 0x70 + 3 x 0x25 (InitRandom(0, 6, 0x70, 0, 3, 0x25, ...))
         int fxProblems = 0;
         endSceneEffects(app);
-        app.runner.start(app.events, 0, app.game, app.area, app.mapNumber);
-        for (int f = 0; f < 3000 && app.runner.running(); ++f) {
-            stepEvents(app);
-            app.dialogue.clear();
-            if (app.choiceFlag >= 0) answerChoice(app, true);
-            app.tapPending = true;
-        }
+        loadSceneEffectSet(app, 5);
         int loaded = 0;
         for (const cr::Texture& t : app.fx.tex) loaded += t.id != 0;
-        fxProblems += app.fx.set != 0 || loaded != 6 || app.fx.on[3] || !app.fx.on[5]; // 3 and their "(128)" copies
-        setSceneEffect(app, true, 3);
+        fxProblems += app.fx.set != 5 || loaded != 2;
+        setSceneEffect(app, true, 10);
+        setSceneEffect(app, true, 30);
+        for (int f = 0; f < 3000; ++f) {
+            stepSceneEffects(app);
+            fxProblems += app.fx.timerA[10] > 0xf0 || app.fx.timerA[30] > 0x808 || app.fx.timerB[30] > 0x78;
+        }
+        app.lastTicks = 0;
+        drawFrame(app, false);
+        ++frames;
+        endSceneEffects(app);
+        loadSceneEffectSet(app, 1);
+        setSceneEffect(app, true, 6);
         int lo = 255, hi = 0;
         for (int f = 0; f < 600; ++f) {
             stepSceneEffects(app);
             lo = std::min(lo, app.fx.ch[0].alpha);
             hi = std::max(hi, app.fx.ch[0].alpha);
-            fxProblems += app.fx.timerA[5] < 0 || app.fx.timerA[5] > 79 || app.fx.timerA[3] > 400 || app.fx.timerB[3] > 440;
         }
-        fxProblems += lo != 55 || hi != 255 || app.fx.ch[2].alpha != 135; // UpdateRandom: 55 <-> 255; channel 2 stays
+        fxProblems += lo != 0x70 || hi != 0x70 + 3 * 0x25;
         app.lastTicks = 0;
         drawFrame(app, false);
         ++frames;
-        setSceneEffect(app, false, 5);
-        fxProblems += app.fx.on[5];
-        std::printf("scene effects: set %d (%d textures), snow on, fog added, snow's fog alpha %d..%d; %d problems\n", app.fx.set,
-                    loaded, lo, hi, fxProblems);
+        setSceneEffect(app, false, 6);
+        fxProblems += app.fx.on[6];
+        std::printf("scene effects: set 5 (%d textures), steam and sky on, set 1's smoke alpha %d..%d; %d problems\n", loaded, lo, hi,
+                    fxProblems);
         problems += fxProblems;
         endSceneEffects(app);
         app.video.paintings = keepPaintings;
@@ -15176,6 +15326,12 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                     app.background.width, app.background.height, app.stageCams.size(),
                     scrollingField(app) ? "a scrolling painting" : paintedField(app) ? "a painting shown whole" : "3D",
                     app.scroll.offX, app.scroll.offY, app.cam.free ? ", camera free" : "");
+        if (app.fx.set >= 0) {
+            std::printf("scene effects: set %d, on", app.fx.set);
+            for (int id = 1; id < 31; ++id)
+                if (app.fx.on[size_t(id)]) std::printf(" %d", id);
+            std::printf("%s\n", app.environmentEffects ? "" : " (Environment Effects off)");
+        }
         if (SDL_getenv("CR_CAPTURE_TRACE")) {
             const cr::StageCamera& sc = app.stageCam;
             std::printf("camera: stage %s fov %.1f view %dx%d; script %s eye (%.1f %.1f %.1f) target (%.1f %.1f %.1f)\n",
@@ -15188,8 +15344,9 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         loadSceneEffectSet(app, app.captureSceneFx[0]);
         setSceneEffect(app, true, app.captureSceneFx[1]);
         for (int f = 0; f < app.captureSceneFx[2]; ++f) stepSceneEffects(app);
-        std::printf("scene fx: set %d, effect %d on, %d frames, drift %d rise %d\n", app.fx.set, app.captureSceneFx[1],
-                    app.captureSceneFx[2], app.fx.spaceDrift, app.fx.spaceRise);
+        std::printf("scene fx: set %d, effect %d on, %d frames, counters %d / %d\n", app.fx.set, app.captureSceneFx[1],
+                    app.captureSceneFx[2], app.fx.timerA[size_t(std::clamp(app.captureSceneFx[1], 0, 30))],
+                    app.fx.timerB[size_t(std::clamp(app.captureSceneFx[1], 0, 30))]);
     }
     if (app.captureBattle[0] > 0) { // --battle group stage: that battle, a second in
         cr::ensureStartingGenes(app.game);
