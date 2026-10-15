@@ -345,7 +345,7 @@ struct App {
     int manualCursor = 0, manualTop = 0, manualAnim = 0;
     bool charSelectOpen = false;
     int charSelectCursor = 0, charSelectAnim = 0, chosenPair = 1, charSelectPage = 0;
-    cr::Texture charSelectArt;
+    cr::Texture charSelectArt, charSelectArt2; // Select Scenario's sheets: chara1 / chara2 (slot 0x10), chara3 (0x12)
     struct Camp {                          // the Camp menu's page and cursors (__menuu_CampMain*)
         enum Page { Main, Items, Equip, Status, Genes } page = Main;
         enum Phase { List, Member, Slot, Ask } phase = List; // Status: Slot = the member's details
@@ -707,18 +707,22 @@ struct App {
 
 // The menus' sounds: __effgo ids (sndeff.bin entries) as the original's *Prc functions use them
 namespace se {
-constexpr uint32_t kChoose = 2;  // a plate, button, toggle, Yes or No (ComUty_YesNoChoiceProc's own is 2 too)
-constexpr uint32_t kBack = 3;    // the Back bar (ComUty_BackButtonProc); Options' < > page arrows on it as well
-constexpr uint32_t kBuzzer = 4;  // refused: nothing to sell (BuySell_CommandProc), a count past its end
-                                 // (ComUty_NumCountProc), a pair-only command alone (menub_mainPrc)
-constexpr uint32_t kPage = 5;    // the Back bar's < > arrows (StartPrc, MuCamp_NextProc), a list flicked a page
-constexpr uint32_t kCampOpen = 8, kCampClose = 9; // menuf_mainPrc's Camp button, CampMainPrc's Back bar
-constexpr uint32_t kSaved = 11;  // SaveLoadPrc, after SaveData_Save
-constexpr uint32_t kLoaded = 12; // SaveLoadPrc: Yes to Load / New
-constexpr uint32_t kPaid = 22;   // ShopPrc
-constexpr uint32_t kVolume = 40; // MuOptionSetInfo: the SE gauge let go (the BGM gauge is silent)
+// Omega's sndeff.bin has 145 sounds ahead of the menus' (sndeff entry = CR1's + 0x91: StartPrc's
+// 0x93 / 0x94, menuf_mainPrc's 0x95 / 0x99 / 0x9a, SaveLoadPrc's 0x9c / 0x9d, ShopPrc's 0xa7)
+constexpr uint32_t kMenuBase = 0x91;
+constexpr uint32_t kChoose = kMenuBase + 2;  // a plate, button, toggle, Yes or No (ComUty_YesNoChoiceProc's own is 2 too)
+constexpr uint32_t kBack = kMenuBase + 3;    // the Back bar (ComUty_BackButtonProc); Options' < > page arrows on it as well
+constexpr uint32_t kBuzzer = kMenuBase + 4;  // refused: nothing to sell (BuySell_CommandProc), a count past its end
+                                             // (ComUty_NumCountProc), a pair-only command alone (menub_mainPrc)
+constexpr uint32_t kPage = kMenuBase + 5;    // the Back bar's < > arrows (MuCamp_NextProc), a list flicked a page
+constexpr uint32_t kCampOpen = kMenuBase + 8, kCampClose = kMenuBase + 9; // menuf_mainPrc's Camp button, CampMainPrc's Back bar
+constexpr uint32_t kSaved = kMenuBase + 11;  // SaveLoadPrc, after SaveData_Save
+constexpr uint32_t kLoaded = kMenuBase + 12; // SaveLoadPrc: Yes to Load / New
+constexpr uint32_t kPaid = kMenuBase + 22;   // ShopPrc
+constexpr uint32_t kVolume = kMenuBase + 40; // MuOptionSetInfo: the SE gauge let go (the BGM gauge is silent)
+constexpr uint32_t kSlide = 0x12d;           // StartPrc: Select Scenario's page dragged over
 // The original is touch-only, so it has no cursor sound; keyboard cursor moves are the port's own
-constexpr uint32_t kCursor = 4;
+constexpr uint32_t kCursor = kBuzzer;
 } // namespace se
 
 void menuSound(App& app, uint32_t id) {
@@ -3080,16 +3084,20 @@ void openOptions(App& app, int page) {
     app.optionsAnim = 0;
 }
 
-// The iPhone layout (2.2.0): the menus' coordinates are its screen's - (0, 0) the corner, not the
-// iPad's 512 x 384 menu space - so a menu drawn there sits (+16, +32) menu units further in
+// The menus' coordinates are the iPhone screen's - (0, 0) its corner, not CR1's iPad 512 x 384
+// menu space - so a menu sits (+16, +32) menu units further in. Omega's iPad build is that layout
+// doubled and centred (tex2d_add: screen = 2 x + (32, 64), the sheets' pictures doubled with it:
+// its title's logo and copyright line fill x 32..992), so for Omega this holds in both layouts.
+// (CR1:U: only the iPhone layout.)
+bool phoneMenus(const App&) { return true; }
 struct PhoneMenu {
     cr::MenuPainter& m;
-    PhoneMenu(const App& app, cr::MenuPainter& p) : m(p) { m.setOffset(app.renderer.phoneLayout() ? 16.0f : 0.0f, app.renderer.phoneLayout() ? 32.0f : 0.0f); }
+    PhoneMenu(const App& app, cr::MenuPainter& p) : m(p) { m.setOffset(phoneMenus(app) ? 16.0f : 0.0f, phoneMenus(app) ? 32.0f : 0.0f); }
     ~PhoneMenu() { m.setOffset(0, 0); }
 };
 // A tap's menu units under the same offset
 void phoneMenuPoint(const App& app, float& mx, float& my) {
-    if (app.renderer.phoneLayout()) mx -= 16, my -= 32;
+    if (phoneMenus(app)) mx -= 16, my -= 32;
 }
 // Widescreen (the iPad layout): the origins of a screen's left- and right-hand groups - kept to
 // the screen's edges, as the later widescreen release does (and the shop and the battle here),
@@ -3496,8 +3504,8 @@ void drawSaveScreen(App& app) {
     const bool art = ss.load && app.charSelectArt.id;
     if (art) r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 1);
     r.setOrigin(r.uiX());
-    // On the title (__menuu_SaveLoadPut, mode 1) the pair's Character Select art behind it all: piece
-    // 16 of texture 0x11 (0x12 with flag 4092, the second sheet) at tex2d (-32, -64), z -10
+    // On the title (__menuu_SaveLoadPut, mode 1) the scenario's Select Scenario art behind it all:
+    // picture 24 (iPhone 22) of slot 0x10 (0x12, chara3, for the second scenario) at (-32, -64), z -10
     // (dimmed a little for the plates and text)
     if (art) drawCharArt(app, 1, false, 0.65f);
     else {
@@ -3523,8 +3531,7 @@ void drawSaveScreen(App& app) {
             drawFaceBoard(app, m, 0, 24 + 88.0f * float(k), ch, hp, hpMax, mp, mpMax, a, shown);
         }
     if (ss.load && !ss.haveSave) m.text("No save data", 24, 100, false, a, 16);
-    for (int k = 0; k < 3; ++k)
-        if (ss.emblems & (1u << k)) m.picture(111 + k, 16 + 72.0f * float(k), 224, a);
+    // (CR1's pair emblems, pictures 111..113: Omega's SaveLoadPut has none)
     r.setOrigin(wideRight(app));
     if (ss.load && ss.haveSave) drawSaveDate(app, m, ss.data, a);
     if (ss.phase == 0) { // the plates at (328, 136 + 48 x which): the last battle, Load, New
@@ -3534,7 +3541,7 @@ void drawSaveScreen(App& app) {
             m.plate(328, 136 + 48.0f * float(plates[i]), plateIcon(kWord[plates[i]]), kWord[plates[i]], ss.cursor == int(i), a,
                     false); // (window 3; the icon is the word's: ComUty_ChoicePlateDraw)
         r.setOrigin(r.uiX());
-        m.backButton(192, r.phoneLayout() ? 286 : 344, false, 0, a);
+        m.backButton(192, 288, false, 0, a); // (Omega's ComUty_BackButtonDraw: CmdBack at (192, 288))
     } else if (r.phoneLayout()) { // the original's (SaveLoadPut, the same in 2.2.0): the message
         // board (ComUty_MsgBoardDraw, picture 12) at (0, 220), lines from (24, 234); Yes / No the
         // plates at window 6 + (336, 104) / (336, 160)
@@ -3637,7 +3644,7 @@ void saveScreenClick(App& app, float px, float py) {
         const float py0 = 136 + 48.0f * float(plates[i]);
         if (rx >= 328 && rx < 464 && my >= py0 && my < py0 + 40) { saveScreenChoose(app, int(i)); return; }
     }
-    const float backY = app.renderer.phoneLayout() ? 286 : 344; // 2.2.0's Back: (192, 286)
+    const float backY = 288; // Omega's ComUty_BackButtonDraw: (192, 288)
     if (my >= backY && my < backY + 24 && mx >= 192 && mx < 424) saveScreenKey(app, SDLK_ESCAPE);
 }
 
@@ -6684,89 +6691,96 @@ void manualClick(App& app, float px, float py) {
 }
 
 // ---- Character Select (Util 4: __menuu_StartPut) ----
-// The chara1 sheet's art (the first two pairs and "Character Select"), the two plates at
-// (56 + 232k, 232) - word pictures 12 Escher and 14 Eluca - and Back. The second sheet (16 Olgar,
-// 18 Ayuta) is its mode 2, for when the first stories are cleared: not offered yet.
-constexpr int kCharSelectWords[2][2] = {{12, 14}, {16, 18}}; // Escher / Eluca, Olgar / Ayuta
+// Select Scenario (Util 4: __menuu_StartSet / Put / Prc / Clr, Omega). StartSet reads the scenario's
+// sheet into tex2d slot 0x10 - chara1, chara2 once flag 0x4bd or 0x6a2 is set - and, from flag 31
+// on, serect (0x11) and chara3 (0x12) for the second page. StartPut, in group-1 pictures
+// (kOutReadPicture, the iPhone screen's units doubled on the iPad): the art (iPad 24 at (-32,
+// -64), iPhone 22 at (0, 0)), Back at (124, 288), ONE plate at (172, 232) - word 12, 17 on the
+// second page -, and the banner over it all (iPad 27 at (-32, -64), iPhone 26 at (0, 0); from the
+// page's sheet). StartClr: var 0 = 0 Back, 1 the first scenario, 2 the second.
+// (Not yet: the second page's slide-in - StartPrc's drag over x 360..480 with gafMoveTbl, serect's
+// pictures 28 / 29 and chara3's 24 / 32 moving with it; here Left / Right just turn the page.)
+constexpr int kScenarioWord[2] = {12, 17};
 
-bool laterPairsOpen(const App& app) { // a first story finished (flag 32 or 34): chara2's pairs too
-    const cr::GameState g = allPairsFlags(app);
-    return g.flag(32) || g.flag(34);
-}
+bool laterPairsOpen(const App& app) { return allPairsFlags(app).flag(31); } // StartSet: the second page
 
 void openCharSelect(App& app) {
     app.charSelectOpen = true;
     app.charSelectAnim = 0;
     app.charSelectPage = 0;
+    app.charSelectCursor = 0;
     app.renderer.destroy(app.charSelectArt);
+    app.renderer.destroy(app.charSelectArt2);
+    const cr::GameState g = allPairsFlags(app);
     cr::Image img;
-    if (loadImage(app, "chara1_hd.mct", img)) app.charSelectArt = app.renderer.upload(img);
+    if (loadImage(app, g.flag(0x6a2) || g.flag(0x4bd) ? "chara2.mct" : "chara1.mct", img)) app.charSelectArt = app.renderer.upload(img);
+    if (g.flag(31) && loadImage(app, "chara3.mct", img)) app.charSelectArt2 = app.renderer.upload(img);
 }
 
-void charSelectTurn(App& app) { // the other sheet, once it's open
-    if (!laterPairsOpen(app)) { menuSound(app, se::kBuzzer); return; }
+void charSelectTurn(App& app) { // the second page, once it's open
+    if (!laterPairsOpen(app) || !app.charSelectArt2.id) { menuSound(app, se::kBuzzer); return; }
     app.charSelectPage ^= 1;
-    app.renderer.destroy(app.charSelectArt);
-    cr::Image img;
-    if (loadImage(app, app.charSelectPage ? "chara2_hd.mct" : "chara1_hd.mct", img)) app.charSelectArt = app.renderer.upload(img);
-    menuSound(app, se::kPage);
+    menuSound(app, se::kSlide);
 }
 
-void closeCharSelect(App& app, int pair) { // 0: back to the title
+void closeCharSelect(App& app, int scenario) { // __menuu_StartClr: var 0 = 0 (Back), 1 / 2 the scenario
     app.charSelectOpen = false;
-    app.game.vars[0] = pair; // __menuu_StartClr: SetVar(0, the pair 1..4, or 0 back); flag 4092 the second sheet
-    app.game.setFlag(4092, pair >= 3);
-    if (pair) app.chosenPair = pair;
-    else app.renderer.destroy(app.charSelectArt); // (a pair: the save screen shows it too - showMap frees it)
+    app.game.vars[0] = scenario;
+    if (scenario) app.chosenPair = scenario;
+    else app.renderer.destroy(app.charSelectArt); // (a scenario: the save screen shows it too - showMap frees it)
+    if (scenario == 2 && app.charSelectArt2.id) { // SaveLoadPut: slot 0x12 (chara3) for the second scenario
+        app.renderer.destroy(app.charSelectArt);
+        app.charSelectArt = app.charSelectArt2;
+        app.charSelectArt2 = cr::Texture();
+    }
+    app.renderer.destroy(app.charSelectArt2);
+    app.charSelectPage = 0;
 }
 
-// __menuu_StartPut's art (piece 16): 1.0.1's sheet 1024 x 768 + 164 for the iPad, 2.2.0's 960 x 640 +
-// 168 (480 x 320 + 84 in tex2d) for the iPhone. Either sheet goes to either layout: scaled to cover
-// the screen (the whole of it in widescreen), cut at the sides or top and bottom. `banner`: the
-// "Character Select" one (piece 18) over its top edge; `grey` darkens it. Drawn from origin uiX
+// The page's art, picture 24 (iPhone 22) - or with `banner` the banner over it, 27 (26) (Omega's
+// StartPut); `grey` darkens it. Drawn in menu units under PhoneMenu
 void drawCharArt(App& app, float alpha, bool banner, float grey) {
-    cr::Renderer& r = app.renderer;
-    if (!app.charSelectArt.id) return;
-    const bool phoneSheet = app.phoneData || app.vitaOnly; // (the Vita's sheet is laid out as 2.2.0's)
-    const float sw = phoneSheet ? 960.0f : 1024.0f, sh = phoneSheet ? 640.0f : 768.0f;
-    const float vw = r.phoneLayout() ? 960.0f : r.screenW(), vh = r.phoneLayout() ? 640.0f : 768.0f;
-    const float x0 = r.phoneLayout() ? 32.0f : -r.uiX(), y0 = r.phoneLayout() ? 64.0f : 0.0f;
-    const float k = std::max(vw / sw, vh / sh), w = sw * k, ax = x0 + (vw - w) / 2, ay = y0 + (vh - sh * k) / 2;
-    r.drawQuadUV(app.charSelectArt, ax, ay, w, sh * k, 0, 0, sw, sh, grey, grey, grey, alpha);
-    const float bh = phoneSheet ? 168.0f : 164.0f;
-    if (banner) r.drawQuadUV(app.charSelectArt, ax, y0, w, bh * k, 0, sh, sw, bh, grey, grey, grey, alpha);
+    const cr::Texture& tex = app.charSelectPage && app.charSelectArt2.id ? app.charSelectArt2 : app.charSelectArt;
+    if (!tex.id) return;
+    cr::MenuPainter& m = app.menu;
+    const bool phone = app.renderer.phoneLayout();
+    const float x = phone ? 0.0f : -32.0f, y = phone ? 0.0f : -64.0f;
+    const auto draw = [&](int pict) {
+        const short* p = cr::kOutReadPicture[pict];
+        const float k = tex.width >= 1024 ? 2.0f : 1.0f;
+        m.imagePieceTo(tex, x, y, p[2], p[3], p[0] * k, p[1] * k, p[2] * k, p[3] * k, alpha, grey, grey, grey);
+    };
+    draw(banner ? (phone ? 26 : 27) : (phone ? 22 : 24));
 }
 
 void drawCharSelect(App& app) {
     cr::Renderer& r = app.renderer;
     cr::MenuPainter& m = app.menu;
     m.begin(r, app.windowTex, &app.font);
-    const PhoneMenu phoneMenu(app, m); // the iPhone layout: its screen's menu coordinates
+    const PhoneMenu phoneMenu(app, m); // the menus' coordinates: the iPhone screen's
     r.setOrigin(0);
     r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 1);
     r.setOrigin(r.uiX());
     const float t = std::min(1.0f, app.charSelectAnim / 10.0f);
-    drawCharArt(app, t, true); // __menuu_StartPut: the art (piece 16, z -5), the banner (piece 18, z -4)
-    for (int k = 0; k < 2; ++k)
-        m.plate(56 + 232.0f * float(k), 232, plateIcon(kCharSelectWords[app.charSelectPage][k]), // (the word's icon)
-                kCharSelectWords[app.charSelectPage][k], app.charSelectCursor == k, t, false);
+    drawCharArt(app, t, false); // the art (z -20)
     m.backButton(124, 288, false, 0, t); // ComUty_BackButtonPosSetXYDraw(124, 288)
+    const int word = kScenarioWord[app.charSelectPage & 1];
+    m.plate(172, 232, plateIcon(word), word, app.charSelectCursor == 0, t, false);
+    drawCharArt(app, t, true); // (the banner, z -4, over the plate's row)
     if (keyHints(app)) // (our key hints)
-    m.text(laterPairsOpen(app) ? "Left/Right  Q: other pairs  Enter  Esc: back" : "Left/Right  Enter  Esc: back", 20, 372,
-           false, t * 0.8f, 9);
+        m.text(laterPairsOpen(app) ? "Enter  Left/Right: the other scenario  Esc: back" : "Enter  Esc: back", 20, 352, false,
+               t * 0.8f, 9);
 }
 
 void charSelectKey(App& app, SDL_Keycode key) {
     switch (key) {
-    case SDLK_LEFT: case SDLK_A: case SDLK_RIGHT: case SDLK_D: case SDLK_UP: case SDLK_DOWN:
-        app.charSelectCursor ^= 1;
-        menuSound(app, se::kCursor);
+    case SDLK_LEFT: case SDLK_A: case SDLK_RIGHT: case SDLK_D: case SDLK_Q: case SDLK_TAB: case SDLK_PAGEUP: case SDLK_PAGEDOWN:
+        charSelectTurn(app);
         break;
     case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: case SDLK_E:
         menuSound(app, se::kChoose);
-        closeCharSelect(app, app.charSelectPage * 2 + app.charSelectCursor + 1);
+        closeCharSelect(app, app.charSelectPage + 1);
         break;
-    case SDLK_Q: case SDLK_TAB: case SDLK_PAGEUP: case SDLK_PAGEDOWN: charSelectTurn(app); break;
     case SDLK_ESCAPE: case SDLK_BACKSPACE: case SDLK_AC_BACK: menuSound(app, se::kBack); closeCharSelect(app, 0); break;
     default: break;
     }
@@ -6777,13 +6791,10 @@ void charSelectClick(App& app, float px, float py) {
     app.renderer.toLogical(px, py, lx, ly);
     float mx, my;
     menuPoint(app, lx, ly, mx, my);
-    for (int k = 0; k < 2; ++k) {
-        const float x = 56 + 232.0f * float(k);
-        if (mx >= x && mx < x + 132 && my >= 232 && my < 272) {
-            menuSound(app, se::kChoose);
-            closeCharSelect(app, app.charSelectPage * 2 + k + 1);
-            return;
-        }
+    if (mx >= 172 && mx < 172 + 136 && my >= 232 && my < 272) { // _pad_chk_updw_box(0xac, 0xe8, 0x88, 0x28)
+        menuSound(app, se::kChoose);
+        closeCharSelect(app, app.charSelectPage + 1);
+        return;
     }
     if (my >= 288 && my < 312 && mx >= 124 && mx < 356) { menuSound(app, se::kBack); closeCharSelect(app, 0); }
 }

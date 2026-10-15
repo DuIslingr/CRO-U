@@ -43,9 +43,9 @@ void MenuPainter::imagePiece(const Texture& tex, float x, float y, float u, floa
 }
 
 void MenuPainter::imagePieceTo(const Texture& tex, float x, float y, float w, float h, float u, float v, float uw, float vh,
-                               float alpha) {
+                               float alpha, float r, float g, float b) {
     if (!r_ || !tex.id || alpha <= 0.001f) return;
-    r_->drawQuadUV(tex, X(x) * kScale, Y(y) * kScale, w * K() * kScale, h * K() * kScale, u, v, uw, vh, 1, 1, 1, alpha);
+    r_->drawQuadUV(tex, X(x) * kScale, Y(y) * kScale, w * K() * kScale, h * K() * kScale, u, v, uw, vh, r, g, b, alpha);
 }
 
 void MenuPainter::picture(int pict, float x, float y, float alpha) {

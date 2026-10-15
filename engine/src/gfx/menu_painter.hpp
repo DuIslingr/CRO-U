@@ -41,7 +41,7 @@ public:
     void imagePiece(const Texture& tex, float x, float y, float u, float v, float w, float h, float alpha = 1);
     // ... the texture's (u, v, uw, vh) drawn w x h menu units (a sheet with more pixels than units)
     void imagePieceTo(const Texture& tex, float x, float y, float w, float h, float u, float v, float uw, float vh,
-                      float alpha = 1);
+                      float alpha = 1, float r = 1, float g = 1, float b = 1);
     // Sheet-0 picture `pict` (kMenuPicture) at (x, y) (MuComPictDraw)
     void picture(int pict, float x, float y, float alpha = 1);
     // ... stretched to w x h
