@@ -935,7 +935,7 @@ private:
         std::vector<const char*> ext(sdlExt, sdlExt + count);
         Dlss::instanceExtensions(ext); // NVIDIA NGX's, when its runtime is present
         VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
-        app.pApplicationName = "Chaos Rings";
+        app.pApplicationName = "Chaos Rings Omega";
         app.apiVersion = VK_API_VERSION_1_3;
         VkInstanceCreateInfo ci{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
         ci.pApplicationInfo = &app;

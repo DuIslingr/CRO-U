@@ -3,9 +3,9 @@
 wrote (<hash>.crraw) with waifu2x (waifu2x-ncnn-vulkan) or Real-ESRGAN (realesrgan-ncnn-vulkan)
 into <hash>.crhd, which the engine loads in place of the originals when Graphics > HD Textures is on.
 
-  chaosrings --export-textures ~/.local/share/preservation/ChaosRingsHD/hd-source/ipad
-  tools/hd_textures.py --source ~/.local/share/preservation/ChaosRingsHD/hd-source/ipad \\
-      --out ~/.local/share/preservation/ChaosRingsHD/hd-textures \\
+  chaosrings --export-textures ~/.local/share/preservation/ChaosRingsOmegaHD/hd-source/ipad
+  tools/hd_textures.py --source ~/.local/share/preservation/ChaosRingsOmegaHD/hd-source/ipad \\
+      --out ~/.local/share/preservation/ChaosRingsOmegaHD/hd-textures \\
       [--esrgan <folder with realesrgan-ncnn-vulkan and models/>] [--waifu2x <its executable or folder>]
 
 --engine auto (the default) picks by how the game's file stored each picture (the .crraw's flags,

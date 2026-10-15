@@ -272,8 +272,8 @@ else()
     # A Release build leaves out the viewer's status / key help at the top (F3 shows it)
     target_compile_definitions(chaosrings PRIVATE $<$<CONFIG:Release,MinSizeRel>:CR_RELEASE=1>)
     set_target_properties(chaosrings PROPERTIES
-        MACOSX_BUNDLE_BUNDLE_NAME "Chaos Rings"
-        MACOSX_BUNDLE_GUI_IDENTIFIER "local.preservation.chaosrings")
+        MACOSX_BUNDLE_BUNDLE_NAME "Chaos Rings Omega"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "local.preservation.chaosringsomega")
 
     # Headless asset tool (decode/verify), desktop only
     add_executable(crtool tools/crtool.cpp)

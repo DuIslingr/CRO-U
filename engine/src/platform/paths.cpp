@@ -46,10 +46,9 @@ std::string findDataDir(int argc, char** argv) {
     const std::string d = platformDefault();
     if (!d.empty() && looksLikeData(d)) return d;
 #ifndef SDL_PLATFORM_ANDROID
-    // The working directory: a copied dataHD, the .app itself, or an unpacked .ipa - the iPad HD
-    // release (ChaosRingsHD.app/dataHD) or the later voiced iPhone release (ChaosRings.app/data)
-    for (const char* rel : {"dataHD/", "ChaosRingsHD.app/dataHD/", "Payload/ChaosRingsHD.app/dataHD/", "data/",
-                            "ChaosRings.app/data/", "Payload/ChaosRings.app/data/"}) {
+    // The working directory: a copied data folder, the .app itself, or an unpacked .ipa - the iPad
+    // HD release (ChaosRingsOmegaHDeng.app/data)
+    for (const char* rel : {"dataHD/", "data/", "ChaosRingsOmegaHDeng.app/data/", "Payload/ChaosRingsOmegaHDeng.app/data/"}) {
         char* cwd = SDL_GetCurrentDirectory();
         const std::string c = (cwd ? withSlash(cwd) : std::string()) + rel;
         SDL_free(cwd);
@@ -62,7 +61,7 @@ std::string findDataDir(int argc, char** argv) {
 std::string defaultDataDirHint() { return platformDefault(); }
 
 std::string saveDir() {
-    char* pref = SDL_GetPrefPath("preservation", "ChaosRingsHD");
+    char* pref = SDL_GetPrefPath("preservation", "ChaosRingsOmegaHD");
     std::string out = pref ? withSlash(pref) : std::string("./");
     SDL_free(pref);
     return out;

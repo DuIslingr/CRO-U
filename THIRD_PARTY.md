@@ -1,6 +1,6 @@
 # Third-party code
 
-CR1:U's own code is licensed under the GNU General Public License, version 2 or (at your
+CRO-U's own code (begun from CR1:U's) is licensed under the GNU General Public License, version 2 or (at your
 option) any later version - see `LICENSE`. These libraries are included under their own
 licences, kept beside them in `engine/third_party/`:
 
@@ -17,5 +17,5 @@ builds only when you place the SDK's `include/` and `lib/libnvsdk_ngx.a` in
 `engine/third_party/dlss/` yourself; without it the build has FSR 3.1 only. A build with DLSS
 links proprietary code into a GPL program, so it is for your own use, not for redistribution.
 
-No game data is included or distributed: *Chaos Rings* and its assets are the property of
-Square Enix and Media.Vision. The port loads them at runtime from a copy you own.
+No game data is included or distributed: *Chaos Rings Omega* and its assets are the property
+of Square Enix and Media.Vision. The port loads them at runtime from a copy you own.

@@ -879,14 +879,14 @@ std::vector<std::string> vitaNames(const std::string& name) {
     return out;
 }
 
-// Opens the Vita copy at `path` (its PCSG00497 folder, CR1, resources or cr1.psarc itself): the
+// Opens the Vita copy at `path` (its PCSG00499 folder, CRO, resources or cro.psarc itself): the
 // textures and models (loadOriginalImage, loadModelFile), the scripts through the data folder's
 // overlay, and the sound folder's archives (hooked up by vitaAudio once the sound starts)
 bool openVita(App& app, const std::string& path) {
     std::string err;
     std::string root = path;
     while (root.size() > 1 && root.back() == '/') root.pop_back();
-    for (const char* rel : {"", "/CR1/resources/cr1.psarc", "/resources/cr1.psarc", "/cr1.psarc"})
+    for (const char* rel : {"", "/CRO/resources/cro.psarc", "/resources/cro.psarc", "/cro.psarc"})
         if (app.vita.open(root + rel, &err)) {
             const std::string p = root + rel; // the sound folder sits beside resources/
             const size_t res = p.rfind("/resources/");
@@ -975,9 +975,9 @@ void takeVitaFolder(App& app) {
     }
     cr::PsarcArchive probe;
     bool found = false;
-    for (const char* rel : {"", "/CR1/resources/cr1.psarc", "/resources/cr1.psarc", "/cr1.psarc"})
+    for (const char* rel : {"", "/CRO/resources/cro.psarc", "/resources/cro.psarc", "/cro.psarc"})
         if ((found = probe.open(path + rel))) break;
-    if (!found) { app.vitaNote = "No Vita data (CR1/resources/cr1.psarc) in that folder"; return; }
+    if (!found) { app.vitaNote = "No Vita data (CRO/resources/cro.psarc) in that folder"; return; }
     app.vitaPath = path;
     app.vitaNote = path == app.vitaLoaded ? "In use" : "Used from the next start: " + path;
     saveMix(app);
@@ -15468,7 +15468,7 @@ void videoArgs(App& app, int argc, char** argv) {
 }
 
 SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
-    SDL_SetAppMetadata("Chaos Rings HD (reimplementation)", "0.1", "local.preservation.chaosrings");
+    SDL_SetAppMetadata("Chaos Rings Omega HD (reimplementation)", "0.1", "local.preservation.chaosringsomega");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SDL_Init: %s", SDL_GetError());
         return SDL_APP_FAILURE;
@@ -15491,7 +15491,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         return SDL_GetPathInfo(p.c_str(), &info) && info.type == SDL_PATHTYPE_DIRECTORY;
     };
     app->phoneData = SDL_GetPathInfo((app->dataDir + "voiceevnt.bin").c_str(), nullptr); // 2.2.0's data
-    // --vita <PCSG00497 folder | cr1.psarc> (or CR_VITA, else settings.ini's vita=; --vita none:
+    // --vita <PCSG00499 folder | cro.psarc> (or CR_VITA, else settings.ini's vita=; --vita none:
     // without): the Vita release's assets. With no iOS data, the Vita copy alone - also given as
     // --data - is the game (vitaOnly)
     std::string vitaArg;
@@ -15532,12 +15532,12 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     else app->hdDir = cr::saveDir() + "hd-textures";
     if (!app->hdDir.empty() && app->hdDir.back() != '/') app->hdDir += '/';
     if (app->dataDir.empty()) {
-        const std::string msg = "Could not find the original game data (dataHD folder).\n\n"
-                                "Copy dataHD from your ChaosRingsHD.app to:\n" +
+        const std::string msg = "Could not find the original game data (the app's data folder).\n\n"
+                                "Copy data from your ChaosRingsOmegaHDeng.app to:\n" +
                                 cr::defaultDataDirHint() +
                                 "\n\nor run with --data <path-to-dataHD>, or set CR_DATA - or --data / --vita "
                                 "<your Vita copy's PCSG00497 folder>.";
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Chaos Rings", msg.c_str(), nullptr);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Chaos Rings Omega", msg.c_str(), nullptr);
         return SDL_APP_FAILURE;
     }
 
@@ -15550,7 +15550,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     for (cr::Backend b : {want, cr::Backend::OpenGL}) {
         const uint64_t flags = cr::Renderer::windowFlags(b);
         if (!flags) continue; // not built in
-        app->window = SDL_CreateWindow("Chaos Rings", 1024, 768,
+        app->window = SDL_CreateWindow("Chaos Rings Omega", 1024, 768,
                                        SDL_WindowFlags(flags) | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
         if (!app->window) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SDL_CreateWindow: %s", SDL_GetError());
