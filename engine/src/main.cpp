@@ -9257,6 +9257,8 @@ constexpr float kWinBadge[4] = {936, 399, 81, 83};         // round "!" badge
 // PutMsg / CmdFont: a line every 24 tex2d units, the glyphs 16 - doubled on the iPad (and the iPhone's
 // Retina screen) as all of Omega's tex2d is: 48 px a line (CR1's iPad-native layout had half that)
 constexpr float kMsgScale = 4.0f;
+// drawfont_text's name (its -8): about three quarters of the lines' size, as the reference shows it
+constexpr float kNameScale = 3.1f;
 void drawMessageLines(App& app, const std::vector<std::string>& page, float x, float y, float scale, bool centreAll) {
     cr::Renderer& r = app.renderer;
     bool any = centreAll;
@@ -9371,7 +9373,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         drawWinPiece(app, kWinParchmentPhone, 32, 2.0f * (pr[0] + 16) + 64, 960, 256);
         if (!speaker.empty()) {
             app.nameHud.setTint(1, 1, 1);
-            app.nameHud.drawAt(r, {speaker}, 2.0f * 24 + 32, 2.0f * 206 + 64 - 14, 2.0f, 0, 0, 0.0f);
+            app.nameHud.drawAt(r, {speaker}, 2.0f * 24 + 32, 2.0f * 206 + 64 - 25, kNameScale, 0, 0, 0.0f);
         }
         app.dialogueHud.setTint(0.12f, 0.10f, 0.08f);
         textX = 2.0f * 36 + 32;
@@ -9383,7 +9385,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         app.renderer.drawQuadUV(app.cutinTex, left, 2.0f * (pr[0] + 32 - 32) + 128, width, 288, 0, 112, 512, 144);
         if (!speaker.empty()) {
             app.nameHud.setTint(1, 1, 1);
-            app.nameHud.drawAt(r, {speaker}, 2.0f * 24 + 32, 2.0f * 222 + 64 - 14, 2.0f, 0, 0, 0.0f);
+            app.nameHud.drawAt(r, {speaker}, 2.0f * 24 + 32, 2.0f * 222 + 64 - 25, kNameScale, 0, 0, 0.0f);
         }
         app.dialogueHud.setTint(0.12f, 0.10f, 0.08f); // ink
         textX = 2.0f * 36 + 32;
