@@ -678,6 +678,8 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
         }
         const BattleActionDef* a = actions.get(e.action);
         if (!a) continue;
+        for (int k : e.actors)
+            if (k >= 0) f[size_t(k)].lastAction = e.action;
         if (e.kind == kCmdItem) out.item = e.item;
         if (e.kind == kCmdGene && e.actors[0] < 2 && !e.paid) { // the gene's MP: each member pays it in pair mode
             const int cost = geneCost(*a, e.actors[0]);
@@ -823,7 +825,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                             BattleHit self;
                             self.target = k;
                             self.amount = u.hp / 4;
-                            if (keepAlive && u.hp - self.amount < 1) self.amount = std::max(0, u.hp - 1);
+                            self.amount = floored(k, self.amount);
                             if (self.amount > 0) breakEvent(e.actors[0], 2, t);
                             u.hp = std::max(0, u.hp - self.amount);
                             if (u.hp == 0 && u.status[kStatusEndure]) u.status[kStatusEndure] = 0, u.hp = 1;
@@ -883,7 +885,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             const int before = tf.hp;
             if (h.type == kHitKill) h.amount = tf.hp;
             if (h.amount > 0 && tf.status[kStatusInvincible]) h.amount = 0, h.type = kHitNoEffect; // Is_invincible
-            if (keepAlive && h.amount > 0 && tf.hp - h.amount < 1) h.amount = std::max(0, tf.hp - 1); // chk_karaok_dmg_hp
+            h.amount = floored(t, h.amount); // chk_karaok_dmg_hp
             if (calc == 0 && round > 3 && h.amount >= 1 && a->id == 18) lateAttack = true; // btlcalc_0404: +0xa50
             if (h.amount > 0) breakEvent(e.actors[0], 2, t);
             tf.hp = std::clamp(tf.hp - h.amount, 0, tf.hpMax);
@@ -1019,7 +1021,7 @@ void BattleRules::endRound() {
         int hp = has(i, 133) ? x.hpMax / 20 : 0;
         x.hp = std::min(x.hpMax, x.hp + hp);
         if (x.status[kStatusPoison] > 0) // poison: 10% a round (through btlcalc_dmg_hp)
-            x.hp = keepAlive ? std::max(std::min(x.hp, 1), x.hp - x.hpMax / 10) : std::max(0, x.hp - x.hpMax / 10);
+            x.hp = std::max(0, x.hp - floored(i, x.hpMax / 10));
         if (regenFull[size_t(i)]) x.hp = x.hpMax; // a story boss heals whole until its moment comes
         x.counterStance = false;
         if (has(i, 138)) x.mp = std::min(x.mpMax, x.mp + x.mpMax / 20);

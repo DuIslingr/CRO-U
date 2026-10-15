@@ -9252,84 +9252,105 @@ void drawEffects(App& app, const cr::Mat4& vp) { drawEffects(app, app.battle.eff
 // thing happens (flags 0xff1.. mark them seen), the battle's script ending with the flag.
 namespace battletalk {
 constexpr int kFlag = 4095;
-constexpr int kAnyRoute = -1;
-struct Moment { int route, group, when, arg, seen; }; // when: 0 a round, 1 HP <= max / arg, 2 the 0x104 case
-// _chk_karaok_frist: at the start
-constexpr Moment kFirst[] = {{2, 0x156, 0, 0, -1}, {kAnyRoute, 0x164, 0, 0, -1}, {kAnyRoute, 0x165, 0, 0, -1},
-                             {kAnyRoute, 0x166, 0, 0, -1}, {kAnyRoute, 0x167, 0, 0, -1}};
-// _chk_karaok_end: as the last enemy falls
-constexpr Moment kEnd[] = {{0, 0x154, 0, 0, -1}, {0, 0x158, 0, 0, -1}, {0, 0x160, 0, 0, -1}, {1, 0x155, 0, 0, -1},
-                           {1, 0x11b, 0, 0, -1}, {1, 0x159, 0, 0, -1}, {1, 0x161, 0, 0, -1}, {2, 0x162, 0, 0, -1},
-                           {3, 0x157, 0, 0, -1}, {3, 0x15b, 0, 0, -1}, {3, 0x163, 0, 0, -1}};
-// _chk_karaok_between: after a round - its number (when 0), or enemy 2's HP at most its most / arg
-// (when 1) while flag `seen` is clear
-constexpr Moment kBetween[] = {
-    {0, 0x104, 2, 3, 0x4d0},  {0, 0x173, 0, 3, -1},      {0, 0xad, 0, 2, -1},       {0, 0x105, 0, 3, -1},
-    {0, 0x154, 0, 3, -1},     {0, 0x158, 0, 2, -1},      {0, 0x160, 1, 2, 0x4d7},   {0, 0x170, 1, 2, 0x4d9},
-    {1, 0x118, 0, 3, -1},     {1, 0x119, 0, 3, -1},      {1, 0x159, 0, 2, -1},      {1, 0x161, 1, 2, 0x665},
-    {1, 0x170, 1, 2, 0x667},  {2, 0x178, 0, 2, -1},      {2, 300, 0, 3, -1},        {2, 0x176, 0, 3, -1},
-    {2, 0x156, 1, 5, 0x7f3},  {2, 0x17a, 0, 3, 0x7f4},   {2, 0x15e, 0, 5, 0x7f5},   {2, 0x162, 1, 2, 0x7f6},
-    {2, 0x170, 1, 2, 0x7f8},  {3, 0x140, 0, 3, -1},      {3, 0x177, 0, 1, -1},      {3, 0x15b, 0, 2, -1},
-    {3, 0x163, 1, 2, 0x985},  {3, 0x170, 1, 2, 0x987},   {kAnyRoute, 0x164, 1, 2, 0x4db},
-    {kAnyRoute, 0x165, 1, 2, 0x4dd}, {kAnyRoute, 0x166, 1, 2, 0x4df}, {kAnyRoute, 0x167, 1, 2, 0x4e1}};
-// _chk_karaok_dmg_hp: until flag `seen` is set nobody falls in these
-constexpr Moment kKeepAlive[] = {
-    {0, 0x104, 0, 0, 0x4d0}, {0, 0x173, 0, 0, 0x4d1}, {0, 0xad, 0, 0, 0x4a9},  {0, 0x105, 0, 0, 0x4d2},
-    {0, 0x154, 0, 0, 0x4d3}, {0, 0x158, 0, 0, 0x4d5}, {0, 0x160, 0, 0, 0x4d7}, {0, 0x170, 0, 0, 0x4d9},
-    {1, 0x118, 0, 0, 0x65f}, {1, 0x119, 0, 0, 0x660}, {1, 0x159, 0, 0, 0x663}, {1, 0x161, 0, 0, 0x665},
-    {1, 0x170, 0, 0, 0x667}, {2, 0x178, 0, 0, 0x7ef}, {2, 300, 0, 0, 0x7f0},   {2, 0x176, 0, 0, 0x7f1},
-    {2, 0x156, 0, 0, 0x7f3}, {2, 0x17a, 0, 0, 0x7f4}, {2, 0x15e, 0, 0, 0x7f5}, {2, 0x162, 0, 0, 0x7f6},
-    {2, 0x170, 0, 0, 0x7f8}, {3, 0x140, 0, 0, 0x97f}, {3, 0x177, 0, 0, 0x980}, {3, 0x15b, 0, 0, 0x983},
-    {3, 0x163, 0, 0, 0x985}, {3, 0x170, 0, 0, 0x987}, {kAnyRoute, 0x164, 0, 0, 0x4db},
-    {kAnyRoute, 0x165, 0, 0, 0x4dd}, {kAnyRoute, 0x166, 0, 0, 0x4df}, {kAnyRoute, 0x167, 0, 0, 0x4e1}};
-
-int route(const App& app) { return std::clamp(app.playerChar / 2, 0, 3); } // G+0xc18
+// Omega's chk_karaok_*: in event battles (+0xa6a) the story's talks (flag 0xfff, __menub_karaok_on)
+// by group and scenario - at the start (frist), as a round ends (between), as the next opens
+// (between_start), as the last enemy falls (end) - and its HP floors (dmg_hp)
 bool on(const App& app) { return app.battle.active && app.game.flag(kFlag); }
-template <size_t N> bool meets(const App& app, const Moment (&list)[N], const std::function<bool(const Moment&)>& more) {
-    const App::Battle& b = app.battle;
-    if (!b.eventBattle) return false;
-    for (const Moment& m : list)
-        if ((m.route == kAnyRoute || m.route == route(app)) && m.group == b.start.group && more(m)) return true;
-    return false;
-}
 void open(App& app) { app.game.setFlag(kFlag, true); } // (__menub_karaok_on)
+bool any(int g, std::initializer_list<int> list) { return std::find(list.begin(), list.end(), g) != list.end(); }
 
-// The scripted rules of this battle, as they stand now (chk_karaok_dmg_hp, btlcalc_status_prc)
+// chk_karaok_dmg_hp (event battles, enemies only): until each moment's flag, the least HP its
+// damage leaves - fighter 2's max HP x 80 / 60 / 40 / 20% then 1 in group 0x291, half then 1 in
+// 0x2a4 / 0x2a5, 1 in the others listed, and 1 for a monster whose row's +0x3a is set
 void rules(App& app) {
     App::Battle& b = app.battle;
     cr::BattleRules& r = b.rules;
-    r.keepAlive = meets(app, kKeepAlive, [&](const Moment& m) { return !app.game.flag(m.seen); });
+    r.hpFloor = {};
     r.regenFull = {};
     if (!b.eventBattle) return;
-    const int g = b.start.group, rt = route(app);
-    for (int i = 2; i < 5; ++i) // enemies: whole again each round until their moment
-        r.regenFull[size_t(i)] = (rt == 0 && g == 0x104 && !app.game.flag(0x4d0) && !r.lateAttack) ||
-                                 (rt == 2 && i == 2 && g == 0x17a && !app.game.flag(0x7f4)) ||
-                                 (rt == 2 && i == 2 && g == 0x15e && !app.game.flag(0x7f5));
+    const int g = b.start.group, sc = app.game.scenario;
+    auto fl = [&](int n) { return app.game.flag(n); };
+    const int most = r.f[2].hpMax;
+    int floor = 0;
+    if (sc == 0) {
+        if ((g == 0x28b && !fl(0x57b)) || (g == 0x28c && !fl(0x57d)) || (g == 0x28e && !fl(0x580)) ||
+            (g == 0x290 && !fl(0x585)) || (g == 0x292 && !fl(0x58a)) || (g == 0x293 && !fl(0x58c)) ||
+            (g == 0x294 && !fl(0x58f)))
+            floor = 1;
+        if (g == 0x291) {
+            if (!fl(0x587)) floor = most * 80 / 100 + 1;
+            else if (!fl(0x588)) floor = most * 60 / 100 + 1;
+            else if (!fl(0x592)) floor = most * 40 / 100 + 1;
+            else if (!fl(0x595)) floor = most / 5 + 1;
+            else if (!fl(0x593)) floor = 1;
+        }
+    } else {
+        if (g == 0x2a4) floor = !fl(0x780) ? most / 2 + 1 : !fl(0x781) ? 1 : 0;
+        if (g == 0x2a5) floor = !fl(0x785) ? most / 2 + 1 : !fl(0x792) ? 1 : 0;
+        if ((g == 0x297 && !fl(0x76f)) || (g == 0x298 && !fl(0x775)) || (g == 0x299 && !fl(0x777)) ||
+            (g == 0x29c && !fl(0x77c)) || (g == 0x2a2 && !fl(0x789)))
+            floor = 1;
+    }
+    for (int i = 2; i < 5; ++i) {
+        const cr::Fighter& x = r.f[size_t(i)];
+        const bool undying = x.def && int16_t(x.def->raw[0x3a] | x.def->raw[0x3b] << 8) >= 1; // the row's +0x3a
+        r.hpFloor[size_t(i)] = std::max(floor, undying ? 1 : 0);
+    }
+    // btlcalc_status_prc: group 0x293's enemies whole again each round until flag 0x58c
+    if (sc == 0 && g == 0x293 && !fl(0x58c))
+        for (int i = 2; i < 5; ++i) r.regenFull[size_t(i)] = true;
 }
 
 // btl_main 300 -> 400: the battle's first moment, else the first battle's tutorial (0xff1)
 bool tutorial(App& app, int key);
 void first(App& app) {
-    if (meets(app, kFirst, [](const Moment&) { return true; })) open(app);
+    const App::Battle& b = app.battle;
+    const int g = b.start.group;
+    const bool talk = b.eventBattle && (app.game.scenario == 0
+        ? any(g, {0x2e1, 0x28a, 0x2b7, 0x28c, 0x28d, 0x28f, 0x290, 0x291, 0x292, 0x293, 0x294}) || (g == 0x2ad && !app.game.flag(0xff1))
+        : any(g, {0x297, 0x29a, 0x298, 0x29b, 0x29c, 0x2a4, 0x2a5, 0x2a2}));
+    if (talk) open(app);
     else tutorial(app, 0xff1);
 }
-// btl_main 899: a round over and everyone standing
+// btl_main 0x352: a round over and everyone standing (the round counter, enemy 2's HP); group 0x28d
+// at half HP sets flag 0xffe (the battle's own end) instead
 void between(App& app) {
-    const cr::BattleRules& r = app.battle.rules;
-    const cr::Fighter& e = r.f[2];
-    if (meets(app, kBetween, [&](const Moment& m) {
-            if (m.when == 2) // 0x104: the third round, then the pair attack landing after it
-                return r.round == 3 || (r.round > 3 && r.lateAttack && !app.game.flag(m.seen));
-            if (m.seen >= 0 && app.game.flag(m.seen)) return false;
-            if (m.when == 0) return r.round == m.arg;
-            return e.hp <= e.hpMax / m.arg;
-        }))
-        open(app);
+    const App::Battle& b = app.battle;
+    if (!b.eventBattle) return;
+    const cr::BattleRules& r = b.rules;
+    const int g = b.start.group, n = r.round, hp = r.f[2].hp, most = r.f[2].hpMax;
+    auto fl = [&](int k) { return app.game.flag(k); };
+    bool talk = false;
+    if (app.game.scenario == 0) {
+        talk |= (g == 0x28b && n == 3) || (g == 0x28c && hp <= most / 2 && !fl(0x57d)) || (g == 0x28e && n == 2) ||
+                (g == 0x290 && n == 5) || (g == 0x292 && n == 3) || (g == 0x294 && (n == 5 || n == 9));
+        if (g == 0x28d && hp <= most / 2) app.game.setFlag(0xffe, true);
+        if (g == 0x291)
+            talk |= ((r.f[0].lastAction == 0x1b5 || r.f[1].lastAction == 0x1b5) && !fl(0x587)) ||
+                    (fl(0x587) && hp <= most * 80 / 100 && !fl(0x588)) || (fl(0x592) && hp <= most * 40 / 100 && !fl(0x595));
+    } else
+        talk |= (g == 0x297 && n == 1) || (g == 0x298 && n >= 1 && n <= 3) || (g == 0x299 && n == 1) || (g == 0x29c && n == 1) ||
+                (g == 0x2a4 && fl(0x780) && hp <= most / 2 && !fl(0x781)) ||
+                (g == 0x2a5 && fl(0x785) && hp <= most / 2 && !fl(0x792)) || (g == 0x2a2 && (n == 3 || n == 4));
+    if (talk) open(app);
+}
+// btl_main 0: the next round's commands open
+void betweenStart(App& app) {
+    const App::Battle& b = app.battle;
+    if (!b.eventBattle) return;
+    const int g = b.start.group, n = b.rules.round;
+    const bool talk = app.game.scenario == 0
+        ? (g == 0x293 && n == 3) || (g == 0x290 && (n == 2 || n == 7)) || (g == 0x294 && n == 3)
+        : (any(g, {0x297, 0x299, 0x2a4, 0x2a5}) && (n == 1 || n == 2)) || (g == 0x29c && n >= 1 && n <= 3) ||
+              (g == 0x2a2 && n >= 4 && n <= 6);
+    if (talk) open(app);
 }
 // btlord_chk 2: the enemies are down - a last word first? (btl_main 8000 waits for it)
 bool end(App& app) {
-    if (!meets(app, kEnd, [](const Moment&) { return true; })) return false;
+    const App::Battle& b = app.battle;
+    const int g = b.start.group;
+    if (!b.eventBattle || !(app.game.scenario == 0 ? any(g, {0x293, 0x294}) : any(g, {0x29a, 0x29b, 0x2a4, 0x2a5, 0x2a2})))
+        return false;
     open(app);
     return true;
 }
@@ -10571,7 +10592,8 @@ void endRound(App& app) {
         b.member = 0;
         b.commandSaid[0] = b.commandSaid[1] = false; // +0xafc / +0xafd
         battleMenu(app, App::Battle::Top);
-        battletalk::between(app); // btl_main 899
+        battletalk::between(app); // btl_main 0x352
+        if (!app.game.flag(battletalk::kFlag)) battletalk::betweenStart(app); // btl_main 0
         break;
     }
 }

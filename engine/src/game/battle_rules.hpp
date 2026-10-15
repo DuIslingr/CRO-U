@@ -146,6 +146,7 @@ struct Fighter {
     bool gone = false;             // fled the battle (calc 11, +0x93)
     bool counterStance = false;    // calc 34 (+0x94): answers every physical hit this round
     int stolen = 0;                // Oz it took (calc 10, +0x9c): back when it falls
+    int lastAction = 0;            // the action it last took (btl +0xac: chk_karaok_between)
     bool alive() const { return present && hp > 0 && !gone; }
 };
 
@@ -228,10 +229,15 @@ public:
     // skill was learned (0506)
     bool elementTaken = false, statusTaken = false, learnedNew = false;
     // The story battles' scripted rules (set by the scene from the group, the route and flags):
-    // chk_karaok_dmg_hp - no damage takes a fighter below 1 HP; btlcalc_status_prc - these
+    // chk_karaok_dmg_hp - the least HP damage leaves each fighter (0: none; Omega's story bosses
+    // stop at 80 / 60 / 40 / 20 / 50% or 1 HP until their moment); btlcalc_status_prc - these
     // fighters are back to full HP as the round ends; +0xa50 - a pair attack (action 18) landed
     // after the third round (btlcalc_0404)
-    bool keepAlive = false;
+    std::array<int, 5> hpFloor{};
+    int floored(int t, int amount) const {
+        const int fl = t >= 0 && t < 5 ? hpFloor[size_t(t)] : 0;
+        return fl > 0 && amount > 0 && f[size_t(t)].hp - amount < fl ? std::max(0, f[size_t(t)].hp - fl) : amount;
+    }
     std::array<bool, 5> regenFull{};
     bool lateAttack = false;
 
