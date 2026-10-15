@@ -15781,6 +15781,11 @@ int runExplore(App& app, int maxActions) {
                 worldAsked = true;
             }
             if (app.shop.open && !app.shop.talkRunning) closeShop(app); // (it buys nothing)
+            if (app.staffRoll.open) { // the ending's credits, fast, the end card tapped away
+                app.staffRoll.fast = true;
+                stepStaffRoll(app);
+                if (app.staffRoll.state >= 7) staffRollTap(app);
+            }
             if (app.saveScreen.open && !app.booting) closeSaveScreen(app);
             if (app.itemWindowOpen) app.game.setFlag(0, true);
             app.tapPending = true;
@@ -16601,8 +16606,8 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             const LoadedModel& lm = app.npcModels[d.model];
             const std::string act = d.action >= 0 && d.action < int(lm.actions.size())
                                         ? lm.actions[d.action].name + (d.action < lm.builtin ? " (own)" : "") : "-";
-            std::printf("npc %-16s at (%.1f %.1f %.1f) view (%.0f, %.0f) action %s t %.0f\n", d.model.c_str(), p.x, p.y,
-                        p.z, sx, sy, act.c_str(), d.time);
+            std::printf("npc %-16s at (%.1f %.1f %.1f) view (%.0f, %.0f) action %s t %.0f (id %d)\n", d.model.c_str(), p.x, p.y,
+                        p.z, sx, sy, act.c_str(), d.time, d.id);
         }
     }
     if (app.havePlayer && app.haveStageCam) {
