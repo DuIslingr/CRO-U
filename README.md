@@ -88,6 +88,9 @@ Done so far:
       the level-up genes 30 HP / 3 MP / 5), seeds 10 a seed to 9999 (`use_item`,
       `MuCom_GetUsedItemLimitNum`); group 695's guest takes orders and leaves the enemies' levels to
       Olgar's; the save screen's load flags (31 / 32) and clear data; gold boxes (`Uty_ChkItem`, key 2)
+- [x] Omega's text at its own size (PutMsg's lines doubled with the rest of its tex2d; names at
+      about three quarters), the item band (`Uty_GetItem_*`), SD full-screen cards (the second
+      scenario's notice), Select Scenario's card (flag 0x643)
 - [x] the self-test runs clean on Omega's data (its checks moved onto Omega's rooms, groups,
       scripts and tables)
 
