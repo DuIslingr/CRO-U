@@ -97,6 +97,9 @@ Both scenarios play from the opening to their endings. Checked against Omega's o
 - **The collection**: all 80 presents can be found - the gold boxes (keys from the shop), the
   maze's trials and its post-game extras (open as 3.1.0 and the Vita have them); the first four
   worlds' boxes drawn again on every World Select entry, as Omega's TreasureBoxManager does
+- **Timing**: the game's own 20 frames a second (its iPad releases' 0.05 s timer, Android's 50 ms
+  frames), drawn at 60 (Options > Display > Frame Rate: 30 / 60 / 120 / 144 / unlimited) with the
+  leader, NPCs, cameras, scroll and battle actors shown moving between its frames
 - **Testing**: `--selftest` runs clean on Omega's data (iPad 1.0.0 and 3.1.0, iPad + Vita, Vita
   alone); `--explore n [scenario]` plays either scenario by itself to its ending and staff roll -
   the second finding all 80 presents on the way
