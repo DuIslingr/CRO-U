@@ -25,6 +25,9 @@ build/chaosrings --data "<path to>/ChaosRingsOmegaHDeng.app/data" --vita "<path 
 build/chaosrings --data "<path to>/PCSG00499"
 ```
 
+`--android <folder>` adds the Android release's expansion file (a folder holding its
+`main.*.obb` and APK): its sharper textures and the art only it has (`docs/ANDROID.md`).
+
 Either iPad release works as the game: 1.0.0, or the voiced 3.1.0 (Japanese voices, eight
 languages) with the same layout and art.
 

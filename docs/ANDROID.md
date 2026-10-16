@@ -15,9 +15,33 @@ Nothing of the APK is in this repository.
 | `assets/00000`, `00001` | two OpenType (CFF) fonts |
 | `assets/loading.mct` | the loading picture |
 
-The game's data is **not** in the APK: it comes as a Google Play expansion file (`main.<version
-code>.<package>.obb`, MIME `application/vnd.android.obb`), a zip the native code reads with miniz
-(`mz_zip_reader_*`). Its file names are the iOS data's, plus the Android art below.
+The game's data is **not** in the APK: it comes as a Google Play expansion file
+(`main.110.com.square_enix.chaosringsomega.googleplay.obb`, 1,076,352,109 bytes): the game's 2125
+files one after another, **with no table of its own**. The table is in `classes.dex`: a Java
+class's constructor fills a `String[2125]` with the names, one const-string at a time, and two
+`int[2125]` arrays (fill-array-data payloads) hold each file's size and CRC-16
+(`GetSizeAndOffsetFromOBB` -> `NDKGetSizeAndOffsetFromOBB`); a file's offset is the sizes before
+it added up, and they add up to the OBB exactly. `cr::ObbArchive` (`engine/src/assets/obb.cpp`)
+reads the table out of your APK at run time; `crtool obb <obb> <apk> [name -o out]` lists, checks
+or extracts. (The engine links miniz, `mz_zip_reader_*`, but the OBB isn't a zip.)
+
+The files: the multi-language 3.1.0 data (`MAPtitle_*` in eight languages, the voiced scripts,
+`voicebtl.bin` / `voiceevnt.bin`) plus
+
+- 341 `_15` pictures (the 1.5x screens' art) and `window_cutin_480 / 800 / 854 / 960 / 1024 /
+  1280 / 1366`, `achievement*`;
+- every texture as RGB / RGBA or an 8-bit palette - no PVRTC (Android's GPUs lack it), so the
+  `_hd` art is sharper than the iPad's PVRTC (the formats: RGB888 12, RGBA8888 9, PAL8_RGB8 202,
+  PAL8_RGBA8 551, PAL8_RGB5A1 7, PAL8_RGBA4 522, PAL4_RGB8 3, PAL4_RGBA8 17);
+- the music as `j001m01.mca` .. `j001m38.mca`: Ogg Vorbis after a 1 KB header (`setbgm_caf` builds
+  the names, `SLBgmPlay` opens the file at +0x400) - the iOS release's `bgm*.caf`; the other `.mca`
+  files are animations, as on iOS.
+
+`--android <folder | main.*.obb>` (or `CR_ANDROID`, or Options, Game, Android Assets; saved as
+`android=`) adds it as a source: a picture the data lacks, or one of the same size, comes from
+it, and a model package's textures when it holds as many of the same sizes (the meshes stay the
+data's). The folder must hold the OBB and the APK; the APK whose table adds up to the OBB is the
+one used.
 
 ## The screen
 
