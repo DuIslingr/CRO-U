@@ -23,7 +23,7 @@ class's constructor fills a `String[2125]` with the names, one const-string at a
 (`GetSizeAndOffsetFromOBB` -> `NDKGetSizeAndOffsetFromOBB`); a file's offset is the sizes before
 it added up, and they add up to the OBB exactly. `cr::ObbArchive` (`engine/src/assets/obb.cpp`)
 reads the table out of your APK at run time; `crtool obb <obb> <apk> [name -o out]` lists, checks
-or extracts. (The engine links miniz, `mz_zip_reader_*`, but the OBB isn't a zip.)
+or extracts. (The game's library links miniz, `mz_zip_reader_*`, but the OBB isn't a zip.)
 
 The files: the multi-language 3.1.0 data (`MAPtitle_*` in eight languages, the voiced scripts,
 `voicebtl.bin` / `voiceevnt.bin`) plus
