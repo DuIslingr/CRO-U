@@ -40,7 +40,10 @@ The files: the multi-language 3.1.0 data (`MAPtitle_*` in eight languages, the v
 `--android <folder | main.*.obb>` (or `CR_ANDROID`, or Options, Game, Android Assets; saved as
 `android=`) adds it as a source: a picture the data lacks, or one of the same size, comes from
 it, and a model package's textures when it holds as many of the same sizes (the meshes stay the
-data's). The folder must hold the OBB and the APK; the APK whose table adds up to the OBB is the
+data's); the music plays from its Ogg Vorbis tracks (stb_vorbis) before the iPad's AAC (the
+Vita's ATRAC9 still first), looping at the Android build's own points - `setbgm_caf`'s table at
+0xaed80, the sample `SndBgmPlayerCallback` seeks back to (-1: bgm30 plays once) - and it fills
+bgm10, bgm11 and bgm29, which the iPad's data lacks. The folder must hold the OBB and the APK; the APK whose table adds up to the OBB is the
 one used.
 
 ## The screen

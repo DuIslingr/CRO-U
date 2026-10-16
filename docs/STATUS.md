@@ -164,3 +164,8 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
       out (flag 4075, the page-turn cue, only for a tap's turn, as 0xfeb is); 0x16 0 / 1 sets the text white or black for the rest of the message (four of
       j001_d06's lines and a manual page); 0x11 breaks the line, 0x17 centres one, 0x15 / 0x1c the
       name plate and the speaking side as before
+- [x] the music as Omega has it (`_BGM_FILE` 0xdb344 / `_BGM_REPEAT` 0xc9d94): 38 tracks -
+      bgm01..30 but 07, then bgm41..49 - where the port had CR1's 30 (bgm31 for track 29, nothing
+      for 30..37); a track plays once when its repeat is 0 (bgm30), as `setRepeatFrame:` has it
+- [x] the Android release as an add-on (`--android`, docs/ANDROID.md): its textures, its art,
+      its Ogg Vorbis music
