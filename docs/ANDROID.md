@@ -33,7 +33,7 @@ The files: the multi-language 3.1.0 data (`MAPtitle_*` in eight languages, the v
 - every texture as RGB / RGBA or an 8-bit palette - no PVRTC (Android's GPUs lack it), so the
   `_hd` art is sharper than the iPad's PVRTC (the formats: RGB888 12, RGBA8888 9, PAL8_RGB8 202,
   PAL8_RGBA8 551, PAL8_RGB5A1 7, PAL8_RGBA4 522, PAL4_RGB8 3, PAL4_RGBA8 17);
-- the music as `j001m01.mca` .. `j001m38.mca`: Ogg Vorbis after a 1 KB header (`setbgm_caf` builds
+- the music as `j001m01.mca` .. `j001m30.mca` and `j001m41` .. `49` (38: no 07): Ogg Vorbis after a 1 KB header (`setbgm_caf` builds
   the names, `SLBgmPlay` opens the file at +0x400) - the iOS release's `bgm*.caf`; the other `.mca`
   files are animations, as on iOS.
 
