@@ -233,6 +233,8 @@ struct App {
     cr::Hud optionsHud;
     cr::Texture windowTex;                 // window.mct (chk_hd_name: window_ipad on the iPad): the UI atlas
     cr::Texture cutinTex;                  // window_cutin.mct (tex2d slot 0x2b on the iPad): the talk parchment
+    cr::Texture cutinWideTex;              // window_cutin_<w>.mct (Android, slot 0x2f): androidCutin's
+    std::string cutinWideName;
     cr::Texture speedLinesTex;             // syuutyuusen(_ipad).mct (slot 0x2e): scene effect 1
     cr::Texture titleArt[2];               // __menuu_TitleSet: title1.mct (MuCom slot 0x11), chaos.mct (0x12)
     float footPrev = 0;                    // player's animation time last frame (footsteps)
@@ -3156,7 +3158,7 @@ void loadVideo(App& app, const char* text) {
     v.hdTextures = keyValue(text, "\nhd_textures=", v.hdTextures) != 0;
     v.smoothModels = keyValue(text, "\nsmooth_models=", v.smoothModels);
     if (v.smoothModels != 2 && v.smoothModels != 3) v.smoothModels = 0;
-    v.layout = std::clamp(keyValue(text, "\nlayout=", v.layout), 0, 3);
+    v.layout = std::clamp(keyValue(text, "\nlayout=", v.layout), 0, 4);
     app.environmentEffects = keyValue(text, "\nenvironment_effects=", app.environmentEffects) != 0;
     app.lockOrientation = keyValue(text, "\nlock_orientation=", app.lockOrientation) != 0;
     if (const char* at = SDL_strstr(text, "\npad_confirm=")) app.padConfirmEast = SDL_strncmp(at + 13, "south", 5) != 0;
@@ -3169,8 +3171,9 @@ void applyVideo(App& app) {
     r.setWidescreen(v.widescreen);
     // 2.2.0's / Omega's iPhone screens (3:2): the iPhone's data, or the Vita's alone - its art is the
     // iPhone's Retina sheets (the Vita ran the iPhone code path) - unless the iPad layout is asked for
-    const bool phone = v.layout == 2 || v.layout == 3 || (v.layout == 0 && (app.phoneData || app.vitaOnly));
+    const bool phone = v.layout >= 2 || (v.layout == 0 && (app.phoneData || app.vitaOnly));
     r.setVitaScreen(v.layout == 3 || (v.layout == 0 && app.vitaOnly)); // (its 960 x 544: the Vita alone's own)
+    r.setAndroidScreen(v.layout == 4); // (the Android release's: docs/ANDROID.md)
     const bool changed = phone != r.phoneLayout();
     r.setPhoneLayout(phone);
     if (changed && app.rendererReady) { // the UI's sheets again, by chk_hd_name for this layout
@@ -3296,7 +3299,7 @@ void adjustVideo(App& app, int row, int dir) {
     case 9: v.upscaler = (v.upscaler + dir + 3) % 3; break;
     case 10: v.upscaleMode = (v.upscaleMode + dir + 5) % 5; break;
     case 11: v.sharpness = std::clamp(v.sharpness + dir * 5, 0, 100); break;
-    case 14: v.layout = (v.layout + dir + 4) % 4; break;
+    case 14: v.layout = (v.layout + dir + 5) % 5; break;
     case 13: v.smoothModels = (v.smoothModels == 0 ? (dir > 0 ? 2 : 3) : v.smoothModels == 2 ? (dir > 0 ? 3 : 0) : (dir > 0 ? 0 : 2)); break;
     case 12: { // HD textures: what loads from now on (the next room); the UI atlas at once
         v.hdTextures = !v.hdTextures;
@@ -3522,9 +3525,10 @@ std::vector<OptRow> optionRows(App& app, int page) {
         pair("Aspect", "4:3", "Wide", v.widescreen ? 1 : 0, [&app](int i) {
             if (app.video.widescreen != (i == 1)) adjustVideo(app, 2, 1);
         });
-        static const char* const kLayout[] = {"Auto", "iPad", "iPhone", "Vita"};
-        value("Layout", kLayout[std::clamp(v.layout, 0, 3)], [&app](int dir) { adjustVideo(app, 14, dir ? dir : 1); });
-        rows.back().hint = "The screens' layout: the iPad release's (4:3) or the iPhone 2.2.0's (3:2); Auto follows the data";
+        static const char* const kLayout[] = {"Auto", "iPad", "iPhone", "Vita", "Android"};
+        value("Layout", kLayout[std::clamp(v.layout, 0, 4)], [&app](int dir) { adjustVideo(app, 14, dir ? dir : 1); });
+        rows.back().hint = "The screens' layout: the iPad release's (4:3), the iPhone's (3:2), the Vita's or the Android "
+                           "release's (16:9, its screens centred); Auto follows the data";
         static const char* const kPaintings[] = {"Original", "Whole", "Fill Width"};
         value("Painted Rooms", kPaintings[std::clamp(v.paintings, 0, 2)], [&app](int dir) { adjustVideo(app, 3, dir ? dir : 1); });
         onOff("VSync", &v.vsync, [&app] { applyVideo(app); });
@@ -9743,6 +9747,29 @@ void drawMessageLines(App& app, const std::vector<std::string>& page, float x, f
     }
 }
 
+// The Android build's message strip for the screen's width (tex2d_setup_tex: window_cutin_480 ..
+// _1366, the first at least as wide; none wider) on a 720-tall phone of the screen's aspect, its
+// width in `wv`: window_cutin_<w> from the Android data, kept until the width changes
+int androidCutinWidth(float wv) {
+    static const int kWidths[] = {480, 800, 854, 960, 1024, 1280, 1366};
+    const int* w = std::find_if(std::begin(kWidths), std::end(kWidths), [&](int k) { return int(wv) <= k; });
+    return w == std::end(kWidths) ? 0 : *w;
+}
+
+const cr::Texture* androidCutin(App& app, float& wv) {
+    wv = 720.0f * app.renderer.screenW() / cr::Renderer::kLogicalH;
+    const int w = androidCutinWidth(wv);
+    if (w == 0 || !app.android.isOpen()) return nullptr;
+    const std::string name = "window_cutin_" + std::to_string(w) + ".mct";
+    if (name != app.cutinWideName) {
+        app.renderer.destroy(app.cutinWideTex);
+        cr::Image img;
+        if (loadImage(app, name, img)) app.cutinWideTex = app.renderer.upload(img);
+        app.cutinWideName = name;
+    }
+    return app.cutinWideTex.id ? &app.cutinWideTex : nullptr;
+}
+
 void drawMessageBox(App& app, const std::vector<std::string>& page, const std::string& speaker, bool next,
                     const std::string& pageNo) {
     cr::Renderer& r = app.renderer;
@@ -9834,7 +9861,18 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         // lines at (36, y + text y) - no +18 - (the port's font offsets as for the iPad)
         static const float kWinParchmentPhone[4] = {1024, 240, 960, 256};
         const short* pr = kRect[app.msgLines == 1];
-        drawWinPiece(app, kWinParchmentPhone, 32, 2.0f * (pr[0] + 16) + 64, 960, 256);
+        float wv = 0;
+        if (const cr::Texture* strip = r.androidScreen() ? androidCutin(app, wv) : nullptr) {
+            // Android (draw_win, read_window_flag): the strip's (0, 0, w, h - y) 1:1 from the
+            // screen's left edge at y 2 y + 20 (FUN_00094a70), then the parchment's name streak
+            // (512, 120, 196, 40) at (x, y + 16) (FUN_00094b50)
+            static const float kWinNamePhone[4] = {1024, 240, 392, 80};
+            const float y = 2.0f * pr[0] + 20;
+            app.renderer.drawQuadUV(*strip, 32 - (wv - 960) * 0.5f, y + 64, wv, 720 - y, 0, 0, wv, 720 - y);
+            drawWinPiece(app, kWinNamePhone, 32, 2.0f * (pr[0] + 16) + 64, 392, 80);
+        } else {
+            drawWinPiece(app, kWinParchmentPhone, 32, 2.0f * (pr[0] + 16) + 64, 960, 256);
+        }
         if (!speaker.empty()) {
             app.nameHud.setTint(1, 1, 1);
             app.nameHud.drawAt(r, {speaker}, 2.0f * 24 + 32, 2.0f * 206 + 64 - 25, kNameScale, 0, 0, 0.0f);
@@ -15764,6 +15802,11 @@ int runSelfTest(App& app) {
             if (cr::checkAndroidTrack(read, t, samples, loopOk)) ++decoded, loops += loopOk, minutes += double(samples) / 44100 / 60;
         }
         problems += decoded < cr::kBgmTracks - 1 || loops != decoded; // (CR1's: no j001m31)
+        // the layout's message strip (window_cutin_<w>) by the width of a 720-tall screen; each in the data
+        int strips = 0;
+        for (const int w : {480, 800, 854, 960, 1024, 1280, 1366}) strips += app.android.contains("window_cutin_" + std::to_string(w) + ".mct");
+        problems += strips != 7 || androidCutinWidth(1080) != 1280 || androidCutinWidth(1280.0f * 0.9999f) != 1280 ||
+                    androidCutinWidth(1281) != 1366 || androidCutinWidth(1680) != 0;
         std::printf("android music: %d of %d tracks decode (%.1f minutes), %d loop points inside them; %d problems\n", decoded,
                     cr::kBgmTracks, minutes, loops, problems);
         mapErrors += problems;
@@ -17849,8 +17892,9 @@ void videoArgs(App& app, int argc, char** argv) {
         else if (SDL_strcmp(a, "--fullscreen") == 0) v.display = 1;
         else if (SDL_strcmp(a, "--borderless") == 0) v.display = 2;
         else if (SDL_strcmp(a, "--widescreen") == 0) v.widescreen = true;
-        else if (SDL_strcmp(a, "--layout") == 0 && i + 1 < argc) // --layout auto | ipad | iphone
-            v.layout = SDL_strcmp(argv[i + 1], "vita") == 0 ? 3 : SDL_strcmp(argv[i + 1], "iphone") == 0 ? 2 : SDL_strcmp(argv[i + 1], "ipad") == 0 ? 1 : 0;
+        else if (SDL_strcmp(a, "--layout") == 0 && i + 1 < argc) // --layout auto | ipad | iphone | vita | android
+            v.layout = SDL_strcmp(argv[i + 1], "android") == 0 ? 4 : SDL_strcmp(argv[i + 1], "vita") == 0 ? 3
+                     : SDL_strcmp(argv[i + 1], "iphone") == 0 ? 2 : SDL_strcmp(argv[i + 1], "ipad") == 0 ? 1 : 0;
         else if (SDL_strcmp(a, "--zoom-paintings") == 0) v.paintings = 2;
         else if (SDL_strcmp(a, "--whole-paintings") == 0) v.paintings = 1;
         else if (SDL_strcmp(a, "--render-scale") == 0 && next) v.renderScale = std::clamp(SDL_atoi(next), 25, 400);

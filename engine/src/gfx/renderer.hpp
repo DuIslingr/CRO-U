@@ -107,13 +107,21 @@ public:
     // Tex2d images, the portraits) at full size, 12 px up, and the logos (7) 48 down (_tex2d_draw)
     void setVitaScreen(bool on) { vita_ = on; }
     bool vitaScreen() const { return vita_ && phone_; }
+    // The Android release's screen (with the iPhone layout; docs/ANDROID.md): its 480 x 320 2D at
+    // 2x on a 720-tall screen, centred - the layout x 16/15 here - the full-width parts at the
+    // screen's width; 16:9 when not widescreen
+    void setAndroidScreen(bool on) { android_ = on; }
+    bool androidScreen() const { return android_ && phone_; }
+    static constexpr float kAndroidScale = 16.0f / 15.0f;
     void setLayer(int kind) { layer_ = kind; }
     int layer() const { return layer_; }
-    float layoutScale() const { return vitaScreen() && (layer_ == 3 || layer_ == 7) ? kPhoneScale / 0.85f : kPhoneScale; }
+    float layoutScale() const {
+        return androidScreen() ? kAndroidScale : vitaScreen() && (layer_ == 3 || layer_ == 7) ? kPhoneScale / 0.85f : kPhoneScale;
+    }
     void layoutToScreen(float& x, float& y) const;
     // The visible screen's right / top edge in the layout's units (toLogical's)
-    float layoutRight() const { return phone_ ? screenW_ * 0.5f + screenW_ * 0.5f / kPhoneScale : screenW_; }
-    float layoutTop() const { return phone_ ? 384.0f - 384.0f / kPhoneScale : 0.0f; }
+    float layoutRight() const { return phone_ ? screenW_ * 0.5f + screenW_ * 0.5f / layoutScale() : screenW_; }
+    float layoutTop() const { return phone_ ? 384.0f - 384.0f / layoutScale() : 0.0f; }
     void screenToLayout(float& x, float& y) const;
     // Frames rendered at `scale` x the window's pixels and with `samples` x MSAA, where the
     // device renders offscreen (Vulkan); the frame is then scaled to the window
@@ -148,6 +156,7 @@ private:
     float scaleX_ = 1, scaleY_ = 1;          // the current target's (the scene's, while in it)
     float screenW_ = kLogicalW, originX_ = 0, renderScale_ = 1;
     bool vita_ = false;
+    bool android_ = false;
     int layer_ = 0;
     bool widescreen_ = false, inScene_ = false, phone_ = false;
     int frameW_ = 0, frameH_ = 0; // the full frame (drawableW_/H_ is the scene's while in it)

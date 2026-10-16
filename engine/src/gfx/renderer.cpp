@@ -169,7 +169,8 @@ void Renderer::mapScreen(int drawableW, int drawableH) {
     // The logical screen: 768 tall, 4:3 or (widescreen) the window's aspect up to 21:9, fitted
     // inside the frame and centred
     const float least = vitaScreen() ? 960.0f / 544.0f : phone_ ? 1.5f : 4.0f / 3.0f; // the Vita's, the iPhone's 3:2, the iPad's 4:3
-    const float aspect = widescreen_ ? std::clamp(windowAspect_, least, 21.0f / 9.0f) : least;
+    const float fixed = androidScreen() ? 16.0f / 9.0f : least; // (Android: a 1280 x 720 phone's)
+    const float aspect = widescreen_ ? std::clamp(windowAspect_, least, 21.0f / 9.0f) : fixed;
     screenW_ = kLogicalH * aspect;
     const float sx = float(frameW_) / screenW_, sy = float(frameH_) / kLogicalH;
     scale_ = sx < sy ? sx : sy;

@@ -43,7 +43,7 @@ it, and a model package's textures when it holds as many of the same sizes (the 
 data's); the music plays from its Ogg Vorbis tracks (stb_vorbis) before the iPad's AAC (the
 Vita's ATRAC9 still first), looping at the Android build's own points - `setbgm_caf`'s table at
 0xaed80, the sample `SndBgmPlayerCallback` seeks back to (-1: bgm30 plays once) - and it fills
-bgm10, bgm11 and bgm29, which the iPad's data lacks. The folder must hold the OBB and the APK; the APK whose table adds up to the OBB is the
+bgm10, bgm11 and bgm29, which the iPad's data lacks. The folder must hold the OBB and the APK (or the APK's `classes.dex`); the one whose table adds up to the OBB is the
 one used.
 
 ## The screen
@@ -60,6 +60,16 @@ one used.
 - Full-screen pictures (`MuComPictTexNoDrawFull15`) fit an 800 x 480 design to the screen,
   min(w / 800, h / 480).
 - gac +0x1e26bc = w / 480 (w / 512 above 480), at most 2.
+
+The port's Layout: Android (Options, Display, or `--layout android`) draws the iPhone layout as a
+720-tall Android phone at 2x would: the 480 x 320 screen centred on a 16:9 screen (the window's
+aspect in widescreen), and, with `--android`, the message window as `draw_win` draws it when it
+has a strip (`read_window_flag`): `window_cutin_<w>` (the first width at least the screen's, for
+a 720-tall screen of its aspect; none above 1366, where the iPhone's parchment stays) 1:1 from
+the screen's left edge, its (0, 0, w, h - y) at y 2 y + 20 (`FUN_00094a70`), and over it the
+parchment's name streak, `window`'s (512, 120, 196, 40) at (x, y + 16) (`FUN_00094b50`). The
+pictures `MuComPictTexNoDrawFull2` fits to the screen (min(w / 480, h / 320) / 2) keep the
+iPhone's place.
 
 ## Other differences
 
