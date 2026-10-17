@@ -25,6 +25,12 @@ it added up, and they add up to the OBB exactly. `cr::ObbArchive` (`engine/src/a
 reads the table out of your APK at run time; `crtool obb <obb> <apk> [name -o out]` lists, checks
 or extracts. (The game's library links miniz, `mz_zip_reader_*`, but the OBB isn't a zip.)
 
+The event files (the areas' `.evt` and `sys.evt`) are stored scrambled, as in CR1's Android
+build: `FUN_0003c484` - called by `file_load_malloc` (`sys.evt`) and `file_load_addr`
+(`fldread_evt_init2`) - XORs every other byte from 0x1000 on with the same 21-byte key (61 19 4a
+ed 04 a7 a1 48 5a 6f 44 b9 d9 ed 74 da 75 9c d8 f5 3f, byte 0x1000 + 2k with key[k % 21]).
+`ObbArchive::read` unscrambles them.
+
 The files: the multi-language 3.1.0 data (`MAPtitle_*` in eight languages, the voiced scripts,
 `voicebtl.bin` / `voiceevnt.bin`) plus
 
@@ -45,6 +51,13 @@ Vita's ATRAC9 still first), looping at the Android build's own points - `setbgm_
 0xaed80, the sample `SndBgmPlayerCallback` seeks back to (-1: bgm30 plays once) - and it fills
 bgm10, bgm11 and bgm29, which the iPad's data lacks. The folder must hold the OBB and the APK (or the APK's `classes.dex`); the one whose table adds up to the OBB is the
 one used.
+
+With no iOS data (and no Vita copy) the same folder is the whole game (`--data` or `--android`,
+`CR_ANDROID`, the saved folder, or `android/` beside the build): every file read from inside
+the OBB by its own name, the voice banks streamed from it (`SoundSystem::setLocator`), the music
+its Ogg Vorbis. It holds the `_ipad` sheets, so it runs as 3.1.0's iPad data; next to the iPad's
+it lacks only the `bgm*.caf` music, which its own tracks replace. The self-test passes from it
+alone; `crtool obb <obb> <apk> --names [data]` compares the names with an iPad's.
 
 ## The screen
 

@@ -169,3 +169,5 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
       for 30..37); a track plays once when its repeat is 0 (bgm30), as `setRepeatFrame:` has it
 - [x] the Android release as an add-on (`--android`, docs/ANDROID.md): its textures, its art,
       its Ogg Vorbis music
+- [x] the Android release alone as the game (`--data` / `--android` with no iOS data): the
+      OBB's files, its event files unscrambled, voices streamed from it; self-test clean

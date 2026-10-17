@@ -23,10 +23,13 @@ cmake --build build
 build/chaosrings --data "<path to>/ChaosRingsOmegaHDeng.app/data"
 build/chaosrings --data "<path to>/ChaosRingsOmegaHDeng.app/data" --vita "<path to>/PCSG00499"
 build/chaosrings --data "<path to>/PCSG00499"
+build/chaosrings --data "<folder with main.110.com.square_enix.chaosringsomega.googleplay.obb and the APK>"
 ```
 
 `--android <folder>` adds the Android release's expansion file (a folder holding its
 `main.*.obb` and APK): its sharper textures and the art only it has (`docs/ANDROID.md`).
+With no iOS data that folder is the whole game (`--data` or `--android`): the Android release
+(1.1.6) alone, as 3.1.0's iPad data (voices, eight languages), its Ogg Vorbis music.
 
 Either iPad release works as the game: 1.0.0, or the voiced 3.1.0 (Japanese voices, eight
 languages) with the same layout and art.
