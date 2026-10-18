@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Chaos Rings Omega
+Comment=A reimplementation of the game (needs your own copy of its data)
+Exec=chaosrings
+Icon=chaosringsomega
+Terminal=false
+Categories=Game;RolePlaying;
