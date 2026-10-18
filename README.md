@@ -43,6 +43,23 @@ directory. Settings and saves go to the `ChaosRingsOmegaHD` profile folder
 The Vita copy alone runs as the Vita does: the iPhone's Retina layout on its 960 × 544 screen
 (Options, Display, Layout: Vita - also `--layout vita` over the iPad's data).
 
+## Platforms
+
+Every push is built for Linux, Windows, macOS and Android by `.github/workflows/build.yml`; the
+binaries are that run's artifacts (nothing of the game is in them). Windows, macOS and Android are
+built in CI but not yet played on a real machine.
+
+| Platform | Build | Renderer | The data (besides `--data` and `CR_DATA`) |
+|---|---|---|---|
+| Linux | as above | Vulkan, OpenGL 3.3 | as above |
+| Windows 10+ (x64) | MSVC and Ninja from a Developer prompt; the [Vulkan SDK](https://vulkan.lunarg.com/) for Vulkan. SDL3 and zlib are built by CMake | Vulkan, OpenGL 3.3 | `dataHD\` beside `chaosrings.exe` |
+| macOS 11+ (Apple silicon and Intel) | Xcode's command-line tools and Ninja; add `"-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"` for both | OpenGL 3.3 (Vulkan needs MoltenVK, not yet bundled) | `dataHD/` beside `chaosrings.app`, or in its `Contents/Resources/` |
+| Android 7+ (arm64, x86-64) | the Android SDK and NDK: `git clone -b release-3.2.0 https://github.com/libsdl-org/SDL android/SDL`, then `gradle assembleRelease` in `android/` | OpenGL ES 3.0 | `Android/data/local.preservation.chaosringsomega/files/dataHD/` on the shared storage (copy it there over USB) |
+
+`-DCR_GLES=ON` builds the desktop game on OpenGL ES 3.0, as Android runs it (Mesa has it): a way
+to test that path without a device. Settings and saves go to SDL's profile folder:
+`%APPDATA%\preservation\ChaosRingsOmegaHD\` on Windows, `~/Library/Application Support/preservation/ChaosRingsOmegaHD/` on macOS.
+
 ## Controls
 
 A controller plays as the Vita does. The face buttons are by position, so on an Xbox pad ○ is B,
