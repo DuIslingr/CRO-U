@@ -22,6 +22,7 @@
 #include <SDL3/SDL_main.h>
 
 #include <algorithm>
+#include <bitset>
 #include <functional>
 #include <ctime>
 #include <map>
@@ -17106,7 +17107,7 @@ int runExplore(App& app, int maxActions, int scenario) {
     };
     auto flagCount = [&] {
         int c = 0;
-        for (uint32_t w : app.game.flags) c += __builtin_popcount(w);
+        for (uint32_t w : app.game.flags) c += int(std::bitset<32>(w).count());
         return c;
     };
     auto stateKey = [&] {
