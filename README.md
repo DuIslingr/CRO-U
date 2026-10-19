@@ -20,28 +20,96 @@ Licence: GPL-2.0-or-later (`LICENSE`); the bundled libraries keep their own (`TH
 cd engine
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build
-build/chaosrings --data "<path to>/ChaosRingsOmegaHDeng.app/data"
-build/chaosrings --data "<path to>/ChaosRingsOmegaHDeng.app/data" --vita "<path to>/PCSG00499"
-build/chaosrings --data "<path to>/PCSG00499"
-build/chaosrings --data "<folder with main.110.com.square_enix.chaosringsomega.googleplay.obb and the APK>"
+build/chaosrings
 ```
 
-`--android <folder>` adds the Android release's expansion file (a folder holding its
-`main.*.obb` and APK): its sharper textures and the art only it has (`docs/ANDROID.md`).
-With no iOS data that folder is the whole game (`--data` or `--android`): the Android release
-(1.1.6) alone, as 3.1.0's iPad data (voices, eight languages), its Ogg Vorbis music.
+Your copy goes in the game folder - for this build `engine/build/`, or the folder you start it
+from - as `ios/`, `android/` or `vita/` ([Your copy](#your-copy)), and it starts with nothing on
+the command line. The Android release adds its sharper textures and the art only it has
+(`docs/ANDROID.md`); alone it is the whole game, as 3.1.0's iPad data (voices, eight languages),
+with its Ogg Vorbis music.
 
 Either iPad release works as the game: 1.0.0, or the voiced 3.1.0 (Japanese voices, eight
 languages) with the same layout and art.
 
-The build is CR1:U's (C++17, SDL3, Vulkan or OpenGL; `docs/ENGINE.md`, "Building"). Without
-`--data` it looks for `CR_DATA`, then `dataHD/` beside the executable, then `dataHD/`, `data/`,
-`ChaosRingsOmegaHDeng.app/data/` or `Payload/ChaosRingsOmegaHDeng.app/data/` under the current
-directory. Settings and saves go to the `ChaosRingsOmegaHD` profile folder
-(`~/.local/share/preservation/ChaosRingsOmegaHD/` on Linux), apart from CR1:U's.
+The build is CR1:U's (C++17, SDL3, Vulkan or OpenGL; `docs/ENGINE.md`, "Building"). Settings and
+saves go to the `ChaosRingsOmegaHD` profile folder (`~/.local/share/preservation/ChaosRingsOmegaHD/`
+on Linux), apart from CR1:U's.
 
 The Vita copy alone runs as the Vita does: the iPhone's Retina layout on its 960 × 544 screen
 (Options, Display, Layout: Vita - also `--layout vita` over the iPad's data).
+
+## Your copy
+
+Nothing has to be given on the command line: put your copy in the **game folder** and start the
+program - it finds it by itself. The game folder is:
+
+| Platform | The game folder |
+|---|---|
+| Windows, Linux | the folder holding `chaosrings.exe` / `chaosrings` |
+| Linux AppImage | the folder holding the `.AppImage` |
+| macOS | the folder holding `chaosrings.app` (its `Contents/Resources/` works too) |
+| Android | `Android/data/local.preservation.chaosringsomega/files/` on the shared storage (copy your files there over USB) |
+
+(then the working directory too). In it, a folder for each release you have - any one is enough:
+
+```
+<game folder>/
+├── chaosrings                          (or chaosrings.exe, chaosrings.app, the .AppImage)
+├── ios/
+│   └── ChaosRingsOmegaHDeng.app/       the iPad 1.0.0's or 3.1.0's .app: its data/ (sys.evt, the .evt, .mct, .bin files)
+│                                       - or Payload/ChaosRingsOmegaHDeng.app/ (the .ipa unpacked as it is)
+├── android/
+│   ├── main.110.com.square_enix.chaosringsomega.googleplay.obb
+│   └── <the 1.1.6 APK>.apk             (or its classes.dex: the OBB's table is in it)
+├── vita/
+│   └── PCSG00499/                      the installed title: CRO/resources/cro.psarc, CRO/sound/*.psarc
+└── textures/
+    ├── export/                         written by --export-textures: the pictures to upscale (<hash>.crraw)
+    └── hd/                             read by the game: the upscaled pictures (<hash>.crhd)
+```
+
+A release's folder may hold the release itself or have it one or two folders down, as above
+(`ios/Payload/....app`, `vita/PCSG00xxx/`), so a copy can be dropped in as it was unpacked or
+installed; the names of the folders below `ios/`, `android/` and `vita/` don't matter. A Vita copy
+has to be the installed, decrypted title (an encrypted NoNpDrm dump: install it first, e.g. with
+Vita3K). The release downloads come with these folders made, each with a `README.txt` saying what
+goes in it.
+
+With several, **the iOS copy is the game and the others add to it**: the Vita's voices, music,
+scripts in eight languages and textures, the Android release's sharper textures and its own art
+(each switched off in Options, Game: Vita Assets / Android Assets). With no iOS copy the Vita copy
+alone is the game (its 960 x 544 layout), else the Android release alone (3.1.0's voiced data).
+
+If nothing is found the program says where it looked. The older places still work: `dataHD/`, `data/`, `ChaosRingsOmegaHDeng.app/` or `Payload/` straight in the game folder.
+To use a copy elsewhere: `--data <iOS data>` (or `CR_DATA`), `--vita <PCSG00499 folder>` (`CR_VITA`), `--android <folder>` (`CR_ANDROID`) - each also a folder picked in Options, Game, kept in `settings.ini`; `--vita none` / `--android none` without. Settings and saves go to the profile folder
+(`~/.local/share/preservation/ChaosRingsOmegaHD/` on Linux; the same folders under `%APPDATA%\` on Windows and
+`~/Library/Application Support/` on macOS), not the game folder. All four ports (CR1:U, CRO-U, CR2-U, CR3-U) look for their copies the same way.
+
+## HD textures
+
+Upscaled textures you make yourself, from your own copy - waifu2x or Real-ESRGAN, drawn in place of
+the originals:
+
+1. `chaosrings --export-textures` writes every picture the game draws to `<game folder>/textures/export/`
+   (`<hash>.crraw`; the profile folder's `textures/export/` if the game folder can't be written;
+   `--export-textures <folder>` elsewhere). Each release exports its own pictures.
+2. `python3 tools/hd_textures.py <game folder>` upscales them into `<game folder>/textures/hd/`
+   (`<hash>.crhd`): waifu2x (`waifu2x-ncnn-vulkan` on the PATH, or `--waifu2x <it>`) for the
+   lossless and block-compressed pictures, Real-ESRGAN (`--esrgan <the folder with
+   realesrgan-ncnn-vulkan and models/>`) for the 16-bit ones - or `--engine waifu2x` for all. It
+   needs Python 3 with NumPy and Pillow; `--help` lists the rest (`--scale`, `--noise`, `--only` ...).
+3. Start the game: with `textures/hd/` there, HD Textures is on by itself (Options, Detail, HD Textures switches
+   it; `--no-hd-textures` for a run without). One `textures/hd/` can hold every release's.
+
+An export made with Vita Assets on takes the Vita's version of each picture it has alike and
+leaves `<iOS hash>.cralias` files: the tool links each to that picture's upscale, so one upscale
+serves the game with or without the Vita's.
+
+`CR_HD_TEXTURES=<folder>` reads them from elsewhere; the older `hd-textures/` beside the program or in
+the profile folder is still read while there is no `textures/hd/`. The `tools/hd_textures.py` is the
+same in all four ports. Personal use: the outputs are made from the game's art - keep them out of
+anything shared.
 
 ## Platforms
 
@@ -51,12 +119,12 @@ a universal macOS `.app` and an APK. The Windows build is checked under Wine (Vu
 same frames as Linux's); macOS and Android are built in CI but not yet played on a real machine -
 MetalFX, in particular, is compiled but untested.
 
-| Platform | Build | Renderer | The data (besides `--data` and `CR_DATA`) |
+| Platform | Build | Renderer | The game folder (its `ios/`, `android/`, `vita/`, `textures/`) |
 |---|---|---|---|
-| Linux | as above | Vulkan, OpenGL 3.3; FSR 3.1, DLSS (with the SDK) | as above |
-| Windows 10+ (x64) | MSVC and Ninja from a Developer prompt, the [Vulkan SDK](https://vulkan.lunarg.com/) for Vulkan - or from Linux with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw): `-DCMAKE_TOOLCHAIN_FILE=engine/cmake/llvm-mingw-x86_64.cmake` (runs under Wine). SDL3 and zlib are built by CMake | Vulkan, OpenGL 3.3; FSR 3.1, DLSS (MSVC, with the SDK) | `dataHD\` beside `chaosrings.exe` |
-| macOS 11+ (Apple silicon and Intel) | Xcode's command-line tools, Ninja and the [Vulkan SDK](https://vulkan.lunarg.com/) (MoltenVK, copied into the `.app`); add `"-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"` for both | Vulkan (MoltenVK), OpenGL 3.3; FSR 3.1, MetalFX (macOS 13+) | `dataHD/` beside `chaosrings.app`, or in its `Contents/Resources/` |
-| Android 7+ (arm64, x86-64) | the Android SDK and NDK: `git clone -b release-3.2.0 https://github.com/libsdl-org/SDL android/SDL`, then `gradle assembleRelease` in `android/` | OpenGL ES 3.0 | `Android/data/local.preservation.chaosringsomega/files/dataHD/` on the shared storage (copy it there over USB) |
+| Linux | as above | Vulkan, OpenGL 3.3; FSR 3.1, DLSS (with the SDK) | the folder holding `chaosrings`, or the AppImage |
+| Windows 10+ (x64) | MSVC and Ninja from a Developer prompt, the [Vulkan SDK](https://vulkan.lunarg.com/) for Vulkan - or from Linux with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw): `-DCMAKE_TOOLCHAIN_FILE=engine/cmake/llvm-mingw-x86_64.cmake` (runs under Wine). SDL3 and zlib are built by CMake | Vulkan, OpenGL 3.3; FSR 3.1, DLSS (MSVC, with the SDK) | the folder holding `chaosrings.exe` |
+| macOS 11+ (Apple silicon and Intel) | Xcode's command-line tools, Ninja and the [Vulkan SDK](https://vulkan.lunarg.com/) (MoltenVK, copied into the `.app`); add `"-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"` for both | Vulkan (MoltenVK), OpenGL 3.3; FSR 3.1, MetalFX (macOS 13+) | the folder holding `chaosrings.app` (or its `Contents/Resources/`) |
+| Android 7+ (arm64, x86-64) | the Android SDK and NDK: `git clone -b release-3.2.0 https://github.com/libsdl-org/SDL android/SDL`, then `gradle assembleRelease` in `android/` | OpenGL ES 3.0 | `Android/data/local.preservation.chaosringsomega/files/` on the shared storage (copy your files there over USB) |
 
 `-DCR_GLES=ON` builds the desktop game on OpenGL ES 3.0, as Android runs it (Mesa has it): a way
 to test that path without a device. Settings and saves go to SDL's profile folder:

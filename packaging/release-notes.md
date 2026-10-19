@@ -10,16 +10,17 @@ builds for Windows, macOS, Linux and Android.
 | `CRO-U-x86_64.AppImage`, `CRO-U-linux-x86_64.tar.gz` | Linux x86-64 (Vulkan or OpenGL; FSR 3.1) |
 | `CRO-U-android.apk` | Android 7+, arm64 / x86-64 (OpenGL ES 3.0) |
 
-**The game's data** - any one of: the iPad release's `data` folder (from
-`ChaosRingsOmegaHDeng.app`, 1.0.0 or the voiced 3.1.0), the Vita's `PCSG00499` folder, or the Android
-1.1.6 release's `main.110.com.square_enix.chaosringsomega.googleplay.obb` with its APK. Put it beside
-the program as `dataHD` (beside the `.app` on macOS, beside the AppImage on Linux), in
-`Android/data/local.preservation.chaosringsomega/files/dataHD/` on Android, or pass `--data <folder>`.
+**The game's data** - nothing to set: put your copy in the folder holding the program (the folder
+holding the `.app` on macOS, the AppImage's on Linux; on Android
+`Android/data/local.preservation.chaosringsomega/files/` on the shared storage), in a folder named after its release:
+`ios/` - the iPad's `ChaosRingsOmegaHDeng.app` (1.0.0 or the voiced 3.1.0; or the unpacked `.ipa`); `android/` - the 1.1.6 release's `main.110.com.square_enix.chaosringsomega.googleplay.obb` and its APK; `vita/` - the installed `PCSG00499` folder. Any one is enough, and each
+may hold it as it was unpacked or installed (one or two folders down). The iOS copy is the game and the others add their voices, music, languages and art to it (Options, Game); alone, the Vita or the Android release is the game. If none is found it
+says where it looked; the README's "Your copy" has the details.
 
 **In this release:** the game playable with its own menus, Options pages for display, graphics
 (render scale, MSAA, FSR 3.1 / DLSS / MetalFX), and the new Detail page (HD textures, smoothed
-models, anisotropic filtering, texture filtering); HD textures you make yourself with
-`tools/hd_textures.py` (waifu2x / Real-ESRGAN).
+models, anisotropic filtering, texture filtering); HD textures you make yourself (`chaosrings --export-textures` into `textures/export/`, then
+`tools/hd_textures.py <the game folder>` into `textures/hd/`, read by itself: the README's "HD textures").
 
 **Not included:** any of the game. You need your own copy; the port reads it at run time. DLSS is
 not in these builds either (NVIDIA's NGX library is proprietary and the port is GPL): build it
