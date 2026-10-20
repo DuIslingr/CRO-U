@@ -556,8 +556,8 @@ bool EventRunner::step(EventHost* host) {
             if (host) host->placeNpc(n, v, yaw, f);
             break;
         }
-        case 48: { // FrmStopEff effect + 99: every FrmPlayEff of it
-            const int e = int16_t(vm.u16()) - 99;
+        case 48: { // FrmStopEff effect: every FrmPlayEff of it (Omega's operand is the effect itself; CR1's + 99)
+            const int e = int16_t(vm.u16());
             if (host) host->stopFrameEffect(e, -1);
             break;
         }
@@ -593,8 +593,8 @@ bool EventRunner::step(EventHost* host) {
             }
             break;
         }
-        case 50: { // FrmStopEff2 actor, effect + 99
-            const int a = int16_t(vm.u16()), e = int16_t(vm.u16()) - 99;
+        case 50: { // FrmStopEff2 actor, effect
+            const int a = int16_t(vm.u16()), e = int16_t(vm.u16());
             if (host) host->stopFrameEffect(e, a);
             break;
         }
@@ -647,8 +647,9 @@ bool EventRunner::step(EventHost* host) {
             break;
         }
         case 30: case 54: vm.skip(8); break;
-        case 47: case 56: { // FrmPlayEff / FrmPlayEff2 actor, effect + 99, scale %
-            const int a = int16_t(vm.u16()), e = int16_t(vm.u16()) - 99, scale = int16_t(vm.u16());
+        case 47: case 56: { // FrmPlayEff / FrmPlayEff2 actor, effect, scale % (Omega's FUN_00069e08 / 69008: the operand as
+            // it is - CR1's take 99 off)
+            const int a = int16_t(vm.u16()), e = int16_t(vm.u16()), scale = int16_t(vm.u16());
             Vm::Scene s;
             float v[6];
             const bool rec = vm.scene(s) && vm.actor(s, state.frmRecord, a, v);

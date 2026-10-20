@@ -1344,10 +1344,13 @@ fragile block breaking, 0xd / 0xc looped / 0xe a candle switch lighting / lit / 
 above it), 0x19 a squash (5 above the leader)); FieldPCCtrl's footsteps (effect 0 on the leader
 with each step sound); call 2023 `Uty_eff3d_set_fld` (GetXmpStkData 0 the effect, 1 an NPC id, 2
 a height: once at the NPC, that much above); the cutscene ops 47 `FrmPlayEff` / 56
-`FrmPlayEff2` (s16 actor, effect + 99, scale percent: looped, on the leader for actor 0, an NPC
-whose id it is, else the current record's point for that actor - 56 also its angle; up to 16
-kept with key (effect + 1) × (actor + 1)), 48 `FrmStopEff` (effect + 99: all of it) and 50
-`FrmStopEff2` (actor, effect + 99: that one).
+`FrmPlayEff2` (s16 actor, effect, scale percent: looped, on the leader for actor 0, an NPC
+whose id it is, else the current record's point for that actor - 56 also its angles; up to 16
+kept with key (effect + 1) × (actor + 1)), 48 `FrmStopEff` (effect: all of it) and 50
+`FrmStopEff2` (actor, effect: that one). Omega's operand is the effect itself (FUN_00069e08 /
+FUN_00069008 / FUN_00068358 / FUN_00069ce0); CR1's carry it + 99. An effect's motion is its
+action table's action with one segment a node - in 30 of Omega's effects its material actions
+come first (the sun over the sea, effect 134, plays action 8).
 
 On the field `UpdateQuake` (`gameapp_prc`, each frame) hands the offset to `FieldCamera::setOffset`;
 `setCameraBack` (painted fields) and `setCamera3D` add it to the viewport's corner, set in whole

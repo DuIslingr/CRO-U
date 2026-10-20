@@ -3061,7 +3061,7 @@ struct ViewerHost : cr::EventHost {
         ++app.frameEffectCalls;
         cr::Vec3 p;
         if (SDL_getenv("CR_OP_TRACE"))
-            std::printf("  frame effect %d actor %d scale %d%s at (%.1f %.1f %.1f) angles (%.1f %.1f %.1f)\n", effect, actor, scale,
+            std::printf("  frame effect %d actor %d%s scale %d%s at (%.1f %.1f %.1f) angles (%.1f %.1f %.1f)\n", effect, actor, v ? "" : " (no record)", scale,
                         angled ? " angled" : "", v ? v[0] : 0.0f, v ? v[1] : 0.0f, v ? v[2] : 0.0f, v ? v[3] : 0.0f, v ? v[4] : 0.0f,
                         v ? v[5] : 0.0f);
         float yaw = 0, pitch = 0, roll = 0;
@@ -10424,7 +10424,12 @@ LoadedModel* effectModel(App& app, int id) {
     }
     for (const auto& mesh : m.meshes) out.meshes.push_back(app.renderer.upload(mesh));
     out.packageActions = m.actions;
-    for (auto& a : m.actions) // its motion: the first action that fits the skeleton (or its first nodes)
+    // Its motion: the action table's action for the transform tree - one segment a node (the rest are
+    // its materials', 9 segments, and can come first: 30 of Omega's effects) - else the first that
+    // fits the skeleton (or its first nodes)
+    for (auto& a : m.actions)
+        if (out.actions.empty() && a.segments.size() == m.skeleton.nodes.size() && !a.segments.empty()) out.actions.push_back(a);
+    for (auto& a : m.actions)
         if (out.actions.empty() && !a.segments.empty() && a.segments.size() <= m.skeleton.nodes.size())
             out.actions.push_back(a);
     m.actions.clear();
