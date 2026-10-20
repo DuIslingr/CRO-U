@@ -103,6 +103,7 @@ struct Effect {
     float time = 0;
     bool loop = false;
     float scale = 1, yaw = 0;
+    float pitch = 0, roll = 0; // FrmPlayEff2: the record's X and Z angles (radians)
     int handle = 0;  // for stopping it
     int key = 0;     // FrmPlayEff's (effect + 1) x (actor + 1)
 };
@@ -967,13 +968,25 @@ void showTexture(App& app, int index) {
 // the original's size with a mip chain
 void applyHd(App& app, cr::Image& img) {
     if (!app.video.hdTextures || app.hdDir.empty() || img.width <= 0) return;
+    if (const char* only = SDL_getenv("CR_HD_ONLY"); only && cr::hashName(cr::imageHash(img)) != only) return; // (debugging: one replacement alone)
     cr::Image hd;
     if (!cr::loadHdImage(app.hdDir, img, hd)) {
         ++app.hdMissing;
         return;
     }
+    if (SDL_getenv("CR_HD_LOG")) std::printf("hd %s %dx%d -> %dx%d\n", cr::hashName(cr::imageHash(img)).c_str(), img.width, img.height, hd.width, hd.height);
     hd.logicalW = img.width;
     hd.logicalH = img.height;
+    { // (a cut-out: its alpha only 0 and 255, some of it 0)
+        bool binary = !img.alphaOnly, some = false;
+        for (size_t i = 3; binary && i < img.rgba.size(); i += 4) {
+            const uint8_t a = img.rgba[i];
+            binary = a == 0 || a == 255;
+            some |= a == 0;
+        }
+        hd.cutout = binary && some;
+    }
+    if (hd.cutout) cr::fillSeeThrough(hd); // (only a cut-out: soft alpha keeps its own colours)
     hd.mipmaps = true;
     img = std::move(hd);
     ++app.hdLoaded;
@@ -1556,6 +1569,29 @@ void showMap(App& app, int index, int forcedMap, int forcedArea) {
         if (app.background.id) { app.renderer.destroy(keep[0]); app.renderer.destroy(keep[1]); }
         else { app.renderer.destroy(app.foreground); app.background = keep[0], app.foreground = keep[1]; }
     }
+    if (app.haveStageCam && app.stageCam.scripted) {
+        // its own FOV and view, the script's eye and target - until the script sets them, the best
+        // framing among the maps sharing its collision's name (as a room with no record borrows)
+        cr::StageCamera own = app.stageCam;
+        std::vector<cr::StageCamera> mine = app.stageCams;
+        std::vector<float> fit = app.stageFit;
+        candidates.clear();
+        for (int mapNo = 0; mapNo < cr::kNumMaps; ++mapNo)
+            if (name.compare(0, 2, cr::kMapCollisionFile[mapNo], 2) == 0 && mapNo != own.mapNumber) candidates.push_back(mapNo);
+        app.stageCams.clear(), app.stageFit.clear();
+        tryCandidates();
+        int best = -1;
+        for (size_t k = 0; k < app.stageCams.size(); ++k)
+            if (!app.stageCams[k].scripted && (best < 0 || app.stageFit[k] > app.stageFit[size_t(best)] + 1e-4f)) best = int(k);
+        if (best >= 0)
+            for (int i = 0; i < 3; ++i) own.eye[i] = app.stageCams[size_t(best)].eye[i], own.target[i] = app.stageCams[size_t(best)].target[i];
+        app.stageCams = std::move(mine), app.stageFit = std::move(fit);
+        app.stageCams[size_t(app.stageCamIndex)] = app.stageCam = own;
+    }
+    if (SDL_getenv("CR_STAGE_LOG")) // (debugging: which stage camera a room took)
+        std::printf("stage camera for %s (map %d area %d): %zu candidates%s, took map %d area %d fov %.1f view %dx%d\n", name.c_str(), forcedMap,
+                    forcedArea, app.stageCams.size(), app.stageCamBorrowed ? " (borrowed)" : "", app.haveStageCam ? app.stageCam.mapNumber : -1,
+                    app.haveStageCam ? app.stageCam.area : -1, app.stageCam.fovDegrees, app.stageCam.viewWidth, app.stageCam.viewHeight);
     app.collisionPolys = int(col.polygons.size());
     // Frame the collision (props live inside it)
     const auto& b0 = col.boundsMin;
@@ -2920,6 +2956,8 @@ struct ViewerHost : cr::EventHost {
         }
         if (paintedField(app)) return; // shown whole: nothing moves
         const cr::Vec3 e{eye[0], eye[1], eye[2]}, t{target[0], target[1], target[2]};
+        if (SDL_getenv("CR_OP_TRACE"))
+            std::printf("  set camera eye (%.1f %.1f %.1f) target (%.1f %.1f %.1f) over %d\n", e.x, e.y, e.z, t.x, t.y, t.z, frames);
         if (std::fabs(e.x - t.x) + std::fabs(e.y - t.y) + std::fabs(e.z - t.z) < 1e-4f) return; // no target actor
         App::ScriptCam& c = app.cam;
         if (frames <= 0 || !c.set) { c.eye = e; c.target = t; c.frames = c.t = 0; }
@@ -3022,13 +3060,22 @@ struct ViewerHost : cr::EventHost {
     void frameEffect(int actor, int effect, int scale, const float* v, bool angled) override {
         ++app.frameEffectCalls;
         cr::Vec3 p;
-        float yaw = 0;
+        if (SDL_getenv("CR_OP_TRACE"))
+            std::printf("  frame effect %d actor %d scale %d%s at (%.1f %.1f %.1f) angles (%.1f %.1f %.1f)\n", effect, actor, scale,
+                        angled ? " angled" : "", v ? v[0] : 0.0f, v ? v[1] : 0.0f, v ? v[2] : 0.0f, v ? v[3] : 0.0f, v ? v[4] : 0.0f,
+                        v ? v[5] : 0.0f);
+        float yaw = 0, pitch = 0, roll = 0;
         if (!actorPos(app, actor, p)) { // not an NPC: where the scene's record has it
             if (!v) return;
             p = {v[0], v[1], v[2]};
-            if (angled) yaw = v[4] * kDeg;
+            // FrmPlayEff2 (eff3d_set_with_pos_and_ang) takes its angles too (the field's effects
+            // don't turn to the camera in Omega: drawEffects)
+            if (angled) yaw = v[4] * kDeg, pitch = v[3] * kDeg, roll = v[5] * kDeg;
         }
         const int h = startEffect(app, app.fieldEffects, effect, p, true, float(scale) / 100.0f, yaw);
+        if (h)
+            for (Effect& fx : app.fieldEffects)
+                if (fx.handle == h) fx.pitch = pitch, fx.roll = roll;
         if (h && app.frameEffects.size() < 16) app.frameEffects.push_back({(effect + 1) * (actor + 1), effect, h});
     }
     void stopFrameEffect(int effect, int actor) override {
@@ -9797,6 +9844,8 @@ void animateNpcs(App& app, float dt) {
         if (d.action < 0 || d.action >= int(lm.actions.size())) continue;
         const float dur = lm.actions[d.action].duration;
         d.time += dt * kFramesPerSecond;
+        if (const char* tr = SDL_getenv("CR_NPC_TRACE"); tr && (SDL_atoi(tr) < 0 || d.id == SDL_atoi(tr))) // (debugging: an NPC's animation clock; -1 every one)
+            std::printf("npc %d action %d time %.3f dur %.1f once %d loop %d..%d\n", d.id, d.action, d.time, dur, int(d.once), d.loopFrom, d.loopTo);
         if (dur <= 0) continue;
         if (d.once) { d.time = std::min(d.time, dur); continue; } // loop from -1: play once, hold the end
         const float end = d.loopTo > 0 && d.loopTo < dur ? float(d.loopTo) : dur;
@@ -9833,7 +9882,8 @@ void animateNpcs(App& app, float dt) {
 void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::Material* override = nullptr,
                 float alpha = 1.0f, float matTime = -1.0f);
 const cr::Action* effectMaterialAction(const LoadedModel& lm, const cr::Material* mt);
-bool effectUvMotion(const LoadedModel& lm, const cr::Material* mt, float time, float shift[2], float scale[2]);
+bool effectUvMotion(const LoadedModel& lm, const cr::Material* mt, float time, float shift[2], float scale[2], int unit = 0);
+const cr::Texture* secondUnit(const LoadedModel& lm, size_t mesh, const cr::Material* mt, float time, float uv2[4]);
 
 void drawNpcs(App& app, const cr::Mat4& vp) {
     for (auto& d : app.npcDraws) {
@@ -9855,7 +9905,7 @@ void drawNpcs(App& app, const cr::Mat4& vp) {
                 if (!posed && !moves) continue;
                 if (posed) cr::skinMesh(m, m.meshes[i], lm.world, lm.skinned);
                 const std::vector<float>& pos = posed ? lm.skinned : m.meshes[i].positions;
-                if (moves) { // uv * scale + offset (the material action's segments 8 / 6)
+                if (moves) { // uv * scale + offset (texture unit 0's: the material action's segment 6)
                     lm.uvScratch = m.meshes[i].uvs;
                     for (size_t k = 0; k + 1 < lm.uvScratch.size(); k += 2) {
                         lm.uvScratch[k] = lm.uvScratch[k] * scale[0] + shift[0];
@@ -10449,28 +10499,49 @@ void stepEffects(App& app, std::vector<Effect>& list) { // eff3d_prc: each ends 
 }
 void stepEffects(App& app) { stepEffects(app, app.battle.effects); }
 
-// An effect material's action (its refGid): segment 1 the colour, 6 the texture's offset, 8 its scale
+// An effect material's action (its refGid): segment 1 the colour, 6 texture unit 0's transform, 8
+// unit 1's (keyType 1 the offset, 11 the scale; segment 8 only on two-unit materials)
 const cr::Action* effectMaterialAction(const LoadedModel& lm, const cr::Material* mt) {
     const int g = mt ? int(int32_t(mt->refGid)) : -1;
     return g >= 0 && g < int(lm.packageActions.size()) ? &lm.packageActions[size_t(g)] : nullptr;
 }
 
-// The texture's motion at `time`: uv * scale + shift (false: it has none)
-bool effectUvMotion(const LoadedModel& lm, const cr::Material* mt, float time, float shift[2], float scale[2]) {
+// A texture unit's motion at `time`: uv * scale + shift (false: it has none)
+bool effectUvMotion(const LoadedModel& lm, const cr::Material* mt, float time, float shift[2], float scale[2], int unit) {
     const cr::Action* ma = effectMaterialAction(lm, mt);
+    const size_t seg = unit == 0 ? 6 : 8;
     bool moves = false;
-    for (size_t seg : {size_t(6), size_t(8)})
-        if (ma && ma->segments.size() > seg)
-            for (const cr::Track& t : ma->segments[seg]) {
-                float v[4] = {};
-                if (t.comps != 3 || !cr::evaluateTrack(t, std::min(time, ma->duration), v)) continue;
-                if (seg == 6 && t.type == 1) shift[0] = v[0], shift[1] = v[1], moves = true;
-                if (seg == 8 && t.type == 11) scale[0] = v[0], scale[1] = v[1], moves = true;
-            }
+    if (ma && ma->segments.size() > seg)
+        for (const cr::Track& t : ma->segments[seg]) {
+            float v[4] = {};
+            if (t.comps != 3 || !cr::evaluateTrack(t, std::min(time, ma->duration), v)) continue;
+            if (t.type == 1) shift[0] = v[0], shift[1] = v[1], moves = true;
+            if (t.type == 11) scale[0] = v[0], scale[1] = v[1], moves = true;
+        }
     return moves;
 }
 
-void drawEffects(App& app, const std::vector<Effect>& list, const cr::Mat4& vp) {
+// Texture unit 1 of a mesh (its material's second texture), and where it samples: uv2 maps the
+// coordinates the mesh holds - unit 0's, moved - to unit 1's (uv * xy + zw). Null: none
+const cr::Texture* secondUnit(const LoadedModel& lm, size_t mesh, const cr::Material* mt, float time, float uv2[4]) {
+    const cr::Model& m = lm.cpu;
+    if (!mt || mt->textureRef2 < 0 || mesh >= m.meshes.size()) return nullptr;
+    const int t = m.meshes[mesh].texture2;
+    if (t < 0 || t >= int(lm.textures.size())) return nullptr;
+    float o0[2] = {0, 0}, s0[2] = {1, 1}, o1[2] = {0, 0}, s1[2] = {1, 1};
+    if (time >= 0) effectUvMotion(lm, mt, time, o0, s0, 0), effectUvMotion(lm, mt, time, o1, s1, 1);
+    for (int k = 0; k < 2; ++k) {
+        const float r = s1[k] / (std::fabs(s0[k]) > 1e-6f ? s0[k] : 1.0f);
+        uv2[k] = r, uv2[2 + k] = o1[k] - o0[k] * r;
+    }
+    return &lm.textures[size_t(t)];
+}
+
+// A battle's effects face the camera: mdl_put turns a model eff3d placed with its flag +0xfc7 about
+// Y to the camera's heading, atan2(eye - target) in x and z, each frame - and eff3d_set_with_pos sets
+// that flag only in a battle (gac +0x364 bit 5; CR1 sets it always). The field's keep their own yaw.
+void drawEffects(App& app, const std::vector<Effect>& list, const cr::Mat4& vp, const cr::Vec3* eye, const cr::Vec3* target) {
+    static const bool noScroll = SDL_getenv("CR_NO_UV_SCROLL") != nullptr; // tests: before / after
     for (const Effect& e : list) {
         LoadedModel* found = effectModel(app, e.id);
         auto it = app.effectModels.find(e.id);
@@ -10490,7 +10561,6 @@ void drawEffects(App& app, const std::vector<Effect>& list, const cr::Mat4& vp) 
             if (posed) cr::computeWorld(m.skeleton, lm.actions.empty() ? nullptr : &lm.actions[0], e.time, lm.world);
             for (size_t i = 0; i < m.meshes.size(); ++i) {
                 float shift[2] = {0, 0}, scale[2] = {1, 1};
-                static const bool noScroll = SDL_getenv("CR_NO_UV_SCROLL") != nullptr; // tests: before / after
                 const bool moves = !noScroll && uvMotion(matOf(i), shift, scale);
                 if (!posed && !moves) continue;
                 cr::skinMesh(m, m.meshes[i], posed ? lm.world : std::vector<cr::Mat4>(), lm.skinned);
@@ -10504,9 +10574,14 @@ void drawEffects(App& app, const std::vector<Effect>& list, const cr::Mat4& vp) 
                 app.renderer.updatePositions(lm.meshes[i], lm.skinned, moves ? lm.uvScratch : m.meshes[i].uvs, m.meshes[i].colors);
             }
         }
-        cr::Mat4 world; // scaled, turned about Y (eff3d_set_with_pos_and_ang), at its point
-        const float c = std::cos(e.yaw) * e.scale, sn = std::sin(e.yaw) * e.scale;
-        world.m[0] = c, world.m[2] = -sn, world.m[5] = e.scale, world.m[8] = sn, world.m[10] = c;
+        // scaled, turned (Euler XYZ, mdl_put: R = Rz Ry Rx), at its point
+        const float yaw = eye && target ? std::atan2(eye->x - target->x, eye->z - target->z) : e.yaw;
+        const float cx = std::cos(e.pitch), sx = std::sin(e.pitch), cy = std::cos(yaw), sy = std::sin(yaw);
+        const float cz = std::cos(e.roll), sz = std::sin(e.roll), k = e.scale;
+        cr::Mat4 world;
+        world.m[0] = cy * cz * k, world.m[1] = cy * sz * k, world.m[2] = -sy * k;
+        world.m[4] = (sx * sy * cz - cx * sz) * k, world.m[5] = (sx * sy * sz + cx * cz) * k, world.m[6] = sx * cy * k;
+        world.m[8] = (cx * sy * cz + sx * sz) * k, world.m[9] = (cx * sy * sz - sx * cz) * k, world.m[10] = cx * cy * k;
         world.m[12] = e.pos.x, world.m[13] = e.pos.y, world.m[14] = e.pos.z;
         const cr::Mat4 mvp = vp * world;
         // drawn last, depth tested but not written (draw order + 1000, eff3d_set_with_pos_and_ang)
@@ -10531,11 +10606,15 @@ void drawEffects(App& app, const std::vector<Effect>& list, const cr::Mat4& vp) 
             mat.properties &= ~16u; // no depth writes
             const cr::GpuMesh& mesh = lm.meshes[i];
             const cr::Texture* tex = mesh.texture >= 0 && mesh.texture < int(lm.textures.size()) ? &lm.textures[size_t(mesh.texture)] : nullptr;
-            app.renderer.drawMesh(mesh, tex, mvp, mat, app.smoothFilter);
+            float uv2[4];
+            const cr::Texture* tex2 = secondUnit(lm, i, base, noScroll ? -1.0f : e.time, uv2);
+            app.renderer.drawMesh(mesh, tex, mvp, mat, app.smoothFilter, tex2, uv2);
         }
     }
 }
-void drawEffects(App& app, const cr::Mat4& vp) { drawEffects(app, app.battle.effects, vp); }
+void drawEffects(App& app, const cr::Mat4& vp, const cr::Vec3& eye, const cr::Vec3& target) {
+    drawEffects(app, app.battle.effects, vp, &eye, &target);
+}
 
 // read_btlcpl / btl_prty_init: the stage (kBattleStageFile), the pair at formation 0's first two
 // places facing the enemies, the group's monsters at their formation's places; then the battle
@@ -12346,7 +12425,7 @@ void drawBattle(App& app, float dt) {
         world.m[12] = a.pos.x; world.m[13] = a.pos.y; world.m[14] = a.pos.z;
         drawLoaded(app, lm, vp * world, nullptr, a.alpha);
     }
-    drawEffects(app, vp);
+    drawEffects(app, vp, eye, target);
     r.end3D();
     drawSceneEffects(app, true); // the field's weather goes on over the battle
     r.setOrigin(0);
@@ -13064,7 +13143,7 @@ void drawFrame(App& app, bool present = true) {
             drawNpcs(app, mvp);
             if (app.havePlayer && playerShown(app)) drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app));
             if (app.puzzle.stage >= 0) puzzle::drawFx(app, mvp);
-            drawEffects(app, app.fieldEffects, mvp);
+            drawEffects(app, app.fieldEffects, mvp, nullptr, nullptr);
             if (app.showCollision && app.collision.vao) {
                 cr::Material colMat; // translucent so the painted floor shows through
                 colMat.culling = 0;
@@ -13121,7 +13200,7 @@ void drawFrame(App& app, bool present = true) {
         if (app.mode == Mode::Maps && app.havePlayer && playerShown(app))
             drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app));
         if (app.mode == Mode::Maps && app.puzzle.stage >= 0) puzzle::drawFx(app, mvp);
-        if (app.mode == Mode::Maps) drawEffects(app, app.fieldEffects, mvp);
+        if (app.mode == Mode::Maps) drawEffects(app, app.fieldEffects, mvp, nullptr, nullptr);
         if (app.mode == Mode::Maps && app.collision.vao && app.showCollision) {
             cr::Material colMat;          // opaque, untextured, double-sided, depth test + write
             colMat.culling = 0;
@@ -18071,9 +18150,21 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
     // The capture shows exactly the frames stepped above; --settle draws that moment first (an
     // upscaler's history converges on it)
     const Uint64 frame = Uint64(SDL_NS_PER_SECOND / (app.captureSettleFps > 0 ? float(app.captureSettleFps) : kFramesPerSecond));
+    const char* every = SDL_getenv("CR_CAPTURE_EVERY"); // (debugging: each --settle-moving frame as <dir>/sNNNN.bmp)
     for (int f = 0; f < app.captureSettle; ++f) {
         app.lastTicks = app.captureSettleMoving ? SDL_GetTicksNS() - frame : 0;
         drawFrame(app, false);
+        int fw = 0, fh = 0;
+        std::vector<uint8_t> fp;
+        if (every && app.renderer.readPixels(fp, fw, fh))
+            if (SDL_Surface* fs = SDL_CreateSurface(fw, fh, SDL_PIXELFORMAT_RGBA32)) {
+                for (int y = 0; y < fh; ++y)
+                    std::memcpy(static_cast<uint8_t*>(fs->pixels) + size_t(y) * fs->pitch, &fp[size_t(y) * fw * 4], size_t(fw) * 4);
+                char name[32];
+                SDL_snprintf(name, sizeof name, "/s%04d.bmp", f);
+                SDL_SaveBMP(fs, (std::string(every) + name).c_str());
+                SDL_DestroySurface(fs);
+            }
     }
     app.lastTicks = app.captureSettleMoving && app.captureSettle ? SDL_GetTicksNS() - frame : 0;
     drawFrame(app, false);
@@ -18491,6 +18582,12 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     for (int i = 1; i < argc; ++i)
         if (SDL_strcmp(argv[i], "--models") == 0) app->mode = Mode::Models;
         else if (SDL_strcmp(argv[i], "--maps") == 0) app->mode = Mode::Maps;
+    if (SDL_getenv("CR_OP_TRACE")) { // (debugging: every script instruction and native call)
+        cr::setEventTrace([](size_t pc, int op) { std::printf("  op %#zx: %d\n", pc, op); });
+        cr::setNativeTrace([](int id, const int32_t* a) {
+            std::printf("  call %d (%d %d %d %d %d %d %d %d %d %d %d)\n", id, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10]);
+        });
+    }
     for (int i = 1; i < argc; ++i) {
         if (SDL_strcmp(argv[i], "--capture") == 0 && i + 2 < argc) {
             SDL_SetLogPriorities(SDL_LOG_PRIORITY_WARN);

@@ -90,6 +90,7 @@ void Renderer::destroy(GpuMesh& mesh) {
 
 Texture Renderer::upload(const Image& img) {
     Texture t = dev_->upload(img);
+    t.cutout = img.cutout;
     if (img.logicalW > 0 && img.logicalH > 0) { // HD: drawn at the original's size
         t.width = img.logicalW;
         t.height = img.logicalH;
@@ -119,10 +120,10 @@ void Renderer::begin3DRect(float x, float y, float w, float h) {
 }
 
 void Renderer::drawMesh(const GpuMesh& mesh, const Texture* tex, const Mat4& mvp, const Material& mat,
-                        bool smoothFilter) {
+                        bool smoothFilter, const Texture* tex2, const float* uv2) {
     // GL ES 1.1 lighting with full-bright scene light (ambient = diffuse = 1) until scene
     // Light records are decoded: rgb = emission + ambient + diffuse, alpha = diffuse alpha.
-    // 357 materials rely on this (black diffuse, white ambient), so diffuse alone is not enough.
+    // 357 materials rely on this (black ambient, white diffuse - or the other way), so one alone is not enough.
     MeshShading sh;
     for (int i = 0; i < 3; ++i) sh.color[i] = std::min(1.0f, mat.emission[i] + mat.ambient[i] + mat.diffuse[i]);
     sh.color[3] = mat.diffuse[3];
@@ -130,6 +131,11 @@ void Renderer::drawMesh(const GpuMesh& mesh, const Texture* tex, const Mat4& mvp
     const bool textured = tex && tex->id;
     sh.texMode = textured ? int(mat.texBlend <= 4 ? mat.texBlend : 4) : -1;
     sh.alphaTex = textured && tex->alphaOnly;
+    if (tex2 && tex2->id && mat.textureRef2 >= 0) {
+        sh.tex2 = tex2;
+        sh.texMode2 = mat.texBlend2 <= 4 ? mat.texBlend2 : 4;
+        if (uv2) std::memcpy(sh.uv2, uv2, sizeof sh.uv2);
+    }
     DrawState st;
     st.blend = mat.blended();
     st.blendSrc = mat.blendSrc;
@@ -137,6 +143,12 @@ void Renderer::drawMesh(const GpuMesh& mesh, const Texture* tex, const Mat4& mvp
     st.cull = mat.culling == 0 ? 0 : mat.culling == 1 ? 1 : 2;
     st.depthTest = mat.depthTest();
     st.depthWrite = mat.depthWrite();
+    // An HD texture for a cut-out (the original's alpha 0 or 255, drawn nearest): drawn filtered its
+    // edges come out part-transparent, and blended there - over whatever the frame holds yet, the
+    // depth written - they'd ring it in black. As the original looks: kept above half, else gone,
+    // unblended (a material fading the whole thing still blends)
+    if (textured && tex->cutout && st.blend && mat.blendSrc == 4 && mat.blendDst == 5 && sh.color[3] >= 0.999f)
+        st.blend = false, sh.alphaRef = std::max(sh.alphaRef, 0.5f);
     st.clampS = mat.wrapS != 0;
     st.clampT = mat.wrapT != 0;
     st.minLinear = smoothFilter || linearFilter(mat.minFilter);

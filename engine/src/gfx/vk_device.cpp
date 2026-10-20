@@ -84,8 +84,11 @@ struct PushConstants {
     int32_t alphaTex;
     float alphaRef;
     float reactive;
+    int32_t texMode2; // texture unit 1 (set 1): its environment, -1 none
+    int32_t pad[3];
+    float uv2[4];     // its coordinates: uv * xy + zw
 };
-static_assert(sizeof(PushConstants) == 96, "push constant layout");
+static_assert(sizeof(PushConstants) == 128, "push constant layout");
 
 // The scene variants' (common.glsl with SCENE)
 struct ScenePushConstants {
@@ -93,7 +96,7 @@ struct ScenePushConstants {
     float prevMatrix[16];
     float motion[4]; // jitter in clip units, NDC -> UV
 };
-static_assert(sizeof(ScenePushConstants) == 176, "scene push constant layout");
+static_assert(sizeof(ScenePushConstants) == 208, "scene push constant layout");
 
 // Last frame's matrix (and re-skinned vertices) for one draw: draw n of mesh upload g
 struct DrawHistory {
@@ -537,7 +540,7 @@ public:
         passW_ = w;
         passH_ = h;
         bound_ = VK_NULL_HANDLE;
-        boundSet_ = VK_NULL_HANDLE;
+        boundSet_[0] = boundSet_[1] = VK_NULL_HANDLE;
         boundLayout_ = VK_NULL_HANDLE;
         setViewport(0, 0, float(w), float(h));
         const VkRect2D scissor{{0, 0}, {uint32_t(w), uint32_t(h)}};
@@ -822,6 +825,10 @@ public:
         pc.base.texMode = sh.texMode;
         pc.base.alphaTex = sh.alphaTex ? 1 : 0;
         pc.base.alphaRef = sh.alphaRef;
+        const bool second = sh.tex2 && sh.tex2->id && sh.tex2->id <= textures_.size() && textures_[sh.tex2->id - 1].image &&
+                            sh.texMode2 >= 0;
+        pc.base.texMode2 = second ? sh.texMode2 : -1;
+        std::memcpy(pc.base.uv2, sh.uv2, sizeof pc.base.uv2);
         // Reactive mask: alpha-blended layers by their alpha, additive ones by brightness
         if (st.blend && !st.depthWrite) pc.base.reactive = st.blendDst == 1 ? -0.8f : 0.8f;
         VkBuffer prevBuf = vb;
@@ -850,6 +857,7 @@ public:
         const unsigned samplerBits = (st.clampS ? 1u : 0u) | (st.clampT ? 2u : 0u) | (st.minLinear ? 4u : 0u) |
                                      (st.magLinear ? 8u : 0u);
         bindTexture(textured ? tex->id - 1 : white_.id - 1, textured ? samplerBits : 15);
+        bindTexture(second ? sh.tex2->id - 1 : white_.id - 1, second ? (samplerBits & ~3u) : 15, 1); // (repeating)
         const VkBuffer bufs[2] = {vb, prevBuf};
         const VkDeviceSize offs[2] = {voff, prevOff};
         vkCmdBindVertexBuffers(cmd_, 0, inScene_ ? 2 : 1, bufs, offs);
@@ -857,7 +865,7 @@ public:
         vkCmdDrawIndexed(cmd_, rec.indexCount, 1, 0, 0, 0);
     }
 
-    // The scene's extras (jitter, motion scale) filled in here; outside it only the first 96 bytes
+    // The scene's extras (jitter, motion scale) filled in here; outside it only the first 128 bytes
     void pushConstants(ScenePushConstants& pc) {
         if (inScene_) {
             pc.motion[0] = 2.0f * jitter_[0] / vpW_;
@@ -1136,8 +1144,9 @@ private:
         if (!ok(vkCreateDescriptorPool(device_, &dpi, nullptr, &pool_))) return false;
         const VkPushConstantRange pcr{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants)};
         VkPipelineLayoutCreateInfo pli{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-        pli.setLayoutCount = 1;
-        pli.pSetLayouts = &setLayout_;
+        const VkDescriptorSetLayout sets[2] = {setLayout_, setLayout_}; // texture units 0 and 1
+        pli.setLayoutCount = 2;
+        pli.pSetLayouts = sets;
         pli.pushConstantRangeCount = 1;
         pli.pPushConstantRanges = &pcr;
         if (!ok(vkCreatePipelineLayout(device_, &pli, nullptr, &layout_))) return false;
@@ -1313,7 +1322,7 @@ private:
         const VkPipelineLayout layout = inScene_ ? sceneLayout_ : layout_;
         if (layout != boundLayout_) { // sets bound through the other layout don't carry over
             boundLayout_ = layout;
-            boundSet_ = VK_NULL_HANDLE;
+            boundSet_[0] = boundSet_[1] = VK_NULL_HANDLE;
         }
     }
 
@@ -1362,7 +1371,7 @@ private:
         return true;
     }
 
-    void bindTexture(unsigned index, unsigned samplerBits) {
+    void bindTexture(unsigned index, unsigned samplerBits, unsigned unit = 0) {
         if (index >= textures_.size()) return;
         TextureRec& t = textures_[index];
         if (!t.image) return;
@@ -1382,9 +1391,9 @@ private:
             w.pImageInfo = &ii;
             vkUpdateDescriptorSets(device_, 1, &w, 0, nullptr);
         }
-        if (set != boundSet_) {
-            vkCmdBindDescriptorSets(cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, boundLayout_, 0, 1, &set, 0, nullptr);
-            boundSet_ = set;
+        if (set != boundSet_[unit]) {
+            vkCmdBindDescriptorSets(cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, boundLayout_, unit, 1, &set, 0, nullptr);
+            boundSet_[unit] = set;
         }
     }
 
@@ -1789,7 +1798,7 @@ private:
                    meshFrag_ = VK_NULL_HANDLE;
     VkPipeline quadPipeline_ = VK_NULL_HANDLE, bound_ = VK_NULL_HANDLE;
     VkPipeline quadAddPipeline_ = VK_NULL_HANDLE, sceneQuadAddPipeline_ = VK_NULL_HANDLE;
-    VkDescriptorSet boundSet_ = VK_NULL_HANDLE;
+    VkDescriptorSet boundSet_[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE}; // texture units 0 and 1
     std::map<uint32_t, VkPipeline> pipelines_;
     std::array<VkSampler, 32> samplers_{};
     float anisotropy_ = 1.0f;
@@ -1867,7 +1876,7 @@ private:
         vkBeginCommandBuffer(cmd_, &bi);
         bound_ = VK_NULL_HANDLE; // (a new command buffer: nothing bound)
         boundLayout_ = VK_NULL_HANDLE;
-        boundSet_ = VK_NULL_HANDLE;
+        boundSet_[0] = boundSet_[1] = VK_NULL_HANDLE;
         return encoded;
     }
 #endif
