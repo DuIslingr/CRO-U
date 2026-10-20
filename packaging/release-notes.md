@@ -1,14 +1,18 @@
-# CRO-U v0.2.0
+# CRO-U v0.2.1
 
 A from-scratch reimplementation of *Chaos Rings Omega* (iOS / Vita / Android): builds for Windows,
 macOS, Linux and Android.
 
-**New in this release: your copy found by itself.** Put it in the folder holding the program, in
-a folder named after its release - `ios/`, `android/` or `vita/` (these come made in the download,
-each with a `README.txt` saying what goes in it) - and start the program: nothing to set. HD textures
-the same way: `--export-textures` writes to `textures/export/`, `tools/hd_textures.py <the game
-folder>` upscales into `textures/hd/`, and the game turns them on by itself. The same layout in all
-the Chaos Rings ports; the older places still work.
+**New in this release: the cutscenes' effects.** Omega's scripts name their effects by number and
+the port had read them CR1's way, so every cutscene effect was the wrong one or none: now the sun
+over the sea with its lens flare, the ship's wake, the light on the planet's deck and the rest
+play as in the game. Effects also move as they should (30 had been frozen by a colour track),
+with their other rotation orders, materials' second textures and their own colours, and face the
+camera in battle as the original does. Also: HD textures' cut-out edges without a black fringe,
+smoother animations at 60 fps, and the opening's ship shot at the room's own field of view.
+
+**From v0.2.0:** your copy found by itself in `ios/`, `android/` or `vita/` beside the program, and HD
+textures in `textures/hd/` turned on by themselves (below, and the README's "Your copy").
 
 | File | Platform |
 |---|---|
