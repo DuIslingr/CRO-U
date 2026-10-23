@@ -69,6 +69,8 @@ public:
                            float sh, float angle, float a = 1);
     // Solid-colour rectangle in logical space.
     void fillRect(float x, float y, float w, float h, float r, float g, float b, float a);
+    // A plain colour over any four corners (top left, top right, bottom right, bottom left)
+    void fillQuad(const float xy[8], float r, float g, float b, float a);
 
     // Converts window pixel coordinates to logical coordinates.
     void toLogical(float px, float py, float& lx, float& ly) const;
