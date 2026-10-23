@@ -12215,7 +12215,10 @@ void showHits(App& app) {
         if (h.revived) playSlot(app, *a, btlui::kSlotIdle);
         else if (h.fell) {
             const cr::MonsterDef* def = a->enemy ? f.def : nullptr;
-            if (def && def->strongGrowth) { // btlcalc_chk_dead: a boss
+            const LoadedModel& lm = b.models[a->model];
+            const int down = battleAction(lm, btlui::kSlotDown); // (is_BTLANM_D02: a down motion of 3 frames or more)
+            const bool hasDown = down >= 0 && down < int(lm.actions.size()) && lm.actions[size_t(down)].duration >= 3.0f;
+            if (def && def->strongGrowth && hasDown) { // btlcalc_chk_dead: a boss
                 const int g = b.start.group;
                 if (g == 0x294) app.game.setFlag(0x596, true);
                 if (g == 0x2a5) app.game.setFlag(0x791, true);
@@ -12335,7 +12338,12 @@ void showHits(App& app) {
             calcSound(act->calc, h, user, ue, act->scope == 5 || act->scope == 3, act->element);
             if (h.fell && t >= 2) { // btlcalc_chk_dead: monsters without strong growth burst
                 const cr::Fighter& f = b.rules.f[size_t(t)];
-                if (f.def && !f.def->strongGrowth) spawnEffect(app, kFall, t), app.sound.play(0x41);
+                const App::Battle::Actor* fa = battleActor(app, t);
+                const LoadedModel* flm = fa ? &b.models[fa->model] : nullptr;
+                const int down = flm ? battleAction(*flm, btlui::kSlotDown) : -1;
+                const bool boss = f.def && f.def->strongGrowth && down >= 0 && down < int(flm->actions.size()) &&
+                                  flm->actions[size_t(down)].duration >= 3.0f; // (is_BTLANM_D02)
+                if (f.def && !boss) spawnEffect(app, kFall, t), app.sound.play(0x41);
             }
         }
     }
@@ -12474,7 +12482,7 @@ void battleVictory(App& app) {
         if (const cr::Fighter& f = b.rules.f[size_t(k)]; f.present && f.def && f.def->strongGrowth) ++bosses;
     setBattleCamera(app, b.formation + (b.bossModel == 0 ? 0x34 : bosses == 1 ? 0x35 : 0x67));
     for (App::Battle::Actor& a : b.actors) {
-        if (a.fighter >= 2 && !b.rules.f[size_t(a.fighter)].alive() && a.slot != btlui::kSlotDown) playSlot(app, a, btlui::kSlotDown, -2);
+        if (a.fighter >= 2 && !b.rules.f[size_t(a.fighter)].alive() && a.slot != btlui::kSlotDown) playSlot(app, a, btlui::kSlotDown, -3);
         if (a.fighter >= 0 && a.fighter < 2 && b.rules.f[size_t(a.fighter)].alive()) a.hidden = true;
     }
     b.bossWait = int(actorDuration(app, *boss)) - 1 + 20; // (btlanm_get_max_frm(.., 6) + 20)
@@ -12676,6 +12684,8 @@ void stepBattle(App& app) {
         a.time += 1.0f;
         if (a.then == -2) { // held on its last frame (a fallen monster)
             a.time = std::max(dur - 1, 0.0f);
+        } else if (a.then == -3) { // played once, then held (mdl_set_act_motion_loop mode 2: a boss's end)
+            a.time = std::min(a.time, std::max(dur - 1, 0.0f));
         } else if (a.then >= 0) {
             if (a.time >= std::max(dur, 1.0f)) {
                 const int next = a.then;
@@ -18452,7 +18462,10 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                 }
                 if (bossDown && (b.phase == App::Battle::Command || b.phase == App::Battle::Acting)) // (the test: the pair holds, the monsters fall to a blow)
                     for (int k = 0; k < 5; ++k)
-                        if (b.rules.f[size_t(k)].alive()) b.rules.f[size_t(k)].hp = k < 2 ? b.rules.f[size_t(k)].hpMax : 1;
+                        if (b.rules.f[size_t(k)].alive()) {
+                            b.rules.f[size_t(k)].hp = k < 2 ? b.rules.f[size_t(k)].hpMax : 1;
+                            if (k < 2) b.rules.f[size_t(k)].status[cr::kStatusInvincible] = 9;
+                        }
                 if (setPiece && (b.phase == App::Battle::Command || b.phase == App::Battle::Acting))
                     for (int k = 0; k < 5; ++k) // (the boss's HP as the test sets it: --state, else held at most)
                         if (b.rules.f[size_t(k)].alive() && (k < 2 || !SDL_getenv("CR_SETPIECE_HP"))) {
