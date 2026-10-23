@@ -4364,7 +4364,7 @@ void drawSaveScreen(App& app) {
             m.plate(328, 136 + 48.0f * float(plates[i]), plateIcon(kWord[plates[i]]), kWord[plates[i]], ss.cursor == int(i), a,
                     false); // (window 3; the icon is the word's: ComUty_ChoicePlateDraw)
         r.setOrigin(r.uiX());
-        m.backButton(192, 288, false, 0, a); // (Omega's ComUty_BackButtonDraw: CmdBack at (192, 288))
+        m.backBar(192, 288, false, a); // (Omega's ComUty_BackButtonDraw mode 1: CmdBack at (192, 288), no arrows)
     } else { // SaveLoadPut, in every layout (Omega's iPad screen is the iPhone's doubled): the message
         // board (ComUty_MsgBoardDraw, picture 12) at (0, 220), lines from (24, 234); Yes / No the
         // plates at window 6 + (336, 104) / (336, 160) (ComUty_YesNoChoiceDraw)
@@ -7807,6 +7807,7 @@ void drawScenarios(App& app) {
         r.setOrigin(r.uiX());
     }
     if (s.cardTex.id) card(0, 0, 0, a); // window 6: the card's name
+    drawClockAndOz(app, m, a);         // window 1: BattryAndRealTimeAndOzDraw, the list's and the card's alike
     if (whole && s.anim < 20) { // (the port's: the card done)
         const float f = 1 - float(s.anim) / 20.0f;
         const float wc[4] = {1, 1, 1, f};
@@ -8392,7 +8393,7 @@ void drawCharSelect(App& app) {
             outPicture(m, app.charSelectArt2, 32, -16, sp.y + 352, t);
         }
     }
-    m.backButton(124, 288, false, 0, t); // ComUty_BackButtonPosSetXYDraw(124, 288)
+    m.backBar(124, 288, false, t); // ComUty_BackButtonPosSetXYDraw(124, 288), mode 1
     const int word = kScenarioWord[app.charSelectPage & 1];
     m.plate(172, 232, plateIcon(word), word, app.charSelectCursor == 0, t, false);
     if (later && sp.serect.id) { // window 2: the cord (serect 29, tex2d_add at (260, pull - 205), turned), the arrow while held, 28
