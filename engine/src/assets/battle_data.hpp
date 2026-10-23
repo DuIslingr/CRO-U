@@ -20,6 +20,7 @@ struct MonsterDef {
     uint32_t genePoints = 0;  // +8, plus 15 or 10 per level
     int model = -1;           // +12: kBattleModelFile index, -1 = unused row
     int size = 0;             // +26: size class 1-5, the digits of the formation code
+    int rawSize = 0;          // +26 as the file has it (eff3d_set_btl's scale)
     bool strongGrowth = false; // +28
     int level = 0;            // +32: fixed level, <= 0 = from the party's
     int atk = 0, grd = 0, spd = 0, lck = 0; // +38..+44, plus 12/10/8/9 or 6/4/5/4 per level

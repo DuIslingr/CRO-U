@@ -59,6 +59,7 @@ bool BattleData::load(const std::string& dataDir) {
         m.genePoints = u32(r + 8);
         m.model = s16(r + 12);
         m.size = m.model >= 0x88 && m.model <= 0x8a ? 5 : s16(r + 26); // read_btlcpl: these three fill the field
+        m.rawSize = s16(r + 26);
         m.strongGrowth = s16(r + 28) != 0;
         m.level = s16(r + 32);
         m.atk = s16(r + 38);

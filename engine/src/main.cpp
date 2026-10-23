@@ -1003,6 +1003,7 @@ void applyHd(App& app, cr::Image& img) {
     if (SDL_getenv("CR_HD_LOG")) std::printf("hd %s %dx%d -> %dx%d\n", cr::hashName(cr::imageHash(img)).c_str(), img.width, img.height, hd.width, hd.height);
     hd.logicalW = img.width;
     hd.logicalH = img.height;
+    hd.noAlpha = img.noAlpha;
     { // (a cut-out: its alpha only 0 and 255, some of it 0)
         bool binary = !img.alphaOnly, some = false;
         for (size_t i = 3; binary && i < img.rgba.size(); i += 4) {
@@ -10193,9 +10194,13 @@ void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::M
         if (override) {
             app.renderer.drawMesh(mesh, nullptr, mvp, *override);
         } else if (alpha < 0.999f) {
+            // mdl_set_alpha: every Appearance alpha-blended (blend mode 0), its alpha test at most 1;
+            // mdl_put: texture unit 0 modulated, colour 1's alpha the model's
             cr::Material faded = materialOf(i);
             faded.diffuse[3] *= alpha;
-            if (!faded.blended()) { faded.blendSrc = 4; faded.blendDst = 5; }
+            faded.blendSrc = 4, faded.blendDst = 5;
+            faded.alphaThreshold = std::min<uint8_t>(faded.alphaThreshold, 1);
+            faded.texBlend = 4;
             app.renderer.drawMesh(mesh, tex, mvp, faded, app.smoothFilter);
         } else {
             app.renderer.drawMesh(mesh, tex, mvp, materialOf(i), app.smoothFilter);
@@ -10695,6 +10700,14 @@ void spawnEffect(App& app, int id, int fighter) {
     if (!a) return;
     Effect e;
     e.id = id, e.pos = actorPoint(app, *a, effects::kNode[id]);
+    // on a monster all but 2, 3 and 14 at its size class's scale (0xd8a12: 100 100 100 200 250 300),
+    // and eff3d_set holds 0xd, 0x18 .. 0x20 (not 0x1a, 0x1d) and 0x26 at 100
+    const cr::Fighter& f = b.rules.f[size_t(std::clamp(fighter, 0, 4))];
+    const bool held = id == 0xd || id == 0x18 || id == 0x19 || id == 0x1b || id == 0x1c || id == 0x1e || id == 0x1f || id == 0x20 || id == 0x26;
+    if (fighter > 1 && f.def && id != 2 && id != 3 && id != 14 && !held) {
+        static const short kScale[6] = {100, 100, 100, 200, 250, 300};
+        e.scale = float(kScale[std::clamp(f.def->rawSize, 0, 5)]) / 100.0f;
+    }
     b.effects.push_back(e);
 }
 
@@ -12547,7 +12560,12 @@ void stepBossDown(App& app) {
             if (--b.bossWait < 2) {
                 b.bossWait = -(40 + 10);
                 if (boss) boss->fading = true;
-                spawnEffect(app, 7, b.bossFighter);
+                // effect 7: models 0x6b .. 0x6f 10 up and 0x5e .. 0x61 5 up from where they stand, at
+                // 300%; any other on its own (eff3d_set_btl)
+                const int bm = boss ? boss->modelId : -1;
+                if (boss && ((bm >= 0x6b && bm <= 0x6f) || (bm >= 0x5e && bm <= 0x61)))
+                    startEffect(app, b.effects, 7, boss->pos + cr::Vec3{0, bm >= 0x6b ? 10.0f : 5.0f, 0}, false, 3.0f, 0.0f);
+                else spawnEffect(app, 7, b.bossFighter);
                 app.sound.play(0x42);
             }
         } else if (++b.bossWait == 0) battleWon(app);
@@ -18553,8 +18571,8 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                         hi = {std::max(hi.x, lm.skinned[v]), std::max(hi.y, lm.skinned[v + 1]), std::max(hi.z, lm.skinned[v + 2])};
                     }
                 }
-                std::printf("actor %s at (%.0f %.0f) action %d '%s' t=%.0f: posed bounds (%.1f %.1f %.1f)-(%.1f %.1f %.1f)\n",
-                            a.model.c_str(), a.pos.x, a.pos.z, a.action, act ? act->name.c_str() : "-", a.time, lo.x, lo.y,
+                std::printf("actor %s (fighter %d, alpha %.2f, hidden %d) at (%.0f %.0f) action %d '%s' t=%.0f: posed bounds (%.1f %.1f %.1f)-(%.1f %.1f %.1f)\n",
+                            a.model.c_str(), a.fighter, a.alpha, int(a.hidden), a.pos.x, a.pos.z, a.action, act ? act->name.c_str() : "-", a.time, lo.x, lo.y,
                             lo.z, hi.x, hi.y, hi.z);
             }
     }
