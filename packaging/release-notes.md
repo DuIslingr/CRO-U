@@ -1,15 +1,33 @@
-# CRO-U v0.2.1
+# CRO-U v0.3.0
 
 A from-scratch reimplementation of *Chaos Rings Omega* (iOS / Vita / Android): builds for Windows,
 macOS, Linux and Android.
 
-**New in this release: the cutscenes' effects.** Omega's scripts name their effects by number and
-the port had read them CR1's way, so every cutscene effect was the wrong one or none: now the sun
-over the sea with its lens flare, the ship's wake, the light on the planet's deck and the rest
-play as in the game. Effects also move as they should (30 had been frozen by a colour track),
-with their other rotation orders, materials' second textures and their own colours, and face the
-camera in battle as the original does. Also: HD textures' cut-out edges without a black fringe,
-smoother animations at 60 fps, and the opening's ship shot at the room's own field of view.
+**New in this release: much closer to the original**, from an audit against the game's code and a
+comparison with a full playthrough on video.
+
+Battles
+- A boss's end as the game plays it: the camera on the boss, its down motion played through, the
+  burst and fade (or the white-out for the story's bosses), then "Victory!" with the camera on the
+  pair, held until a tap. The story battles' set pieces between rounds, group 0x294's rumbling
+  rounds, and the scene brought on by blows that don't land.
+- The pair stands side by side in pair mode, as in the game.
+- Omega's own battle sounds: each swing by species, each hit by its kind, genes and items as they
+  start, the bosses' own; the victory tune only when it isn't the battle's own music.
+- An action that can't happen any more says so; the last battle item listed.
+- Effects at their monster's size, and five effects (a boss's burst, flares, pillars of light) that
+  had drawn collapsed; fading models fade instead of vanishing at once.
+- The item and gene lists with the game's plates, icons and HELP board.
+
+The field, scripts and menus
+- Walking by touch: the pad and the "!" button.
+- Scripts: an NPC's fade, the camera turning onto someone, scaling, straight walks; sounds fading
+  as the scripts ask (the shop's room sounds too).
+- The menus' darkening as the game's: a slanted mask that fades in and out; Back's arrows only
+  where pages turn, drawn as the game draws them; the battery beside the clock (and on the
+  Piu-Piu Card).
+- A message that ends by itself stays up until the scene closes it (Extra Mode's warning); the map
+  screen dims only the game's own screen in widescreen.
 
 **From v0.2.0:** your copy found by itself in `ios/`, `android/` or `vita/` beside the program, and HD
 textures in `textures/hd/` turned on by themselves (below, and the README's "Your copy").
