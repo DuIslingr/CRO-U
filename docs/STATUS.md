@@ -64,6 +64,21 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
       groups 0x291 / 0x22c's extra model (`read_btlcpl`: m127 at (500, 0, 465), its slot 14 in 440)
 - [x] Omega's own battle calcs (38..44: the kiss, Down and the Ward, 437's blow, MP / HP x power),
       its stat formula (`btlpcparam_*` with Down / the Ward) and warrior / sorcerer by character
+- [x] a boss's end (`btl_main` 1000 / 0x3de .. 0x3e6): the last boss to fall stays standing
+      (`btlcalc_chk_dead`: down for good when size 1 or in groups 0x292 / 0x2a2; gone at once with
+      effect 7 and sound 0x42 while others stand); won in any formation but 2, the camera turns on
+      it (0x34 / 0x35 / 0x67 past the formation's), the fallen play their down motion, the pair goes
+      out of sight; models 0xd .. 0x12, 0, 0x1b, 0x1d .. 0x20 go under a quake and a white-out at
+      their own frames, the others play the motion out (sound 0xc6 at `_btlanmtbl` [16]) and fade.
+      The story flags it keeps: 0x596 (group 0x294's boss down), 0x791 (0x2a5's), 0x644 (0x295
+      won). The victory: "Victory!" (57007) for 60 frames, the camera on the pair (0x47 / 0x45 + the
+      one standing), its tune only when not the battle's own nor 997 / 998 (var 59 under 0x26). A
+      defeat takes the monsters still standing out of sight. `--battle-view bossdown@n`
+- [x] the battle's sounds as Omega plays them (`__effgo`): each attacker's swing
+      (`btlact_attack_init` by model, `_btlanmtbl` [15] for the species), the bosses' blows and
+      casts at their frames, a gene's / item's start (0x37 / 0x38), a fall (0x41), and every calc's
+      own a target at a time (the hits and their elements, 0x47 / 0x48 + 2 x a gene's element,
+      fixed damage, heals, revives, status and stat changes, 0429 .. 0435's)
 - [x] level-ups as `pcparam_change_lv` has them (from 20: 10 HP and 1 to each other stat a level;
       the level-up genes 30 HP / 3 MP / 5), seeds 10 a seed to 9999 (`use_item`,
       `MuCom_GetUsedItemLimitNum`); group 695's guest takes orders and leaves the enemies' levels to
