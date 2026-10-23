@@ -69,7 +69,13 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
       effect 7 and sound 0x42 while others stand); won in any formation but 2, the camera turns on
       it (0x34 / 0x35 / 0x67 past the formation's), the fallen play their down motion, the pair goes
       out of sight; models 0xd .. 0x12, 0, 0x1b, 0x1d .. 0x20 go under a quake and a white-out at
-      their own frames, the others play the motion out (sound 0xc6 at `_btlanmtbl` [16]) and fade.
+      their own frames, the others play the motion out (sound 0xc6 at `_btlanmtbl` [16]) and fade
+      (`mdl_set_alpha`: blend mode 0, alpha test at most 1, texture unit 0 modulated while fading)
+      under effect 7 (10 up at 300% on models 0x6b .. 0x6f, 5 up on 0x5e .. 0x61).
+- [x] battle effects on a monster at its size class's scale (`eff3d_set_btl`: 100 100 100 200 250
+      300, but for 2, 3 and 14; `eff3d_set` holds 0xd, 0x18, 0x19, 0x1b, 0x1c, 0x1e .. 0x20 and 0x26
+      at 100); an effect's motion is its transform tree's action, never one of its materials' (with
+      9 nodes they fit too: effects 7, 18, 41, 42 drew collapsed)
       The story flags it keeps: 0x596 (group 0x294's boss down), 0x791 (0x2a5's), 0x644 (0x295
       won). The victory: "Victory!" (57007) for 60 frames, the camera on the pair (0x47 / 0x45 + the
       one standing), held 140 frames or until a tap (`--battle-view won@n`); pair mode puts the
