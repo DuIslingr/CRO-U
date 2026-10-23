@@ -19,7 +19,7 @@
 // always hits +15, variance % +16, motion +17, element +18 (sets the user's), affinity +22 (the
 // element triangle applies).
 //  - 10..17 each character's attack (character + 10; monsters use them too), 18..21 the routes'
-//    pair attacks (route + 18), 26 defend, 100..125 battle items 21..46, 201.. genes.
+//    pair attacks (route + 18), 26 defend, 100..126 battle items 21..47, 201.. genes.
 //
 // A round (btl_main 400-899): commands (the pair's, then each enemy's from its AI lists), a queue
 // by speed (the actors' average + the action's +6; +19998 with the "act first" status), then the
@@ -201,6 +201,7 @@ struct BattleTurn {
     std::vector<int> barriers;   // ... whose barriers those were
     bool counter = false;        // skill 154's answer to a hit
     int message = 0;             // a system message to show for it (57xxx), 0 none
+    bool cancelled = false;      // btlque_make_que: it can't be any more - its message, no action
     int messageValue = 0;        // its number (Oz stolen) or the element / kind it names
     bool gone = false;           // calc 11: the enemy fled
     int escapeChance = 0;
@@ -345,6 +346,7 @@ private:
     GameRandom* shared_ = nullptr;
     bool escaped_ = false;
     std::vector<int> known_;     // abilities, skills and plates the bag held at the start
+    std::vector<int> bag_;       // the battle items' counts (21..47) as the actions use them up
 
     void fallRewards(int enemy, const int actors[2], bool itemsAndGenes = true);
     int zoku(int amount, const BattleActionDef& a, int user, int target, bool magic) const;

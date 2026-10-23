@@ -11346,9 +11346,9 @@ void battleChooseCommand(App& app, int i) {
         b.pick = b.pickTop = 0;
         battletalk::tutorial(app, 0xfa8); // the first time: what genes cost
         break;
-    case 2: { // Items: what the bag holds of the battle items (21..46)
+    case 2: { // Items: what the bag holds of the battle items (21..47: get_btl_item_list's 0x15 .. 0x2f)
         b.picks.clear();
-        for (int n = 21; n <= 46; ++n)
+        for (int n = 21; n <= 47; ++n)
             if (auto it = app.game.items.find(n); it != app.game.items.end() && it->second > 0 && app.battleActions.get(n + 79))
                 b.picks.push_back(n);
         if (b.picks.empty()) {
@@ -11421,7 +11421,7 @@ void battleBack(App& app) {
         if (gene) b.pendingGene = 0, b.picks = battleGeneList(app);
         if (item) {
             b.picks.clear();
-            for (int n = 21; n <= 46; ++n)
+            for (int n = 21; n <= 47; ++n)
                 if (auto it = app.game.items.find(n); it != app.game.items.end() && it->second > 0 && app.battleActions.get(n + 79))
                     b.picks.push_back(n);
         }
@@ -12103,6 +12103,11 @@ void startTurn(App& app) {
     b.hitsShown = false;
     b.hitFrame = 20;
     b.bounceAt = -1;
+    if (t.cancelled) { // btlque_make_que: its message for 40 frames in place of the action
+        setBanner(app, sysText(app, t.message), 40);
+        b.hitFrame = 0;
+        return;
+    }
     if (t.kind == cr::kCmdEscape) {
         setBanner(app, sysText(app, t.escaped ? 57000 : 57001));
         b.hitFrame = 0; // btlact_escape: away - 30 frames (2.2.0; 1.0.1 10, no line to wait for)

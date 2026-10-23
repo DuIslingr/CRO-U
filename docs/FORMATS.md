@@ -1193,7 +1193,7 @@ An action (`+0x2c`, 1-based):
 ```
 
 Actions 10..17 are the characters' attacks (character + 10; monsters use them too), 18..21 the
-routes' pair attacks, 26 Defend, 100..125 the battle items 21..46, 201.. genes; the names are
+routes' pair attacks, 26 Defend, 100..126 the battle items 21..47, 201.. genes; the names are
 system text block 3 (54000 + action − 1). Calcs (btlcalcTbl at 0xd2c30, power p):
 0 physical (`btlcalc_0404`), 1 genes (0406), 2 p × 100 shared by the targets (0407), 3 p × 100
 (0408), 4 p × 10 MP (0409), 5 p% of the target's HP (0410), 6 p% of its MP (0411), 7 Sacrifice:

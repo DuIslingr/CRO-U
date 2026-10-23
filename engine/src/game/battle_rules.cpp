@@ -76,9 +76,12 @@ int BattleRules::random(int n) { return (shared_ ? *shared_ : own_).get(n); }
 
 void BattleRules::setupParty(const GameState& gs, const ItemTable& items, int) {
     known_.clear();
+    bag_.assign(48, 0);
     purse = gs.oz;
-    for (const auto& [item, count] : gs.items)
+    for (const auto& [item, count] : gs.items) {
         if (count > 0 && ((item >= kFirstAbility && item <= kLastSkill) || (item >= 474 && item <= 500))) known_.push_back(item);
+        if (item >= 21 && item <= 47) bag_[size_t(item)] = std::max(count, 0);
+    }
     // btl_prty_init: the scenario's pair (records 0..2), the second away while flag 0xfed + s holds
     const int s = std::clamp(gs.scenario, 0, kScenarios - 1);
     for (int k = 0; k < 2; ++k) {
@@ -742,12 +745,33 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
         for (int k : e.actors)
             if (k >= 0) f[size_t(k)].lastAction = e.action;
         if (e.kind == kCmdItem) out.item = e.item;
+        // btlque_make_que: a gene with one of its actors silenced since it was chosen (+0x8f) - "can't
+        // use genes" (57065) in place of the action; the party's last of an item gone - 57080; the
+        // pair's gene without the MP any more - 57081
+        const unsigned ac = unsigned(e.action);
+        bool silenced = false;
+        for (int k : e.actors)
+            if (k >= 0 && f[size_t(k)].alive() && f[size_t(k)].status[kStatusSilence]) silenced = true;
+        if (silenced && ac - 261u > 140u && ac - 1u > 125u && ac - 413u > 16u) {
+            out.cancelled = true, out.message = 57065;
+            return true;
+        }
+        if (e.kind == kCmdItem && e.actors[0] < 2 && e.item >= 21 && e.item <= 47 && !bag_.empty()) {
+            if (bag_[size_t(e.item)] <= 0) {
+                out.cancelled = true, out.message = 57080;
+                return true;
+            }
+            --bag_[size_t(e.item)];
+        }
         if (e.kind == kCmdGene && e.actors[0] < 2 && !e.paid) { // the gene's MP: each member pays it in pair mode
             const int cost = geneCost(*a, e.actors[0]);
             bool enough = true;
             for (int k : e.actors)
                 if (k >= 0) enough &= f[size_t(k)].mp >= cost;
-            if (!enough) continue;
+            if (!enough) {
+                out.cancelled = true, out.message = 57081;
+                return true;
+            }
             for (int k : e.actors)
                 if (k >= 0) f[size_t(k)].mp -= cost;
         }
