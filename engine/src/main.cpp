@@ -4535,6 +4535,10 @@ void openShop(App& app) {
 
 void closeShop(App& app) {
     if (app.shop.open && !app.shop.noBgmRecovery) playBgm(app, uint32_t(app.shop.bgmBack)); // ShopClr
+    if (app.shop.open && app.game.scenario == 0) { // ShopClr: the room's sounds back, looping, fading in over 20
+        if (app.game.flag(0x472)) app.sound.play(0x800113), app.sound.play(0x80113);
+        if (app.game.flag(0x473)) app.sound.play(0x800003), app.sound.play(0x80003);
+    }
     app.shop.open = false;
     app.renderer.destroy(app.shop.keeper);
 }
@@ -12561,6 +12565,24 @@ void endRound(App& app) {
         b.member = 0;
         b.commandSaid[0] = b.commandSaid[1] = false; // +0xafc / +0xafd
         battleMenu(app, App::Battle::Top);
+        if (b.start.group == 0x294 && app.game.scenario == 0) { // btl_main 800: group 0x294's rounds - the quake
+            // dying away over 60 frames under a line, the rumble (0x11) fading over 40; the 10th held, looping
+            struct Rumble { int round, message; float amp; };
+            static const Rumble kRumbles[] = {{1, 57109, 8}, {2, 57095, 5}, {3, 57096, 5}, {4, 57096, 15},
+                                              {6, 57097, 10}, {7, 57110, 30}, {8, 57098, 20}};
+            for (const Rumble& r : kRumbles)
+                if (b.rules.round == r.round) {
+                    setBanner(app, sysText(app, r.message), 60);
+                    endQuake(app, r.amp, 100, 0, 60);
+                    app.sound.play(0x11);
+                    app.sound.play(0x2000011);
+                }
+            if (b.rules.round == 10) {
+                setBanner(app, sysText(app, 57099), 60);
+                endQuake(app, 20, 100, 100, 260);
+                app.sound.play(0x800011);
+            }
+        }
         battletalk::between(app); // btl_main 0x352
         if (!app.game.flag(battletalk::kFlag)) battletalk::betweenStart(app); // btl_main 0
         break;

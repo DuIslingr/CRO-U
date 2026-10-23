@@ -74,6 +74,11 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
       won). The victory: "Victory!" (57007) for 60 frames, the camera on the pair (0x47 / 0x45 + the
       one standing), its tune only when not the battle's own nor 997 / 998 (var 59 under 0x26). A
       defeat takes the monsters still standing out of sight. `--battle-view bossdown@n`
+- [x] sounds fading as `__effgo`'s flags have them (bits 26 / 27 / 25: the one playing out over 10 /
+      20 / 40 frames, `__eff_vol2`; 18 / 19 / 17 in from nothing, `__eff_vol_fadein`) - the scripts'
+      ~820 fade-outs started a second copy before; the shop's close fades the room's loops back in
+      (0x113 with flag 0x472, 0x3 with 0x473); group 0x294's rounds 1 .. 10 (`btl_main` 800): a
+      line, the quake dying away and the rumble (0x11) fading, the 10th's held
 - [x] the battle's sounds as Omega plays them (`__effgo`): each attacker's swing
       (`btlact_attack_init` by model, `_btlanmtbl` [15] for the species), the bosses' blows and
       casts at their frames, a gene's / item's start (0x37 / 0x38), a fall (0x41), and every calc's
