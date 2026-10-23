@@ -74,6 +74,12 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
       won). The victory: "Victory!" (57007) for 60 frames, the camera on the pair (0x47 / 0x45 + the
       one standing), its tune only when not the battle's own nor 997 / 998 (var 59 under 0x26). A
       defeat takes the monsters still standing out of sight. `--battle-view bossdown@n`
+- [x] the story battles' set pieces between rounds (`btl_main` 0x352): group 0x294's tenth round
+      (`chk_cpl660` -> 0x366: white over 3 s with its sounds and the music fading, the models gone,
+      then the battle left for the field, its script going on) and group 0x291's stage changes
+      (`chk_cpl657_mapchange` -> 0x37a: the boss at 80 / 60 / 20% of its HP the first time - flags
+      0x591 / 0x592 / 0x593 - turns the stage into 0x15 / 0x18 / 0x19 under a second's white; with
+      0x15 the script's talk). `--battle-view setpiece@n` (the pair held; `CR_SETPIECE_HP` the boss's %)
 - [x] sounds fading as `__effgo`'s flags have them (bits 26 / 27 / 25: the one playing out over 10 /
       20 / 40 frames, `__eff_vol2`; 18 / 19 / 17 in from nothing, `__eff_vol_fadein`) - the scripts'
       ~820 fade-outs started a second copy before; the shop's close fades the room's loops back in

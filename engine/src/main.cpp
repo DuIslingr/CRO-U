@@ -487,6 +487,9 @@ struct App {
         // its down motion's sounding frame (+0x3a8: _btlanmtbl [16]), G+0xa5c's countdown
         bool bossEnd = false;
         int bossFighter = 2, bossKey = 0, bossModel = -1, bossWait = 0;
+        // the story battles' set pieces between rounds (btl_main 0x352 -> 0x366 / 0x37a): which, and
+        // 0x37a's new stage (G+0xa14)
+        int setPiece = 0, setPieceStage = -1;
         LoadedModel stage;
         struct Actor {
             std::string model;             // battle model package (cache key)
@@ -536,7 +539,7 @@ struct App {
         int requestFlags = 0;
         // The rules (game/battle_rules.hpp) and the scene around them (btl_main's states)
         cr::BattleRules rules;
-        enum Phase { Intro, Command, Acting, WinTalk, BossDown, Won, Results, Lost, Fled } phase = Intro;
+        enum Phase { Intro, Command, Acting, WinTalk, BossDown, SetPiece, Won, Results, Lost, Fled } phase = Intro;
         int phaseFrames = 0;
         enum Menu { Top, Commands, Targets, Items, EscapeAsk, Genes } menu = Top;
         int cursor = 0;
@@ -12529,6 +12532,60 @@ void stepBossDown(App& app) {
     if (f == w->back + 10) battleWon(app); // (1000's 10 frames)
 }
 
+// chk_cpl657_mapchange: group 0x291 in the first scenario, the boss (fighter 2) at 80% / 60% / 20%
+// of its HP for the first time (flags 0x591 / 0x592 / 0x593) - the battle's stage 0x15 / 0x18 / 0x19
+int stageChange657(App& app) {
+    App::Battle& b = app.battle;
+    if (app.game.scenario != 0 || b.start.group != 0x291) return -1;
+    const int hp = b.rules.f[2].hp, most = b.rules.f[2].hpMax;
+    if (hp <= most / 5 && !app.game.flag(0x593)) return app.game.setFlag(0x593, true), 0x19;
+    if (hp <= most * 60 / 100 && !app.game.flag(0x592)) return app.game.setFlag(0x592, true), 0x18;
+    if (hp <= most * 80 / 100 && !app.game.flag(0x591)) return app.game.setFlag(0x591, true), 0x15;
+    return -1;
+}
+
+// btl_main 0x366: group 0x294's end - from frame 40 white over 3 s (sounds 0x41, 0xcb, 0x48, 0x128, the
+// music fading), the models gone at 129, the white gone at 130 (150 ms), and at 163 the quake and the
+// rumble stopped and the battle left for the field, where its script goes on. 0x37a: white over 1 s
+// (sound 0xcb), at 22 the new stage and the white going, at 44 the commands again (and with stage
+// 0x15 the script's talk)
+void stepSetPiece(App& app) {
+    App::Battle& b = app.battle;
+    const int f = b.phaseFrames;
+    if (b.setPiece == 0x366) {
+        if (f == 40) {
+            setFlash(app, 0, 255, 3000);
+            for (uint32_t id : {0x41u, 0xcbu, 0x48u, 0x128u}) app.sound.play(id);
+            playBgm(app, 0x2000000);
+        }
+        if (f == 129)
+            for (App::Battle::Actor& a : b.actors) a.hidden = true;
+        if (f == 130) setFlash(app, 255, 0, 150);
+        if (f == 163) {
+            endQuake(app, 2, 0, 0, 1);
+            app.sound.play(0x20000011);
+            b.exit = 1;
+        }
+        return;
+    }
+    if (f == 1) setFlash(app, 0, 255, 1000), app.sound.play(0xcb);
+    if (f == 22 && b.setPieceStage >= 0 && b.setPieceStage < cr::kNumBattleStages) {
+        unloadLoaded(app, b.stage);
+        loadModelFile(app, cr::kBattleStageFile[b.setPieceStage], b.stage, false);
+        b.start.stage = b.rules.stage = b.setPieceStage; // (G+0x8a53d)
+        setFlash(app, 255, 0, 1000);
+    }
+    if (f == 44) {
+        b.phase = App::Battle::Command;
+        b.phaseFrames = 0;
+        b.member = 0;
+        b.commandSaid[0] = b.commandSaid[1] = false;
+        battleMenu(app, App::Battle::Top);
+        battletalk::between(app);
+        if (b.setPieceStage == 0x15) battletalk::open(app);
+    }
+}
+
 void endRound(App& app) {
     App::Battle& b = app.battle;
     battletalk::rules(app); // (status_prc's boss rules as the round ends)
@@ -12559,12 +12616,23 @@ void endRound(App& app) {
         b.phaseFrames = 0;
         settleBattle(app);
         break;
-    default:
-        b.phase = App::Battle::Command;
-        b.phaseFrames = 0;
-        b.member = 0;
-        b.commandSaid[0] = b.commandSaid[1] = false; // +0xafc / +0xafd
-        battleMenu(app, App::Battle::Top);
+    default: {
+        // btl_main 0x352's end: group 0x294's tenth round (chk_cpl660) or group 0x291's stage change
+        // (chk_cpl657_mapchange) in place of the commands
+        const int piece = app.game.scenario == 0 && b.start.group == 0x294 && b.rules.round == 10 ? 0x366 : 0;
+        const int stage = piece ? -1 : stageChange657(app);
+        if (piece || stage >= 0) {
+            b.phase = App::Battle::SetPiece;
+            b.phaseFrames = 0;
+            b.setPiece = piece ? piece : 0x37a;
+            b.setPieceStage = stage;
+        } else {
+            b.phase = App::Battle::Command;
+            b.phaseFrames = 0;
+            b.member = 0;
+            b.commandSaid[0] = b.commandSaid[1] = false; // +0xafc / +0xafd
+            battleMenu(app, App::Battle::Top);
+        }
         if (b.start.group == 0x294 && app.game.scenario == 0) { // btl_main 800: group 0x294's rounds - the quake
             // dying away over 60 frames under a line, the rumble (0x11) fading over 40; the 10th held, looping
             struct Rumble { int round, message; float amp; };
@@ -12583,9 +12651,11 @@ void endRound(App& app) {
                 app.sound.play(0x800011);
             }
         }
+        if (b.phase == App::Battle::SetPiece) break;
         battletalk::between(app); // btl_main 0x352
         if (!app.game.flag(battletalk::kFlag)) battletalk::betweenStart(app); // btl_main 0
         break;
+    }
     }
 }
 
@@ -12674,6 +12744,7 @@ void stepBattle(App& app) {
         battleVictory(app);
         break;
     case App::Battle::BossDown: stepBossDown(app); break;
+    case App::Battle::SetPiece: stepSetPiece(app); break;
     case App::Battle::Command: // btl_main 400: group 695's guest (+0xa6b) with its leader down - no orders
         if (b.rules.f[1].guest && !b.rules.allyAuto && !b.rules.f[0].alive() && b.rules.f[1].alive() &&
             !battletalk::on(app) && b.menu == App::Battle::Top)
@@ -18361,7 +18432,9 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         int hitsSeen = 0;
         bool wasShown = false;
         // results[@frames][:taps]: the results that many frames in, after that many taps
-        const bool results = v.rfind("results", 0) == 0 || v.rfind("bossdown", 0) == 0; // (bossdown@n: n frames into the boss's end)
+        // (bossdown@n: n frames into the boss's end; setpiece@n: into a story battle's set piece, every side held)
+        const bool setPiece = v.rfind("setpiece", 0) == 0;
+        const bool results = v.rfind("results", 0) == 0 || v.rfind("bossdown", 0) == 0 || setPiece;
         const bool bossDown = v.rfind("bossdown", 0) == 0;
         int resultFrames = 10, resultTaps = 0;
         if (results) {
@@ -18380,7 +18453,16 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                 if (bossDown && (b.phase == App::Battle::Command || b.phase == App::Battle::Acting)) // (the test: the pair holds, the monsters fall to a blow)
                     for (int k = 0; k < 5; ++k)
                         if (b.rules.f[size_t(k)].alive()) b.rules.f[size_t(k)].hp = k < 2 ? b.rules.f[size_t(k)].hpMax : 1;
+                if (setPiece && (b.phase == App::Battle::Command || b.phase == App::Battle::Acting))
+                    for (int k = 0; k < 5; ++k) // (the boss's HP as the test sets it: --state, else held at most)
+                        if (b.rules.f[size_t(k)].alive() && (k < 2 || !SDL_getenv("CR_SETPIECE_HP"))) {
+                            b.rules.f[size_t(k)].hp = b.rules.f[size_t(k)].hpMax;
+                            if (k < 2) b.rules.f[size_t(k)].status[cr::kStatusInvincible] = 9; // (no blow fells them)
+                        }
+                if (setPiece && SDL_getenv("CR_SETPIECE_HP") && b.rules.f[2].alive()) // (a percentage for fighter 2)
+                    b.rules.f[2].hp = std::max(1, b.rules.f[2].hpMax * SDL_atoi(SDL_getenv("CR_SETPIECE_HP")) / 100);
                 if (results) {
+                    if (setPiece && b.phase == App::Battle::SetPiece && b.phaseFrames >= resultFrames) break;
                     if (bossDown && b.phase == App::Battle::BossDown && b.phaseFrames >= resultFrames) break;
                     if (bossDown && b.phase == App::Battle::Won) break;
                     if (b.phase == App::Battle::Results && b.result.frames >= resultFrames) break;
@@ -18401,8 +18483,8 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                 std::printf("results: stage %d, line %d, exp shown %.0f of %d, oz %.0f of %d, %zu level-ups, %zu items\n",
                             b.result.stage, b.result.message, b.result.shownExp, b.result.expTotal, b.result.shownOz,
                             b.result.ozTotal, b.result.ups.size(), b.result.items.size());
-            std::printf("battle view %s: phase %d (frame %d, boss model %d, camera %d), round %d, break %d, hp", v.c_str(), int(b.phase),
-                        b.phaseFrames, b.bossModel, b.cam, b.rules.round, b.rules.breakGauge);
+            std::printf("battle view %s: phase %d (frame %d, boss model %d, camera %d, set piece %#x stage %d), round %d, break %d, hp",
+                        v.c_str(), int(b.phase), b.phaseFrames, b.bossModel, b.cam, b.setPiece, b.start.stage, b.rules.round, b.rules.breakGauge);
             for (int i = 0; i < 5; ++i) std::printf(" %d/%d", b.rules.f[size_t(i)].hp, b.rules.f[size_t(i)].hpMax);
             std::printf(", exp %d oz %d\n", b.rules.expGained, b.rules.ozGained);
         }
