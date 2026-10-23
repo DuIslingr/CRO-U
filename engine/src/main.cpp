@@ -2510,11 +2510,10 @@ void drawSceneEffects(App& app, bool battle = false) {
             }
             if (!app.speedLinesTex.id) break;
             static const int kUv[4][4] = {{0, 0, 256, 192}, {256, 0, -256, 192}, {256, 192, -256, -192}, {0, 192, 256, -192}};
-            const float k = app.speedLinesTex.width / 256.0f;
-            for (const auto& q : kUv) {
-                const float x = 2.0f * float(q[0] - 16) + 32, y = 2.0f * float(q[1] - 32) + 64; // (a negative size flips the uv only)
-                r.drawQuadUV(app.speedLinesTex, x, y, 512, 384, q[0] * k, q[1] * k, q[2] * k, q[3] * k);
-            }
+            const float k = app.speedLinesTex.width / 256.0f, extra = r.uiX(); // (widescreen: the outer halves stretched over the sides)
+            for (const auto& q : kUv) // (a negative size flips the uv only)
+                r.drawQuadUV(app.speedLinesTex, q[0] ? 512.0f : -extra, 2.0f * float(q[1]), 512 + extra, 384, q[0] * k, q[1] * k, q[2] * k,
+                             q[3] * k);
             break;
         }
         case 2: case 3: case 4: { // the alarm lights: a grey level 0 -> 128 -> 0, at 0xa0
