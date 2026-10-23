@@ -12751,6 +12751,10 @@ void stepBattle(App& app) {
                 if (b.rules.elementTaken) battletalk::tutorial(app, 0xff3);
                 else if (b.rules.statusTaken) battletalk::tutorial(app, 0xff4);
                 else if (b.rules.learnedNew) battletalk::tutorial(app, 0xff5);
+                else if (b.start.group == 693 && b.rules.nullHit && !app.game.flag(0xfaa) && b.eventBattle) {
+                    app.game.setFlag(0xfaa, true); // btl_main 799: 0x2b5's blows don't land - the script's scene
+                    battletalk::open(app);         // (its story battle's, after Battle: flag 4010)
+                }
                 for (int k = 0; k < 2; ++k)
                     if (App::Battle::Actor* u = b.turn.actors[k] >= 0 ? battleActor(app, b.turn.actors[k]) : nullptr) {
                         u->pos = u->home;

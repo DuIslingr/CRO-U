@@ -398,7 +398,7 @@ BattleHit BattleRules::physical(const BattleActionDef& a, const int actors[2], i
             h.type = kHitGuard;
         }
     }
-    if (scenario == 0 && group == 693 && (a.id == 27 || a.id == 28)) dmg = 0, h.type = 0; // (0x2b5: the story's)
+    if (scenario == 0 && group == 693 && (a.id == 27 || a.id == 28)) dmg = 0, h.type = 0, nullHit = true; // (0x2b5: the story's, +0xa78)
     dmg = std::max(dmg, 0);
     if (h.type != kHitGuard) dmg = dmg * elementScale(a, actors[0], target, h.type) / 100;
     if (dmg >= 1) dmg = resist(a, actors, target, dmg, false, h.type);
@@ -1049,6 +1049,8 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             const int before = tf.hp;
             if (h.type == kHitKill) h.amount = tf.hp;
             if (h.amount > 0 && tf.status[kStatusInvincible]) h.amount = 0, h.type = kHitNoEffect; // Is_invincible
+            if (scenario == 0 && group == 693 && e.actors[0] < 2 && e.actors[1] < 0 && h.amount > 0) // btlcalc_dmg_hp: 0x2b5's
+                h.amount = 0, h.type = 0, nullHit = true;                                         // solo blows don't land (+0xa78)
             h.amount = floored(t, h.amount); // chk_karaok_dmg_hp
             if (calc == 0 && round > 3 && h.amount >= 1 && a->id == 18) lateAttack = true; // btlcalc_0404: +0xa50
             if (h.amount > 0) breakEvent(breakBy, 2, t);
