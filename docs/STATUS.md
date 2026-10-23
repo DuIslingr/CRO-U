@@ -72,7 +72,8 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
       their own frames, the others play the motion out (sound 0xc6 at `_btlanmtbl` [16]) and fade.
       The story flags it keeps: 0x596 (group 0x294's boss down), 0x791 (0x2a5's), 0x644 (0x295
       won). The victory: "Victory!" (57007) for 60 frames, the camera on the pair (0x47 / 0x45 + the
-      one standing), its tune only when not the battle's own nor 997 / 998 (var 59 under 0x26). A
+      one standing), held 140 frames or until a tap (`--battle-view won@n`); pair mode puts the
+      pair side by side (`_btlinitpos`' second row, `__menub_mainPrc`), solo back at the first; its tune only when not the battle's own nor 997 / 998 (var 59 under 0x26). A
       defeat takes the monsters still standing out of sight. `--battle-view bossdown@n`
 - [x] the story battles' set pieces between rounds (`btl_main` 0x352): group 0x294's tenth round
       (`chk_cpl660` -> 0x366: white over 3 s with its sounds and the music fading, the models gone,
