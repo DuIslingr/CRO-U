@@ -266,6 +266,12 @@ struct App {
         int frames = 1, t = 0;
     };
     std::vector<Move> moves;
+    struct Rescale {                       // AdjScale (npc_autoctl_set_scale: autoctl mode 3) from -> to over `frames`
+        int npc = 0;
+        float from[3] = {1, 1, 1}, to[3] = {1, 1, 1};
+        int frames = 1, t = 0;
+    };
+    std::vector<Rescale> rescales;
     std::set<int> placedNpcs;              // actors a script placed: parked slots (y 1000, origin) appear
     std::map<int, std::map<int, int>> actorSlots; // LoadAct: npc -> slot -> action index in its model
     struct ScriptCam {                     // FrmSetCam / FrmAdjCam / FrmPanCam after CameraFree
@@ -2744,7 +2750,36 @@ struct ViewerHost : cr::EventHost {
     bool animBusy(int id) override {
         for (const auto& m : app.moves)
             if (m.npc == id) return true;
+        for (const auto& r : app.rescales)
+            if (r.npc == id) return true;
         return false;
+    }
+    // SetScale (frames 0) / AdjScale: an NPC's x y z scale (the player's, gac +0xd84 / prty_autoctl_set_scale,
+    // no script changes); one autoctl an NPC, so a rescale ends its move and a move its rescale
+    void scaleNpc(int id, const float* s, int frames) override {
+        cr::FieldNpc* n = findNpc(app, id);
+        if (!n || id == 0) return;
+        app.rescales.erase(std::remove_if(app.rescales.begin(), app.rescales.end(), [&](const App::Rescale& o) { return o.npc == id; }),
+                           app.rescales.end());
+        if (frames <= 0) {
+            for (int k = 0; k < 3; ++k) n->axes[k] = s[k];
+            for (auto& d : app.npcDraws)
+                if (d.id == id) d.world = npcWorld(*n);
+            return;
+        }
+        app.moves.erase(std::remove_if(app.moves.begin(), app.moves.end(), [&](const App::Move& o) { return o.npc == id; }), app.moves.end());
+        App::Rescale r;
+        r.npc = id, r.frames = frames;
+        for (int k = 0; k < 3; ++k) r.from[k] = n->axes[0] >= 0 ? n->axes[k] : n->scale, r.to[k] = s[k];
+        app.rescales.push_back(r);
+    }
+    // Autoadj (npc_autoctl_set / prty_autoctl_set): a straight move to (x, its y, z) at `speed` a frame -
+    // dist / speed frames, truncated (FPToFixed) - facing kept
+    void autoMove(int id, float x, float z, float speed) override {
+        cr::Vec3 p;
+        if (!actorPos(app, id, p) || speed <= 0) return;
+        const float v[3] = {x, p.y, z};
+        moveNpc(id, v, 0, Facing::Keep, int(std::hypot(p.x - x, p.z - z) / speed), 0);
     }
     void fadeNpc(int id, float from, float to, int frames) override {
         for (auto* d : npc(id)) {
@@ -2857,6 +2892,8 @@ struct ViewerHost : cr::EventHost {
         }
         app.moves.erase(std::remove_if(app.moves.begin(), app.moves.end(), [&](const App::Move& o) { return o.npc == id; }),
                         app.moves.end());
+        app.rescales.erase(std::remove_if(app.rescales.begin(), app.rescales.end(), [&](const App::Rescale& o) { return o.npc == id; }),
+                           app.rescales.end());
         app.moves.push_back(m);
     }
     void tex2d(int slot, uint16_t f, int image, const int16_t (*extra)[3]) override {
@@ -3110,6 +3147,10 @@ struct ViewerHost : cr::EventHost {
         cr::Vec3 p;
         float vx, vy;
         if (actorPos(app, npc, p) && fieldViewPoint(app, p, vx, vy)) scrollFieldTo(app, vx, vy, rate);
+    }
+    void lookAtNpc(int npc) override { // SetFreeCamera, SetScroll3D(the npc's place, 1.0)
+        app.cam.free = true;
+        mapScroll(npc, 0, 0, 1.0f);
     }
     void battle(int group, int stage, int flags) override { // starts when this frame's script step ends
         app.battle.requested = true;
@@ -9511,6 +9552,18 @@ void stepEvents(App& app) {
         if (m.t >= m.frames) app.moves.erase(app.moves.begin() + long(i));
         else ++i;
     }
+    for (size_t i = 0; i < app.rescales.size();) { // (npc_autoctl_prc mode 3: the scale in a straight line)
+        App::Rescale& r = app.rescales[i];
+        ++r.t;
+        const float t = float(r.t) / float(r.frames);
+        if (cr::FieldNpc* n = findNpc(app, r.npc)) {
+            for (int k = 0; k < 3; ++k) n->axes[k] = r.from[k] + (r.to[k] - r.from[k]) * t;
+            for (auto& d : app.npcDraws)
+                if (d.id == r.npc) d.world = npcWorld(*n);
+        }
+        if (r.t >= r.frames) app.rescales.erase(app.rescales.begin() + long(i));
+        else ++i;
+    }
     stepFieldScroll(app);
     stepSceneEffects(app);
     if (app.cam.t < app.cam.frames) { // camera moves are straight lines
@@ -9841,10 +9894,12 @@ cr::Mat4 playerWorld(const cr::FieldWalker& w) {
 cr::Mat4 npcWorld(const cr::FieldNpc& n) {
     const float k = n.model <= 1 ? 1.0f : 0.0f;
     const float c = std::cos(n.angle), sn = std::sin(n.angle);
+    const bool set = n.axes[0] >= 0;
+    const float sx = set ? n.axes[0] : n.scale, sy = set ? n.axes[1] : n.scale, sz = set ? n.axes[2] : n.scale;
     cr::Mat4 w;
-    w.m[0] = c * n.scale; w.m[2] = -sn * n.scale;
-    w.m[5] = n.scale;
-    w.m[8] = sn * n.scale; w.m[10] = c * n.scale;
+    w.m[0] = c * sx; w.m[2] = -sn * sx;
+    w.m[5] = sy;
+    w.m[8] = sn * sz; w.m[10] = c * sz;
     w.m[12] = n.pos[0] + k * n.offset[0];
     w.m[13] = n.pos[1] + k * n.offset[1];
     w.m[14] = n.pos[2] + k * n.offset[2];
