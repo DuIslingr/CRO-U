@@ -95,13 +95,23 @@ bool sharedItem(const ItemTable& items, int item) {
     return p && (p->kind == 4 || p->kind == 5 || p->kind == 9 || p->kind == 10);
 }
 
+// Vita imports retain the original scenario-local learned entries. Older native saves
+// used one shared set; keep their interpretation until explicitly imported.
+bool localScenarioItem(const GameState& gs, const ItemTable& items, int item) {
+    if (gs.scenarioGenes)
+        for (int p = 0; p < 7; ++p)
+            for (int entry : kPlate[p])
+                if (item > 0 && entry == item) return true;
+    return !sharedItem(items, item);
+}
+
 void changeScenario(GameState& gs, const ItemTable& items, int scenario) {
     scenario = std::clamp(scenario, 0, kScenarios - 1);
     for (int k = 0; k < 3; ++k) gs.party[size_t(4 + 3 * gs.scenario + k)] = gs.party[size_t(k)];
     if (scenario != gs.scenario) {
         std::unordered_map<int, int> mine, theirs = std::move(gs.otherBag);
         for (auto it = gs.items.begin(); it != gs.items.end();)
-            if (!sharedItem(items, it->first)) mine[it->first] = it->second, it = gs.items.erase(it);
+            if (localScenarioItem(gs, items, it->first)) mine[it->first] = it->second, it = gs.items.erase(it);
             else ++it;
         for (auto& [item, count] : theirs) gs.items[item] = count;
         gs.otherBag = std::move(mine);
@@ -116,7 +126,7 @@ int plateDrop(int model) { return model >= 33 && model <= 138 ? 481 + kBattleAni
 
 void addScenarioItem(GameState& gs, const ItemTable& items, int scenario, int item, int count) {
     if (item <= 0) return;
-    auto& bag = sharedItem(items, item) || scenario == gs.scenario ? gs.items : gs.otherBag;
+    auto& bag = !localScenarioItem(gs, items, item) || scenario == gs.scenario ? gs.items : gs.otherBag;
     bag[item] = std::min(99, bag[item] + count);
 }
 

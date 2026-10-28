@@ -68,7 +68,20 @@ bool actionFits(const Skeleton& skel, const Action& action) {
 
 bool actionNearlyFits(const Skeleton& skel, const Action& action) {
     const long d = long(skel.nodes.size()) - long(action.segments.size());
-    return !action.segments.empty() && d >= 1 && d <= 6;
+    if (action.segments.empty() || d < 1) return false;
+    if (d <= 6) return true;
+    // f010's idle / holding motions omit twelve independent identity helper nodes. They
+    // stay at rest; dropping these motions would shift the stand / walk / run action slots.
+    for (size_t i = action.segments.size(); i < skel.nodes.size(); ++i) {
+        const SkeletonNode& n = skel.nodes[i];
+        if (n.parent >= 0) return false;
+        for (int a = 0; a < 3; ++a) {
+            if (std::fabs(n.translation[a]) > 1e-6f || std::fabs(n.scale[a] - 1) > 1e-6f) return false;
+            for (int c = 0; c < 3; ++c)
+                if (std::fabs(n.axes[a][c] - (a == c ? 1.0f : 0.0f)) > 1e-6f) return false;
+        }
+    }
+    return true;
 }
 
 void computeLocalPoses(const Skeleton& skel, const Action* action, float time, std::vector<NodePose>& out) {

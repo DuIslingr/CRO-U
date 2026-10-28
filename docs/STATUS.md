@@ -20,6 +20,15 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
       `GetScroll`'s unclamped value, camera-wise (up = + y); the leader's model as `Set_Prtyno`
       (f009a / f009b, f010, f011)
 - [x] rooms' paintings and overlays as their stage records name them (+60 / +62 of the record)
+- [x] Options, Game, Control Hints shows / hides the status and keyboard help on every platform;
+      F3 uses the same saved `control_hints` preference (`CR_SELFTEST_CONTROLS=1 --selftest` checks
+      the menu and keyboard changes survive a settings reload)
+- [x] field walk / run animation stays independent of the model viewer's pause; Space confirms
+      dialogue on the field and pauses only the model viewer; Vahti's shorter idle / holding motions
+      keep their slots when only unused identity helper nodes are omitted
+- [x] Android's phone-layout dialogue uses its separate full-width parchment whenever the UI
+      atlas comes from Android, including iPhone / Vita layouts and Android art over iOS data;
+      `CR_SELFTEST_FIELD=1 --selftest` checks all four leaders, the deck backdrop and six UI layouts
 - [x] scene effects as Omega's `ScnEffectRead` / `Proc`: eleven sets, effects 2..30 (weather, the
       elevator shaft, the space backdrop, the battleship's sky behind its painting) and effect 1
       (syuutyuusen's concentration lines, every other frame); d03's fireflies and d06's smoke

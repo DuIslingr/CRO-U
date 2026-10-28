@@ -20,6 +20,7 @@ bool writeSave(const std::string& path, const SaveData& s) {
     o << "area " << s.area << "\nmap " << s.map << "\npos " << s.pos[0] << ' ' << s.pos[1] << ' ' << s.pos[2]
       << "\nyaw " << s.yaw << "\nleader " << s.leader << "\nplay " << s.playSeconds << "\nsaved " << s.savedAt << '\n';
     o << "wornbag 1\n";
+    if (s.game.scenarioGenes) o << "scenario_genes 1\n";
     o << "flags";
     char hex[16];
     for (uint32_t w : s.game.flags) {
@@ -125,6 +126,7 @@ bool readSave(const std::string& path, SaveData& s, std::string* error) {
                 out.game.party[size_t(c)] = m;
             }
         }
+        else if (key == "scenario_genes") out.game.scenarioGenes = true;
         else if (key == "wornbag") out.game.wornInBag = true;
         else if (key == "flags") {
             std::string w;

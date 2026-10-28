@@ -1,17 +1,12 @@
-# CRO-U v0.4.0
+# CRO-U v0.4.1
 
 A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux and Android.
 
 ## What's new
 
-- **Easy first start:** with no game found, it asks for your copy (an iOS `.ipa`, an Android
-  APK + OBB, or a Vita / Vita3K folder) and copies what it needs next to the program. Vita
-  NoNpDrm dumps are decrypted, packed or not (`.rar`, `.7z`, `.zip`, `.vpk`), and the Prequel
-  Trilogy works too.
-- **Smooth Models** now smooths stages, props and battle backgrounds too, not just characters.
-- **HD Models:** export the models as glTF 2.0 and load your own replacements (off by default).
-- **Field Speed and Battle Speed:** 2x to 5x (Options, Game).
-- The Options pages scroll and are easier to read.
+- **Android-data fixes:** corrected field walking animations, dialogue boxes, and missing cutscene backgrounds. Shared rendering fixes also cover iOS and Vita data.
+- **Control Hints setting:** hide or show the on-screen keyboard and controller help from Options → Game, with the choice saved between sessions.
+- **Vita save importing:** import decrypted Vita saves from the native title-screen Options → Game → Import Vita Saves menu, with automatic backups. Imported abilities retain their ownership in each scenario. The optional command-line converter and instructions are included too.
 
 ## Downloads
 

@@ -78,11 +78,15 @@ The port's Layout: Android (Options, Display, or `--layout android`) draws the i
 720-tall Android phone at 2x would: the 480 x 320 screen centred on a 16:9 screen (the window's
 aspect in widescreen), and, with `--android`, the message window as `draw_win` draws it when it
 has a strip (`read_window_flag`): `window_cutin_<w>` (the first width at least the screen's, for
-a 720-tall screen of its aspect; none above 1366, where the iPhone's parchment stays) 1:1 from
+a 720-tall screen of its aspect; the largest strip stretched above 1366) 1:1 from
 the screen's left edge, its (0, 0, w, h - y) at y 2 y + 20 (`FUN_00094a70`), and over it the
 parchment's name streak, `window`'s (512, 120, 196, 40) at (x, y + 16) (`FUN_00094b50`). The
 pictures `MuComPictTexNoDrawFull2` fits to the screen (min(w / 480, h / 320) / 2) keep the
 iPhone's place.
+
+The separate parchment follows the loaded Android atlas in the iPhone and Vita layouts too,
+including Android artwork used over iOS data. Omega's iPad layout keeps its own `window_cutin`
+panel. The strip is fitted to the selected layout's visible width and bottom edge.
 
 ## Other differences
 

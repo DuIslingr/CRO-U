@@ -44,6 +44,7 @@ struct GameState {
     // +0xc1b + route) and the EXP banked by walking (skill 174, +0xac0 + 4 route, paid at a win)
     std::array<bool, 4> noEncounters{};
     std::array<int, 4> walkExp{};
+    bool scenarioGenes = false; // imported Vita abilities/skills keep their scenario-local ownership
     bool wornInBag = true; // (the port's: saves before Omega's rule kept worn equipment out - genes.hpp putWornInBag)
 
     // Cutscene frame data selected by FrmSet / FrmJmp (+0x1dfc / +0x22cc in the original):
