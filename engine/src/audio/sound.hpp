@@ -1,7 +1,7 @@
 #pragma once
-// Sound effects: the sndeff.bin bank (table of {u32 offset, u32 size}, 0x800 bytes; each entry
-// a CAF file with linear PCM) played through SDL3 audio streams, as _effgo / _effplay do with
-// OpenAL. See docs/FORMATS.md ("Sound").
+// Sound effects: Omega's sndeff.bin table of {u32 offset, u32 size}, followed by
+// raw signed 16-bit little-endian mono PCM at 22050 Hz (__effgo / __effplay2).
+// The Vita's Scream bank is decoded separately. Playback uses SDL3 audio streams.
 
 #include <cstdint>
 #include <functional>
@@ -63,6 +63,10 @@ public:
     bool vitaVoices() const { return !vitaLines_[0].empty(); }
     void playLine(int clip, bool battle = false);
     void stopLine();
+    // Story lines can also live in Android's effects bank. Keep effects and
+    // separately tagged battle lines playing when a dialogue page is skipped.
+    void stopDialogueVoices();
+    int dialogueVoiceCount() const;
     bool linePlaying() const;
     // Battle lines (__voicego(clip | 0x200000, tag = speaker x 1000)): one per tag at a time -
     // the speaker's last line stops first (0x200ffe) - while other speakers' play on

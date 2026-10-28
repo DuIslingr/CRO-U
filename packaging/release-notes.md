@@ -1,12 +1,17 @@
-# CRO-U v0.4.1
+# CRO-U v0.4.2
 
 A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux and Android.
 
 ## What's new
 
-- **Android-data fixes:** corrected field walking animations, dialogue boxes, and missing cutscene backgrounds. Shared rendering fixes also cover iOS and Vita data.
-- **Control Hints setting:** hide or show the on-screen keyboard and controller help from Options → Game, with the choice saved between sessions.
-- **Vita save importing:** import decrypted Vita saves from the native title-screen Options → Game → Import Vita Saves menu, with automatic backups. Imported abilities retain their ownership in each scenario. The optional command-line converter and instructions are included too.
+- **Touch and mouse menus:** item, gene and equipment lists now support swiping, scrollbar dragging, arrow taps and wheel scrolling without accidental selection. Equipment touch targets follow Omega's native four-row scrolling layout.
+- **Field transitions:** restore the arrival fade after crystal/puzzle exits and clear stale fades and crystal-camera state on save reload, fixing fields left covered by white.
+- **Sound effects:** read Omega's PCM sound bank correctly, including sound IDs above 255.
+- **Dialogue audio:** interrupt skipped speech and queued clips to prevent voices overlapping during rapid taps.
+- **Orientation:** Lock Screen Orientation applies on Android and remembers the selected landscape direction between sessions.
+- **Vita audio:** fix ATRAC9 bit operations and compressed-frame lookahead bounds. Added decoder regression tests.
+
+Checked with Android, iOS and Vita game data. Physical Android touch and rotation testing remains pending; the reported early crystal-room crash has not been confirmed.
 
 ## Downloads
 

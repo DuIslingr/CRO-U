@@ -60,16 +60,27 @@ bool SoundSystem::init(const std::string& dataDir, const std::string& vitaBank) 
             SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "%s: %s", vitaBank.c_str(), err.empty() ? "unreadable" : err.c_str());
             return false;
         }
-        bank_.resize(std::max<size_t>(bank_.size(), 0x800 / 8)); // (sndeff.bin's 256 slots)
+        bank_.resize(std::max<size_t>(bank_.size(), 0x800 / 8)); // retain the legacy command range without truncating Omega's bank
         SDL_Log("sound effects: the Vita's (%s)", vitaBank.c_str());
-    } else if (!readFile(dataDir + "sndeff.bin", f) || f.size() < 0x800) return false;
-    for (size_t i = 0; vitaBank.empty() && i < 0x800 / 8; ++i) {
-        uint32_t off = 0, len = 0;
-        std::memcpy(&off, &f[i * 8], 4);
-        std::memcpy(&len, &f[i * 8 + 4], 4);
-        PcmSound s;
-        if (off && len && off + size_t(len) <= f.size()) parseCafPcm(&f[off], len, s);
-        bank_.push_back(std::move(s));
+    } else {
+        if (!readFile(dataDir + "sndeff.bin", f) || f.size() < 8) return false;
+        uint32_t tableEnd = 0;
+        std::memcpy(&tableEnd, f.data(), 4);
+        // Omega's __effgo / __effplay2 use table entries as raw AL_FORMAT_MONO16
+        // at 22050 Hz, rather than CR1's CAF containers. The first sample follows
+        // the table (and its padding); reject malformed bounds before indexing.
+        if (tableEnd < 8 || tableEnd % 8 || tableEnd > f.size() || tableEnd / 8 > 0x1000) return false;
+        for (size_t i = 0; i < tableEnd / 8; ++i) {
+            uint32_t off = 0, len = 0;
+            std::memcpy(&off, &f[i * 8], 4);
+            std::memcpy(&len, &f[i * 8 + 4], 4);
+            PcmSound sample;
+            if (off >= tableEnd && len >= 2 && size_t(off) + len <= f.size()) {
+                if (len >= 4 && std::memcmp(&f[off], "caff", 4) == 0) parseCafPcm(&f[off], len, sample);
+                else sample.data.assign(f.begin() + off, f.begin() + off + (len & ~1u));
+            }
+            bank_.push_back(std::move(sample));
+        }
     }
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "no audio: %s", SDL_GetError());
@@ -113,6 +124,20 @@ void SoundSystem::loadLineTables(const std::string& dataDir) {
 void SoundSystem::stopLine() {
     if (line_) SDL_DestroyAudioStream(line_);
     line_ = nullptr;
+}
+
+void SoundSystem::stopDialogueVoices() {
+    stopLine();
+    for (Voice& v : voices_) if (v.stream && v.voice) {
+        SDL_DestroyAudioStream(v.stream);
+        v = Voice();
+    }
+}
+int SoundSystem::dialogueVoiceCount() const {
+    int count = linePlaying() ? 1 : 0;
+    for (const Voice& v : voices_)
+        count += v.stream && v.voice && (SDL_GetAudioStreamQueued(v.stream) > 0 || SDL_GetAudioStreamAvailable(v.stream) > 0);
+    return count;
 }
 
 bool SoundSystem::linePlaying() const {

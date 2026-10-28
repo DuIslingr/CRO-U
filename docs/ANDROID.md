@@ -101,3 +101,10 @@ panel. The strip is fitted to the selected layout's visible width and bottom edg
 - Names the iOS 1.0.0 symbols lack and Android exports, among them `btlcalc_attack_hit`,
   `btlcalc_zoku_dmg`, `btlcalc_rand_dmg`, `ComUty_ComPlate_GameCenter`, `chk_daibensharoom`,
   every module's `initialize_*` and `Clr*Menu`.
+
+## Orientation preference
+
+Options, Game, Lock Screen Orientation now locks the current landscape direction. The lock
+and direction are stored in `settings.ini` and applied on startup through SDL's orientation
+hint and `GameActivity.setOrientationLock`. Off permits either landscape direction. The
+activity handles orientation changes without recreating the native window or GL context.

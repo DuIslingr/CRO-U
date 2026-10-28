@@ -23,6 +23,32 @@ listed is CR1:U's behaviour still (`docs/ENGINE.md` is CR1's notes).
 - [x] Options, Game, Control Hints shows / hides the status and keyboard help on every platform;
       F3 uses the same saved `control_hints` preference (`CR_SELFTEST_CONTROLS=1 --selftest` checks
       the menu and keyboard changes survive a settings reload)
+- [x] Camp item, gene, equipment-slot and equipment-candidate lists support touch swipes,
+      scrollbar dragging, arrow taps and the mouse wheel. Taps match the drawn rows and sliding
+      buttons; swiping does not choose an item. The equipment menu keeps Omega's native four-row
+      list of seven slots.
+- [x] Android's orientation lock applies immediately and restores the chosen landscape direction
+      on restart; Off allows both landscape directions.
+- [x] field arrivals restore Omega's `FieldScene::onLoading` / `SetMask2(1)` fade: the current
+      mask colour, 255 to 0 over 500 ms (Android 0x99ee0 / 0x387b0; iOS 1.0.0 0x1ecc0 / 0x1309c).
+      Crystal exits previously left their white-out covering the new field. Loading a save also
+      clears stale scene masks, speech queues and crystal-camera requests.
+- [x] sound effects read Omega's raw 22050 Hz signed 16-bit mono PCM bank, including entries above
+      255, rather than treating it as CR1's 256 CAF files (`__effplay2`, iOS 1.0.0 0x9748 and
+      3.1.0 0xabf8). Turning dialogue pages interrupts their speech and queued clips; replacing a
+      story clip keeps one playing, while separately tagged battle voices keep their own channels.
+
+- [x] Vita ATRAC9 playback uses a padded superframe buffer for Huffman lookahead. The decoder's
+      bit helpers handle zero-width fields and unsigned extraction without invalid shifts;
+      `ctest --test-dir engine/build -R atrac9-bits` checks every bit width and alignment using
+      synthetic data. These corrections also apply to CR1's shared Vita audio path.
+
+`CR_SELFTEST_MOBILE=1 --selftest` exercises these paths with the loaded data: all four list
+views and seven equipment slots in iPad, iPhone, Vita and Android layouts (normal and wide),
+orientation settings reloads, rapid voice replacement, the first puzzle's teleport solution,
+and all sixteen crystal exits before and after a save reload. Run against each data source
+separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
+
 - [x] field walk / run animation stays independent of the model viewer's pause; Space confirms
       dialogue on the field and pauses only the model viewer; Vahti's shorter idle / holding motions
       keep their slots when only unused identity helper nodes are omitted
