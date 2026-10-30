@@ -63,6 +63,8 @@ bool Renderer::init(SDL_Window* window, Backend backend) {
     return true;
 }
 
+bool Renderer::restoreAfterContextLoss() { return dev_ && dev_->restoreAfterContextLoss(); }
+
 void Renderer::shutdown() {
     if (!dev_) return;
     destroy(white_);
