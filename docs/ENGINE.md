@@ -405,6 +405,9 @@ c101/c102/c104/m207a, 2026-10-12).
       tried with the current story flags, answers yes, picks the first gate) and reports what the
       story asked for that isn't implemented. Today it reaches the 1st Gate (12 rooms, its puzzle
       room and first scene); shops are the only unimplemented menu it meets
+      It draws nothing, so the Vulkan device's deferred frees wait (thousands of images,
+      gigabytes, none of them leaks): `CR_EXPLORE_DRAW=1` draws a frame after each action, for
+      measuring what a play holds
 - [x] Random encounters as the original counts them (walked distance, rising chance, groups by
       weight and party level, first strike / ambush) and script battles (`Battle`): the battle
       stage, the pair and the enemy group at their formation's places, idling, through battle
