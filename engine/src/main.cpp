@@ -776,6 +776,7 @@ struct App {
         cr::Texture tex[2];                // by slot (0x47's slot + 16 in the original's Tex2d)
         int slot = -1, phase = 0, frame = 0, in = 0, hold = 0, out = 0;
         bool skip = false;                 // a tap / confirm in the hold: on to the fade-out
+        bool warning[2] = {false, false};  // (the slot's picture the warning: the whole of its sheet)
     } vitaLogo;
     struct TexDisp {                       // Uty_TexDisp (2016): a Tex2d slot's picture faded in, held, out
         bool on = false;
@@ -3187,6 +3188,7 @@ struct ViewerHost : cr::EventHost {
         app.renderer.destroy(l.tex[k]);
         cr::Image img;
         if (name && loadImage(app, std::string(name) + "_hd.mct", img)) l.tex[k] = app.renderer.upload(img);
+        l.warning[k] = picture == 254;
     }
     void vitaLogoShow(int slot, int in, int hold, int out) override {
         App::VitaLogo& l = app.vitaLogo;
@@ -6798,8 +6800,10 @@ void stepTexDisp(App& app) {
 
 // The Vita's logo opcodes (FUN_81031854 / FUN_81031bee): fade in over `in` frames, hold `hold`
 // (cut short by a tap or confirm), fade out over `out`, then 10 frames of black before the script
-// goes on. Its pictures are full screens: sqex / mve / mclogo 1024 x 768, warning 960 x 544 (the
-// Vita's own), drawn to fit
+// goes on. Its pictures are full screens at their sheets' top-left, drawn to fit: sqex / mve / mclogo
+// 15/16 x 10/16 of their sheet's width (the Vita's 480 x 320 of 512 x 512, centred on (240, 161);
+// the iPad's 960 x 640 of 1024 x 1024, centred on (480, 322)), the warning (picture 254) 960 x 544,
+// the whole of its sheet
 void stepVitaLogo(App& app) {
     App::VitaLogo& l = app.vitaLogo;
     if (!l.phase) return;
@@ -6821,11 +6825,13 @@ void drawVitaLogo(App& app) {
     const float a = l.phase == 1 ? float(l.frame) / float(std::max(1, l.in)) : l.phase == 2 ? 1.0f
                     : l.phase == 3 ? 1.0f - float(l.frame) / float(std::max(1, l.out)) : 0.0f;
     if (t.id && a > 0) {
-        // the picture's own size: 1024 x 768 (or 960 x 544 for the warning) of its sheet
-        const float pw = t.width >= 1024 ? 1024.0f : 960.0f, ph = t.width >= 1024 ? 768.0f : 544.0f;
+        // the picture in its sheet, from the top-left: the warning all of it; a logo 15/16 x 10/16 of
+        // the sheet's width (the Vita's 480 x 320 of 512, the iPad's 960 x 640 of 1024)
+        const int s = std::clamp(l.slot, 0, 1);
+        const float sw = float(t.width);
+        const float pw = l.warning[s] ? sw : sw * 15 / 16, ph = l.warning[s] ? float(t.height) : sw * 10 / 16;
         const float k = std::min(r.screenW() / pw, float(cr::Renderer::kLogicalH) / ph), w = pw * k, h = ph * k;
-        const float su = float(t.width) / (t.width >= 1024 ? 1024.0f : 960.0f); // (the sheet may be larger)
-        r.drawQuadUV(t, (r.screenW() - w) / 2, (cr::Renderer::kLogicalH - h) / 2, w, h, 0, 0, pw * su, ph * su, 1, 1, 1, a);
+        r.drawQuadUV(t, (r.screenW() - w) / 2, (cr::Renderer::kLogicalH - h) / 2, w, h, 0, 0, pw, ph, 1, 1, 1, a);
     }
     r.setOrigin(r.uiX());
 }
