@@ -1530,6 +1530,7 @@ void noteWindowAtlas(App& app, const cr::Image& wi);
 // walls tan, so the walkable layout reads clearly.
 void enterMap(App& app);
 void buildNpcDraws(App& app);
+void updateNpcJoints(App& app);
 void buildWalkCollision(App& app);
 cr::FieldNpc* findNpc(App& app, int id);
 std::string itemName(const App& app, int item);
@@ -10215,7 +10216,7 @@ void betweenRecord(App& app, int side) {
 struct BetweenStep { // betweenRecord on either side of a step, however the step's body leaves
     App& app;
     explicit BetweenStep(App& a) : app(a) { betweenRecord(app, 0); }
-    ~BetweenStep() { betweenRecord(app, 1); }
+    ~BetweenStep() { updateNpcJoints(app); betweenRecord(app, 1); }
 };
 
 bool same(const cr::Vec3& a, const cr::Vec3& b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
@@ -10437,6 +10438,7 @@ void setActor(App& app, int id, cr::Vec3 p, const float* yaw, bool keepY) {
     for (auto& d : app.npcDraws)
         if (d.id == id) { d.world = npcWorld(*n); drawn = true; }
     if (wasParked || !drawn) buildNpcDraws(app); // a parked actor enters the scene
+    else updateNpcJoints(app);
 }
 
 void buildNpcDraws(App& app) {
@@ -10471,6 +10473,7 @@ void buildNpcDraws(App& app) {
         d.index = int(i);
         app.npcDraws.push_back(d);
     }
+    updateNpcJoints(app); // rebuilding draw instances must not detach Joint children
 }
 
 // Solid NPCs (RectWrapper::init / checkHitWallToSphere): kind bit 1 set, bit 2 clear,
@@ -10543,29 +10546,70 @@ void animateNpcs(App& app, float dt) {
             d.time = len > 0 ? start + std::fmod(d.time - start, len) : start;
         }
     }
-    // Joint: a model riding another's node (its object of that user id: 1205 in the scripts) - the
-    // parent's world, then that node's this frame; twice round, for one riding a rider
-    for (int pass = 0; pass < 2; ++pass)
-        for (const auto& [child, j] : app.npcJoints) {
-            App::NpcDraw* parent = nullptr;
-            for (auto& d : app.npcDraws)
-                if (d.id == j.first) parent = &d;
-            if (!parent) continue;
-            LoadedModel& pm = app.npcModels[parent->model];
-            const cr::Model& m = pm.cpu;
-            int node = -1;
-            for (const auto& t : m.records)
-                if (t.user == j.second)
-                    for (const auto& [obj, n] : m.objectNodes)
-                        if (obj == t.id) node = n;
-            if (node < 0 || m.skeleton.nodes.empty()) continue;
-            const cr::Action* act = parent->action >= 0 && parent->action < int(pm.actions.size()) ? &pm.actions[size_t(parent->action)] : nullptr;
-            cr::computeWorld(m.skeleton, act, parent->time, pm.world);
-            if (node >= int(pm.world.size())) continue;
-            const cr::Mat4 at = parent->world * pm.world[size_t(node)];
-            for (auto& d : app.npcDraws)
-                if (d.id == child) d.world = at;
+}
+
+// Resolve Joint attachments parent-first, so chains do not depend on NPC id ordering.
+// A missing/hidden parent or child leaves that instance at its regular NPC-table transform.
+void updateNpcJoints(App& app) {
+    if (app.npcJoints.empty() || app.npcDraws.empty()) return;
+
+    std::set<int> resolved, resolving;
+    std::function<void(int)> update = [&](int childId) {
+        if (resolved.count(childId) || !resolving.insert(childId).second) return;
+
+        const auto ji = app.npcJoints.find(childId);
+        if (ji == app.npcJoints.end()) {
+            resolving.erase(childId);
+            resolved.insert(childId);
+            return;
         }
+        const int parentId = ji->second.first;
+        const int userId = ji->second.second;
+
+        // Resolve a parent that is itself attached before using its world matrix.
+        if (parentId != childId && !resolving.count(parentId)) update(parentId);
+
+        App::NpcDraw* parent = nullptr;
+        App::NpcDraw* child = nullptr;
+        for (auto& d : app.npcDraws) {
+            if (d.id == parentId && !parent) parent = &d;
+            if (d.id == childId && !child) child = &d;
+            if (parent && child) break;
+        }
+
+        if (parent && child && parentId != childId) {
+            const auto modelIt = app.npcModels.find(parent->model);
+            if (modelIt != app.npcModels.end()) {
+                LoadedModel& pm = modelIt->second;
+                const cr::Model& m = pm.cpu;
+                int node = -1;
+                for (const auto& record : m.records) {
+                    if (record.user != userId) continue;
+                    for (const auto& [objectId, nodeIndex] : m.objectNodes) {
+                        if (objectId == record.id) {
+                            node = nodeIndex;
+                            break;
+                        }
+                    }
+                    if (node >= 0) break;
+                }
+                if (node >= 0 && node < int(m.skeleton.nodes.size())) {
+                    const cr::Action* act =
+                        parent->action >= 0 && parent->action < int(pm.actions.size())
+                            ? &pm.actions[size_t(parent->action)]
+                            : nullptr;
+                    cr::computeWorld(m.skeleton, act, parent->time, pm.world);
+                    if (node < int(pm.world.size()))
+                        child->world = parent->world * pm.world[size_t(node)];
+                }
+            }
+        }
+
+        resolving.erase(childId);
+        resolved.insert(childId);
+    };
+
+    for (const auto& [childId, attachment] : app.npcJoints) update(childId);
 }
 
 void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::Material* override = nullptr,
@@ -14250,7 +14294,9 @@ void drawFrame(App& app, bool present = true) {
             r.setCamera(scriptCam ? 1.0f : 10.0f, 4000.0f, fov * 3.14159265f / 180.0f);
             animateModel(app, dt);
             animateNpcs(app, dt);
+            updateNpcJoints(app);
             updatePlayer(app, dt, std::atan2(eye.x - tgt.x, eye.z - tgt.z));
+            updateNpcJoints(app);
         }
         // The stage view on screen (vx, vy, vw, vh)
         float vx, vy, vw, vh;
@@ -14320,7 +14366,9 @@ void drawFrame(App& app, bool present = true) {
         animateModel(app, dt);
         if (app.mode == Mode::Maps) {
             animateNpcs(app, dt);
+            updateNpcJoints(app);
             updatePlayer(app, dt, app.yaw);
+            updateNpcJoints(app);
         }
 
         r.fillRect(0, 0, SW, H, 0.22f, 0.24f, 0.28f, 1);
