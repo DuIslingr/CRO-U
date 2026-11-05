@@ -10570,14 +10570,13 @@ void updateNpcJoints(App& app) {
         if (parentId != childId && !resolving.count(parentId)) update(parentId);
 
         App::NpcDraw* parent = nullptr;
-        App::NpcDraw* child = nullptr;
+        std::vector<App::NpcDraw*> children;
         for (auto& d : app.npcDraws) {
-            if (d.id == parentId && !parent) parent = &d;
-            if (d.id == childId && !child) child = &d;
-            if (parent && child) break;
+            if (d.id == parentId) parent = &d; // retain the former last-match parent semantics
+            if (d.id == childId) children.push_back(&d);
         }
 
-        if (parent && child && parentId != childId) {
+        if (parent && !children.empty() && parentId != childId) {
             const auto modelIt = app.npcModels.find(parent->model);
             if (modelIt != app.npcModels.end()) {
                 LoadedModel& pm = modelIt->second;
@@ -10599,8 +10598,10 @@ void updateNpcJoints(App& app) {
                             ? &pm.actions[size_t(parent->action)]
                             : nullptr;
                     cr::computeWorld(m.skeleton, act, parent->time, pm.world);
-                    if (node < int(pm.world.size()))
-                        child->world = parent->world * pm.world[size_t(node)];
+                    if (node < int(pm.world.size())) {
+                        const cr::Mat4 at = parent->world * pm.world[size_t(node)];
+                        for (App::NpcDraw* child : children) child->world = at;
+                    }
                 }
             }
         }
