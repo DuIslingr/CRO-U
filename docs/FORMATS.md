@@ -184,9 +184,36 @@ exactly); actions whose segment count differs from the node count animate other
 objects (9-segment actions: mostly keyType 12 scalars). Exception: a list's first action
 ("N.1", the motion) can be a segment or a few short of the node count — Escher's gene casts
 (lists 10, 11: 56 of 58), m103's staged attack (list 14: 148 of 149): they drive the first
-nodes in order and the rest stay at rest. Some have more segments than nodes (m104's lists
-2, 4, 5, 8, 9, 11, 13: 150 of 148; c109, c111: one more); neither head- nor tail-aligned
-mapping poses those convincingly, so they're left out (the slot stands).
+nodes in order and the rest stay at rest. Some have more segments than nodes; where the extra
+segments key nothing, segment *i* is still node *i* (`__mceTransformTree_execActionBlend` walks
+the tree's nodes and an action's segments together): c111's warp crystal (13 for 12 nodes: segment
+3, the crystal, translation (0, 11, 0) = node 3's rest, turns once about Y in 80 frames), c109, c110, c117, c151, j009a / b's list 13, m009a / b,
+m122a / b.
+CR1's m104 (150 of 148), m209 and m220 (149 of 127) lists 2, 4, 5, 8, 9, 11, 13 are one shared clip
+that keeps none of their bones (0 of 44 for m220) - and `_btlanmtbl` never loads them: their slots
+are empty in battle, and the original passes over them (`_mdl_set_act_motion*`: a slot of 3 frames
+or less goes to the next).
+
+A change of motion (`_mdl_set_act_motion*`, every call site with 2 frames) cross-fades: for 2 frames
+two action controllers run, the new one weighted k / 2 (`_mdl_actctl_prc`) - one frame half and
+half, the old motion running on, the new held at its first frame; then the new alone from its
+first frame. `__mceActionSegment_calcBlendTransform` blends per node: keyed translations and scales
+summed by weight (an unkeyed scale counts as 1), rotations as quaternions (the first action's, then
+each later one slerped in by its weight); what no action keys stays at rest (scene/pose.hpp
+`MotionBlend`).
+
+Battle attacks (`_btlact_attack_init`, iPad 0x17598) don't play the action's class slot: the
+attacker's slot 9 when it has more than 3 frames (70 of the 166 battle models load one: m225,
+m101..m129, most m2xx), in place with no `btlmove`; else slot 10 in place for a party member's class-10
+attack (action record +0x17) or character 0x21's, monsters 0xa0..0xa2, and 0x4c..0x4f with class
+10 (0x4f always); else slot 8 toward the target (13 for models 0x9d..0x9f while the party stands as a
+pair, btl +0xa64, or enemies 2 and 3 act together, +0xa68). The pair's
+second plays 8 toward the target, or 13 (party model 7, monsters 0xa0..0xa2). Omega's packages put
+a 3-byte `a\r\n` in most slots `_btlanmtbl` doesn't fill, but not all: `_btl_anm_load` loads a
+battle model's package slot only where its row (17 bytes, read flat: model * 17 + slot) is set, the
+party's 1, 4, 6 and 7 always, a monster's 6 when its record's +0x1c is - j001..j007 carry real clips
+in slots 2, 9, 10 that never load. `_mdl_set_act_motion_nextanm` passes any slot of 3 frames or less
+(an empty one included) to the next one round the model's slots.
 
 | keyType | used kind | applied by | meaning |
 |---|---|---|---|

@@ -56,6 +56,7 @@ extern const short kFootstepFrameWalk[kNumFootstepSets][2];
 extern const short kFootstepSound[5][3];
 // _btlanmtbl, per battle model: [0..14] its action slots read from the package (1) or shared,
 // [15] the species (plate item 481 + it, the dying cry, the announce name), [16] a boss's last act
-extern const signed char kBattleAnimTable[kNumBattleModels][17];
+constexpr int kBattleAnimTableWidth = 17;
+extern const signed char kBattleAnimTable[kNumBattleModels][kBattleAnimTableWidth]; // _btlanmtbl
 
 } // namespace cr
