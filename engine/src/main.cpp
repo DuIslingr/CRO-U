@@ -12671,18 +12671,22 @@ void startTurn(App& app) {
         if (it != app.game.items.end() && --it->second <= 0) app.game.items.erase(it);
     }
     const int target = !t.barriers.empty() ? t.barriers[0] : t.hits.empty() ? -1 : t.hits[0].target; // (reflected: at the barrier)
-    const bool melee = a && a->motion == 1 && target >= 0 && (target < 2) != (t.actors[0] < 2);
+    const bool opposingTarget = target >= 0 && (target < 2) != (t.actors[0] < 2);
     for (int k = 0; k < 2; ++k) {
         App::Battle::Actor* u = t.actors[k] >= 0 ? battleActor(app, t.actors[k]) : nullptr;
         if (!u) continue;
         int slot = a && a->cls >= 8 && a->cls < cr::kBattleAnimSlots ? a->cls : 8;
-        if (t.kind == cr::kCmdAttack && t.actors[1] >= 0 && k == 1) slot = 9; // the pair attack's second
+        // (the pair attack's second: btlact_attack_init plays slot 8 for fighter 1 as well -
+        // mdl_set_act_motion_nextanm(.., 8) and its own btlanm_get_move_*(1, model, 8) window)
         if (target >= 0) faceFighter(app, *u, target);
-        playSlot(app, *u, slot, melee ? btlui::kSlotReturn : btlui::kSlotIdle);
         const cr::BattleAnim an = app.battleData.anim(u->modelId, slot);
+        // btlact_attack_init: btlmove_setpos_angy with the model's own move_cnt / start / end for the
+        // slot - a model with no window (m225's blow) acts in place
+        const bool approach = cr::battleApproachEnabled(a ? a->motion : 0, opposingTarget, an);
+        playSlot(app, *u, slot, approach ? btlui::kSlotReturn : btlui::kSlotIdle);
         if (k == 0) b.hitFrame = an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
         u->moveFrom = u->moveTo = 0;
-        if (melee) { // btlmove_setpos: up to the target, a step short of it
+        if (approach) { // btlmove_setpos: up to the target, a step short of it
             const App::Battle::Actor* tv = battleActor(app, target);
             if (tv) {
                 const LoadedModel &lu = b.models[u->model], &lt = b.models[tv->model];
@@ -12692,8 +12696,8 @@ void startTurn(App& app) {
                 u->from = u->pos;
                 u->to = tv->home + cr::Vec3{d.x / len * reach, 0, d.z / len * reach};
                 if (k == 1) u->to = u->to + cr::Vec3{d.z / len * 18, 0, -d.x / len * 18}; // beside the first
-                u->moveFrom = an.moveEnd > an.moveStart ? an.moveStart : 0;
-                u->moveTo = an.moveEnd > an.moveStart ? an.moveEnd : std::max(1, b.hitFrame - 4);
+                u->moveFrom = an.moveStart;
+                u->moveTo = an.moveEnd;
             }
         }
     }
@@ -13253,10 +13257,13 @@ void stepBattle(App& app) {
                 playSlot(app, a, next, back ? btlui::kSlotIdle : -1);
                 if (back) { // and walks back to its place meanwhile
                     const cr::BattleAnim ra = app.battleData.anim(a.modelId, btlui::kSlotReturn);
-                    a.from = a.pos;
-                    a.to = a.home;
-                    a.moveFrom = ra.moveEnd > ra.moveStart ? ra.moveStart : 0;
-                    a.moveTo = ra.moveEnd > ra.moveStart ? ra.moveEnd : std::max(1, int(actorDuration(app, a)));
+                    if (ra.hasMoveWindow()) { // (btlact_attack 0x406: the return slot's own window)
+                        a.from = a.pos;
+                        a.to = a.home;
+                        a.moveFrom = ra.moveStart;
+                        a.moveTo = ra.moveEnd;
+                    } else
+                        a.moveFrom = a.moveTo = 0;
                 } else if (next == btlui::kSlotIdle) {
                     a.pos = a.home;
                     a.yaw = a.homeYaw;

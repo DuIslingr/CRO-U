@@ -59,7 +59,14 @@ struct EncounterTable {
 // actor moves, when hits land.
 struct BattleAnim {
     int loopStart = 0, loopEnd = 0, moveStart = 0, moveEnd = 0, hit = 0, hit2 = 0;
+    // btlanm_get_move_cnt (moveEnd - moveStart): btlmove_prc moves the actor only while it counts down
+    bool hasMoveWindow() const { return moveEnd > moveStart; }
 };
+// btlact_attack_init: an action that moves (motion 1) at someone on the other side approaches only
+// over the model's own window for that slot - none, it acts where it stands
+inline bool battleApproachEnabled(int motion, bool opposingTarget, const BattleAnim& animation) {
+    return motion == 1 && opposingTarget && animation.hasMoveWindow();
+}
 constexpr int kBattleAnimSlots = 16; // 13 for most models, up to 15 for the bosses
 
 // A battle camera (sys.evt section 15, 32 bytes; btlcamera_set): eye and target in stage units
