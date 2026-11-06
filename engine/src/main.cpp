@@ -582,7 +582,7 @@ struct App {
         int requestFlags = 0;
         // The rules (game/battle_rules.hpp) and the scene around them (btl_main's states)
         cr::BattleRules rules;
-        enum Phase { Intro, Command, Acting, WinTalk, BossDown, SetPiece, Won, Results, Lost, Fled } phase = Intro;
+        enum Phase { Intro, Command, Acting, WinTalk, BossDown, SetPiece, Won, Results, Lost, Fled, StoryLost } phase = Intro;
         int phaseFrames = 0;
         bool wonTap = false; // a tap in the victory's hold (state 1099: 140 frames or pad_chk_trg_up)
         enum Menu { Top, Commands, Targets, Items, EscapeAsk, Genes } menu = Top;
@@ -13122,6 +13122,13 @@ void endRound(App& app) {
         else battleVictory(app);
         break;
     case 3: { // lost (0x4b1): the defeat tune and "... lost the battle"
+        // btl_main 0x4b0: groups 0x289, 0x28e, 0x2a2 and 0x295 are lost as the story has it - straight to
+        // the battle's end (9000), no defeat (flag 0xffd stays clear, so no btl_lose): its script goes on
+        if (b.start.group == 0x289 || b.start.group == 0x28e || b.start.group == 0x2a2 || b.start.group == 0x295) {
+            b.phase = App::Battle::StoryLost;
+            b.phaseFrames = 0;
+            break;
+        }
         b.phase = App::Battle::Lost;
         b.phaseFrames = 0;
         playBgm(app, 0x1a);
@@ -13371,6 +13378,9 @@ void stepBattle(App& app) {
     case App::Battle::Lost: // 0x513, then (9000) btl_lose: a story battle starts over from the title,
         // any other goes back to the pair's Ark (drawFrame does either, between frames)
         if (b.phaseFrames >= 120) b.exit = b.eventBattle ? 2 : 3;
+        break;
+    case App::Battle::StoryLost: // 9000 -> 0x238b: twelve frames, then back to the field (an event battle's script on)
+        if (b.phaseFrames >= 12) b.exit = 1;
         break;
     case App::Battle::Fled:
         if (b.phaseFrames >= 30) b.exit = 1;
@@ -16344,6 +16354,96 @@ int sessionUiSelfTest(App& app) {
     return problems;
 }
 
+// btl_main 0x4b0: a story battle the story has lost (groups 0x289, 0x28e - j001_d06's Vieg alone -,
+// 0x2a2 - c101_t01's -, 0x295) ends as a won one does (9000): no defeat, the script goes on from its
+// Battle. Any other story battle lost is the game over (0x4b1, btl_lose: the title)
+int storyLossSelfTest(App& app) {
+    int problems = 0;
+    const cr::GameState keepGame = app.game;
+    const int keepChar = app.playerChar;
+    struct Case { int scenario, group, stage; bool story; };
+    for (const Case& c : {Case{0, 654, 19, true}, Case{1, 674, 0, true}, Case{0, 651, 11, false}}) {
+        app.game = cr::GameState();
+        cr::giveStartingItems(app.game, app.itemTable);
+        app.game.scenario = c.scenario;
+        for (int f : {0xff1, 0xff2, 0xff3, 0xff4, 0xff5, 0xfa8, 0xfa9}) app.game.setFlag(f, true); // (the tutorials seen)
+        showMap(app, 0, 0, c.scenario == 0 ? 6 : 10);
+        app.pendingEntry = App::Entry::None;
+        app.runner.stop();
+        startBattle(app, {c.group, c.stage, -1, 0}, 0);
+        App::Battle& b = app.battle;
+        if (!b.active) {
+            std::printf("story battle %d lost: didn't start\n", c.group);
+            ++problems;
+            continue;
+        }
+        b.eventBattle = true; // (as a script's Battle starts it)
+        bool lostShown = false;
+        int exit = 0;
+        for (int f = 0; f < 6000 && b.active; ++f) {
+            if (b.phase == App::Battle::Command && !battletalk::on(app)) { // the pair down
+                for (int k = 0; k < 2; ++k) b.rules.f[size_t(k)].hp = 0;
+                endRound(app);
+            }
+            if (f % 45 == 44 && !app.dialogue.empty()) advanceDialogue(app);
+            lostShown |= b.phase == App::Battle::Lost;
+            if (b.exit) { exit = b.exit, b.exit = 0; break; }
+            stepBattle(app);
+        }
+        const bool right = c.story ? !lostShown && exit == 1 : lostShown && exit == 2;
+        problems += !right;
+        std::printf("story battle %d lost: %s, way out %d (%s) %s\n", c.group, lostShown ? "the defeat shown" : "no defeat", exit,
+                    exit == 1 ? "the script goes on" : exit == 2 ? "the title" : exit == 3 ? "the Ark" : "none", right ? "ok" : "WRONG");
+        if (b.active) endBattle(app, false);
+        app.runner.stop();
+        app.pendingEntry = App::Entry::None;
+    }
+    { // j001_d06's own script: from 0x6219 (vars 58 .. 60, then Battle 654 at 0x623d) the battle lost, its
+      // talk (Gosub 0x62e7: Msg 1200, 1201) and on to flag 1408 (0x6247)
+        app.game = cr::GameState();
+        cr::giveStartingItems(app.game, app.itemTable);
+        app.game.scenario = 0;
+        for (int f : {0xff1, 0xff2, 0xff3, 0xff4, 0xff5, 0xfa8, 0xfa9}) app.game.setFlag(f, true);
+        showMap(app, 0, 0, 7); // (area 7: j001_d06.evt)
+        app.pendingEntry = App::Entry::None;
+        app.runner.stop();
+        const bool started = app.runner.startAt(app.events, 0x6219, 0, app.game, app.area, app.mapNumber);
+        bool fought = false, wrongWay = false, on = false;
+        int group = -1;
+        for (int f = 0; f < 20000 && started && !on && !wrongWay; ++f) {
+            if (f % 45 == 44 && !app.dialogue.empty()) advanceDialogue(app);
+            if (app.battle.active) {
+                App::Battle& b = app.battle;
+                fought = true, group = b.start.group;
+                if (b.phase == App::Battle::Command && !battletalk::on(app)) {
+                    for (int k = 0; k < 2; ++k) b.rules.f[size_t(k)].hp = 0;
+                    endRound(app);
+                }
+                if (b.exit) { // (as drawFrame takes it)
+                    const int e = b.exit;
+                    b.exit = 0;
+                    if (e == 1) endBattle(app, false);
+                    else wrongWay = true, endBattle(app, false);
+                } else stepBattle(app);
+                continue;
+            }
+            stepEvents(app);
+            on = app.game.flag(1408);
+        }
+        const bool right = started && fought && group == 654 && !wrongWay && on;
+        problems += !right;
+        std::printf("j001_d06's Battle 654 lost: %s, battle %d, %s %s\n", started ? "started" : "NOT STARTED", group,
+                    on ? "the script went on to flag 1408" : wrongWay ? "the game over" : "flag 1408 NOT reached", right ? "ok" : "WRONG");
+        if (app.battle.active) endBattle(app, false);
+        app.runner.stop();
+        app.pendingEntry = App::Entry::None;
+    }
+    std::printf("story battles lost: %d problems\n", problems);
+    app.game = keepGame;
+    app.playerChar = keepChar;
+    return problems;
+}
+
 int runSelfTest(App& app) {
     app.persist = false;
     app.typeOn = false; // pages whole (the typing has its own test)
@@ -16394,6 +16494,7 @@ int runSelfTest(App& app) {
         return problems ? 1 : 0;
     }
     if (SDL_getenv("CR_SELFTEST_SESSION_UI")) return sessionUiSelfTest(app) ? 1 : 0;
+    if (SDL_getenv("CR_SELFTEST_STORY_LOSS")) return storyLossSelfTest(app) ? 1 : 0;
     if (SDL_getenv("CR_SELFTEST_SCENE_AUDIO")) return sceneAudioSelfTest(app) ? 1 : 0;
     if (SDL_getenv("CR_SELFTEST_GRAPHICS")) return graphicsRecoverySelfTest(app) ? 1 : 0;
     if (SDL_getenv("CR_SELFTEST_CANCEL")) return inputCancelSelfTest(app) ? 1 : 0;
@@ -18754,6 +18855,7 @@ int runSelfTest(App& app) {
         app.game = keepGame;
         app.playerChar = keepChar;
     }
+    mapErrors += storyLossSelfTest(app);
     { // PrcMsg's typing: a character a frame, a tap brings the page out whole and the next turns
       // it; 0x1a pauses it; 0x14 closes the message by itself (Omega's j001_d06 6717: three pauses,
       // then it closes after the last)
