@@ -3684,6 +3684,11 @@ void adjustVideo(App& app, int row, int dir) {
             app.windowTex = app.renderer.upload(wi);
             noteWindowAtlas(app, wi);
         }
+        cr::Image ci; // (the cut-in windows' atlas as well)
+        if (app.rendererReady && loadImage(app, "window_cutin.mct", ci)) {
+            app.renderer.destroy(app.cutinTex);
+            app.cutinTex = app.renderer.upload(ci);
+        }
         break;
     }
     default: break;
@@ -20975,6 +20980,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         if (SDL_strcmp(argv[i], "--language") == 0) languageArg = SDL_atoi(argv[i + 1]);
     if (languageArg >= 0) app->language = languageArg;
     applyLanguage(*app);
+    const bool hdTexturesAtFirstUpload = app->video.hdTextures; // (the UI atlases', reloaded after loadMix if it changes)
     {
         cr::Image wi;
         if (loadImage(*app, "window.mct", wi, &app->androidWindow)) app->windowTex = app->renderer.upload(wi), noteWindowAtlas(*app, wi);
@@ -21196,6 +21202,21 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         if (SDL_strcmp(argv[i], "--battle-speed") == 0) app->battleSpeed = std::clamp(SDL_atoi(argv[i + 1]), 1, 5);
     }
     applyVideo(*app);
+    // The UI atlases were uploaded before settings.ini restored hd_textures (hdBundled, loadMix):
+    // when that changed it, again, else the HD replacements stayed out until HD Textures was toggled
+    if (app->video.hdTextures != hdTexturesAtFirstUpload) {
+        cr::Image wi;
+        if (loadImage(*app, "window.mct", wi, &app->androidWindow)) {
+            app->renderer.destroy(app->windowTex);
+            app->windowTex = app->renderer.upload(wi);
+            noteWindowAtlas(*app, wi);
+        }
+        cr::Image ci;
+        if (loadImage(*app, "window_cutin.mct", ci)) {
+            app->renderer.destroy(app->cutinTex);
+            app->cutinTex = app->renderer.upload(ci);
+        }
+    }
     if (languageArg >= 0) { // the command line wins over settings.ini
         app->language = languageArg;
         applyLanguage(*app);
