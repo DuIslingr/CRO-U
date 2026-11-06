@@ -16,6 +16,8 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
 - **Fixes contributed by [metastigma](https://github.com/metastigma):** the player stops walking when a scene starts; an item window
   no longer answers the question before it; characters riding another model stay attached;
   turning HD Textures on in settings.ini updates the menus.
+- **Windows** (hotfix, same version): the first-start setup can copy and unpack your game from a
+  folder whose name uses another alphabet - a Cyrillic user name on a Russian Windows, for example.
 
 Thanks to [metastigma](https://github.com/metastigma) for the report, those fixes and testing. All of it was checked against the original iPad code.
 
