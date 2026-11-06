@@ -157,6 +157,12 @@ uint32_t EventFile::returnEntry(int n) const {
     return off >= 0x30 && off < data_.size() && (off < sec_[0] || off >= end) ? off : 0;
 }
 
+uint16_t EventFile::scriptFlags(int n) const {
+    uint16_t v = 0;
+    const size_t at = size_t(sec_[3]) + 0x28 * size_t(n < 0 ? 0 : n) + 0xe;
+    return n >= 0 && sec_[3] != 0 && at + 2 <= data_.size() && rd(data_, at, v) ? v : 0;
+}
+
 uint32_t EventFile::sceneOffset(int n) const {
     uint32_t first = 0, off = 0;
     if (n < 1 || !rd(data_, sec_[6], first) || first <= sec_[6] || sec_[6] + 4 * size_t(n) > first ||

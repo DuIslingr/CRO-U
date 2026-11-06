@@ -119,6 +119,9 @@ public:
     // then records {u32 frame, i32 values[actors][words]}: position x100, then rotation in
     // degrees x100.
     uint32_t sceneOffset(int n) const;
+    // Section 3: a 0x28-byte record per script, +0xe its flags - 0x4000: EvtStart leaves the
+    // player's motion as it is (else he stands, mdl_set_act_motion(leader, 0, 2)); 0 = none
+    uint16_t scriptFlags(int n) const;
     std::vector<FieldNpc> npcs(int mapNumber) const;    // the map's NPC / trigger list
     bool npcRow(int id, NpcRow& out) const;             // NPC table row
     bool warpEntry(int key, WarpEntry& out) const;      // Warp 0xFFFD lookup (EvtWarp)

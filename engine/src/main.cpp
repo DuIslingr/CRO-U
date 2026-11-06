@@ -2829,7 +2829,10 @@ struct ViewerHost : cr::EventHost {
     void showMessage(int id) override { showMessages(app, {id}); }
     bool messageOpen() override { return !app.dialogue.empty(); }
     bool tapped() override { const bool t = app.tapPending; app.tapPending = false; return t; }
-    void showItemWindow(int item) override { openItemWindow(app, item); }
+    void showItemWindow(int item) override { // Uty_GetItem_Init: ClrFlag(0), the confirmation its own
+        app.game.setFlag(0, false);
+        openItemWindow(app, item);
+    }
     void playAnim(int id, int slot, int loopFrom, int loopTo) override {
         int action = slot; // a slot LoadAct filled, else the model's own action of that number
         if (auto a = app.actorSlots.find(id); a != app.actorSlots.end())
@@ -10287,10 +10290,15 @@ void updatePlayer(App& app, float dt, float camYaw) {
     if (!app.havePlayer) return;
     const bool* keys = SDL_GetKeyboardState(nullptr);
     // A running script, its dialogue box or item window hold the player in place
-    const bool talking = !app.dialogue.empty() || app.runner.running() || app.itemWindowOpen || app.optionsOpen ||
-                         app.campOpen || app.saveScreen.open || app.shop.open || app.mapScreen.open ||
-                         app.puzzle.tpState != 0 || app.puzzle.pkState != 0 ||
+    const bool talking = fieldSceneRunning(app) || app.optionsOpen || app.campOpen || app.saveScreen.open ||
+                         app.shop.open || app.mapScreen.open || app.puzzle.tpState != 0 || app.puzzle.pkState != 0 ||
                          (app.puzzle.stage >= 0 && app.puzzle.scene != 4);
+    // EvtStart: an event stands the player (mdl_set_act_motion(leader, 0, 2)) unless its record's
+    // +0xe has 0x4000; held here, stepWalker doesn't run, so the walk / run clip would play in place
+    auto standHeld = [&] {
+        if (!app.runner.running() || !(app.events.scriptFlags(app.runner.eventNo()) & 0x4000)) app.walker.gait = cr::Gait::Stand;
+    };
+    if (fieldSceneRunning(app)) standHeld();
     float sx = talking ? 0.0f : float(keys[SDL_SCANCODE_D]) - float(keys[SDL_SCANCODE_A]);
     float sy = talking ? 0.0f : float(keys[SDL_SCANCODE_S]) - float(keys[SDL_SCANCODE_W]);
     bool run = keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT];
@@ -10318,13 +10326,19 @@ void updatePlayer(App& app, float dt, float camYaw) {
         BetweenStep between(app);
         stepEvents(app);
         if (app.battle.active) break;
-        if (app.runner.running() || !app.havePlayer) continue;
+        if (fieldSceneRunning(app) || !app.havePlayer) { // (a touch trigger may start a script this step)
+            if (fieldSceneRunning(app)) standHeld();
+            continue;
+        }
         const cr::Vec3 before = app.walker.pos;
         cr::stepWalker(app.walker, app.walkCollision, sx, sy, run, camYaw);
         const cr::Vec3 moved = app.walker.pos - before;
         fieldWalked(app, std::sqrt(cr::dot(moved, moved)));
         checkTriggers(app);
-        if (app.runner.running() || !app.dialogue.empty() || !app.havePlayer) continue;
+        if (fieldSceneRunning(app) || !app.havePlayer) {
+            if (fieldSceneRunning(app)) standHeld();
+            continue;
+        }
         cr::BattleStart start; // fldencount_encount
         auto random = [&](int n) { return app.rng.get(n); };
         const auto& pr = app.game.pairs[size_t(std::clamp(app.game.scenario, 0, cr::kScenarios - 1))]; // 171 / 172 on either
