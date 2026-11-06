@@ -582,7 +582,7 @@ struct App {
         int requestFlags = 0;
         // The rules (game/battle_rules.hpp) and the scene around them (btl_main's states)
         cr::BattleRules rules;
-        enum Phase { Intro, Command, Acting, WinTalk, BossDown, SetPiece, Won, Results, Lost, Fled, StoryLost } phase = Intro;
+        enum Phase { Intro, Command, Acting, WinTalk, BossDown, SetPiece, Won, Results, Lost, Fled, StoryEnd } phase = Intro;
         int phaseFrames = 0;
         bool wonTap = false; // a tap in the victory's hold (state 1099: 140 frames or pad_chk_trg_up)
         enum Menu { Top, Commands, Targets, Items, EscapeAsk, Genes } menu = Top;
@@ -11495,6 +11495,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     b.flags = flags;
     b.eventBattle = false;
     b.breakFx = {};
+    app.game.setFlag(0xffd, false), app.game.setFlag(0xffe, false); // btl_main 0: the defeat's and the story end's flags
     app.runner.setGate(battletalk::kFlag); // PrcEvnt in battle mode
     // CRView::prc: SetFade(white, 255, 255) as the field goes; btl_main 200: SetFade(white, 255, 0,
     // 1000 ms) - the battle comes in out of white over its opening (whatever the field's fade was)
@@ -13115,6 +13116,20 @@ void endRound(App& app) {
     for (int k = 0; k < 2; ++k) // the guard pose ends with the round
         if (App::Battle::Actor* a = battleActor(app, k); a && a->slot == btlui::kSlotGuard) playSlot(app, *a, btlui::kSlotIdle);
     for (int i = 0; i < 5; ++i) b.shownHp[i] = b.rules.f[size_t(i)].hp, b.shownMp[i] = b.rules.f[size_t(i)].mp;
+    { // btlord_chk's story ends, before the round's outcome is read: scenario 0's group 0x28e once enemy 3 is
+      // down (no enemy there counts as down), 0x28a from its second round (its first, the opening: the
+      // Agent's blow in round 2 - _btlque_special 0x1ae - ends it), scenario 1's 0x2a3 from its second - flag
+      // 0xffe; with it set (btl_main 799) the battle ends there (9000), the pair standing or not: its
+      // script goes on
+        const int g = b.start.group, s = app.game.scenario, n = b.rules.round;
+        if ((s == 0 && g == 0x28e && !b.rules.f[3].alive()) || (s == 0 && g == 0x28a && n > 1) || (s == 1 && g == 0x2a3 && n > 1))
+            app.game.setFlag(0xffe, true);
+        if (app.game.flag(0xffe)) {
+            b.phase = App::Battle::StoryEnd;
+            b.phaseFrames = 0;
+            return;
+        }
+    }
     switch (b.rules.outcome()) {
     case 2: // won: the victory pose and tune, then the results (btl_main 0x44b) - a story boss's
         // last word first (8000)
@@ -13125,7 +13140,7 @@ void endRound(App& app) {
         // btl_main 0x4b0: groups 0x289, 0x28e, 0x2a2 and 0x295 are lost as the story has it - straight to
         // the battle's end (9000), no defeat (flag 0xffd stays clear, so no btl_lose): its script goes on
         if (b.start.group == 0x289 || b.start.group == 0x28e || b.start.group == 0x2a2 || b.start.group == 0x295) {
-            b.phase = App::Battle::StoryLost;
+            b.phase = App::Battle::StoryEnd;
             b.phaseFrames = 0;
             break;
         }
@@ -13182,6 +13197,11 @@ void endRound(App& app) {
         }
         if (b.phase == App::Battle::SetPiece) break;
         battletalk::between(app); // btl_main 0x352
+        if (app.game.flag(0xffe)) { // (0x28d at half HP) btl_main 400: the flag set, the battle ends (9000)
+            b.phase = App::Battle::StoryEnd;
+            b.phaseFrames = 0;
+            break;
+        }
         if (!app.game.flag(battletalk::kFlag)) battletalk::betweenStart(app); // btl_main 0
         break;
     }
@@ -13379,7 +13399,7 @@ void stepBattle(App& app) {
         // any other goes back to the pair's Ark (drawFrame does either, between frames)
         if (b.phaseFrames >= 120) b.exit = b.eventBattle ? 2 : 3;
         break;
-    case App::Battle::StoryLost: // 9000 -> 0x238b: twelve frames, then back to the field (an event battle's script on)
+    case App::Battle::StoryEnd: // 9000 -> 0x238b: twelve frames, then back to the field (an event battle's script on)
         if (b.phaseFrames >= 12) b.exit = 1;
         break;
     case App::Battle::Fled:
@@ -16354,15 +16374,18 @@ int sessionUiSelfTest(App& app) {
     return problems;
 }
 
-// btl_main 0x4b0: a story battle the story has lost (groups 0x289, 0x28e - j001_d06's Vieg alone -,
-// 0x2a2 - c101_t01's -, 0x295) ends as a won one does (9000): no defeat, the script goes on from its
-// Battle. Any other story battle lost is the game over (0x4b1, btl_lose: the title)
+// Story battles lost: btl_main 0x4b0 ends groups 0x289, 0x28e - j001_d06's Vieg alone -, 0x2a2 - c101_t01's
+// - and 0x295 as a won one (9000), and btlord_chk's flag 0xffe ends 0x28a - the opening, j001_t01's - from
+// its second round, lost or not: no defeat, the script goes on from its Battle. Any other story battle lost
+// (0x28a in its first round too) is the game over (0x4b1, btl_lose: the title)
 int storyLossSelfTest(App& app) {
+    const int kOpeningLevel = SDL_getenv("CR_OPENING_LEVEL") ? SDL_atoi(SDL_getenv("CR_OPENING_LEVEL")) : 40;
     int problems = 0;
     const cr::GameState keepGame = app.game;
     const int keepChar = app.playerChar;
-    struct Case { int scenario, group, stage; bool story; };
-    for (const Case& c : {Case{0, 654, 19, true}, Case{1, 674, 0, true}, Case{0, 651, 11, false}}) {
+    struct Case { int scenario, group, stage, round; bool story; };
+    for (const Case& c : {Case{0, 654, 19, 1, true}, Case{1, 674, 0, 1, true}, Case{0, 650, 0, 2, true}, Case{0, 650, 0, 1, false},
+                          Case{0, 651, 11, 1, false}}) {
         app.game = cr::GameState();
         cr::giveStartingItems(app.game, app.itemTable);
         app.game.scenario = c.scenario;
@@ -16381,8 +16404,9 @@ int storyLossSelfTest(App& app) {
         bool lostShown = false;
         int exit = 0;
         for (int f = 0; f < 6000 && b.active; ++f) {
-            if (b.phase == App::Battle::Command && !battletalk::on(app)) { // the pair down
+            if (b.phase == App::Battle::Command && !battletalk::on(app)) { // the pair down as that round ends
                 for (int k = 0; k < 2; ++k) b.rules.f[size_t(k)].hp = 0;
+                b.rules.round = c.round;
                 endRound(app);
             }
             if (f % 45 == 44 && !app.dialogue.empty()) advanceDialogue(app);
@@ -16392,7 +16416,7 @@ int storyLossSelfTest(App& app) {
         }
         const bool right = c.story ? !lostShown && exit == 1 : lostShown && exit == 2;
         problems += !right;
-        std::printf("story battle %d lost: %s, way out %d (%s) %s\n", c.group, lostShown ? "the defeat shown" : "no defeat", exit,
+        std::printf("story battle %d lost in round %d: %s, way out %d (%s) %s\n", c.group, c.round, lostShown ? "the defeat shown" : "no defeat", exit,
                     exit == 1 ? "the script goes on" : exit == 2 ? "the title" : exit == 3 ? "the Ark" : "none", right ? "ok" : "WRONG");
         if (b.active) endBattle(app, false);
         app.runner.stop();
@@ -16434,6 +16458,52 @@ int storyLossSelfTest(App& app) {
         problems += !right;
         std::printf("j001_d06's Battle 654 lost: %s, battle %d, %s %s\n", started ? "started" : "NOT STARTED", group,
                     on ? "the script went on to flag 1408" : wrongWay ? "the game over" : "flag 1408 NOT reached", right ? "ok" : "WRONG");
+        if (app.battle.active) endBattle(app, false);
+        app.runner.stop();
+        app.pendingEntry = App::Entry::None;
+    }
+    { // j001_t01's opening (entry 202): from 0xa0d2 (vars 58 .. 60, then Battle 650 at 0xa0f6) the pair
+      // defending each round as it plays out - the Agent's blow in round 2 -, the battle over after its
+      // second round without a defeat, then its talk (Gosub 0xa191: Msg 1400 ..) and on to flag 1401 (0xa100)
+        startNewGame(app, 0); // (Vieg and Olgar as a new game makes them: newPairParty)
+        // (Vieg stronger than a new game's level 1: the Agent's one action, the Particle Cannon (430,
+        // power 220 at attack 1171), is some 2200 a shot, and lost in its first round the battle is the
+        // game over in the original too. Level 40 is this test's assumption, not his level in the story)
+        app.game.party[0].level = kOpeningLevel, app.game.party[0].exp = cr::expForLevel(kOpeningLevel), app.game.party[0].hp = -1;
+        for (int f : {0xff1, 0xff2, 0xff3, 0xff4, 0xff5, 0xfa8, 0xfa9}) app.game.setFlag(f, true);
+        showMap(app, 0, 0, 9); // (area 9: j001_t01.evt)
+        app.pendingEntry = App::Entry::None;
+        app.runner.stop();
+        const bool started = app.runner.startAt(app.events, 0xa0d2, 0, app.game, app.area, app.mapNumber);
+        bool fought = false, lostShown = false, wrongWay = false, on = false;
+        int group = -1, rounds = 0;
+        for (int f = 0; f < 30000 && started && !on && !wrongWay; ++f) {
+            if (f % 45 == 44 && !app.dialogue.empty()) advanceDialogue(app);
+            if (app.battle.active) {
+                App::Battle& b = app.battle;
+                fought = true, group = b.start.group, rounds = std::max(rounds, b.rules.round);
+                if (b.phase == App::Battle::Command && b.menu == App::Battle::Top && !battletalk::on(app)) { // the pair defends
+                    battleChooseTop(app, 0);
+                    battleChooseCommand(app, 3);
+                    if (b.phase == App::Battle::Command && b.menu == App::Battle::Commands) battleChooseCommand(app, 3);
+                }
+                lostShown |= b.phase == App::Battle::Lost;
+                if (b.exit) {
+                    const int e = b.exit;
+                    b.exit = 0;
+                    if (e != 1 && e != 4) wrongWay = true;
+                    endBattle(app, e == 4);
+                } else stepBattle(app);
+                continue;
+            }
+            stepEvents(app);
+            on = app.game.flag(1401);
+        }
+        const bool right = started && fought && group == 650 && !lostShown && !wrongWay && rounds == 2 && on;
+        problems += !right;
+        std::printf("j001_t01's Battle 650: %s, battle %d over after round %d, %s, %s %s\n", started ? "started" : "NOT STARTED", group,
+                    rounds, lostShown ? "the defeat shown" : "no defeat",
+                    on ? "the script went on to flag 1401" : wrongWay ? "the game over" : "flag 1401 NOT reached", right ? "ok" : "WRONG");
         if (app.battle.active) endBattle(app, false);
         app.runner.stop();
         app.pendingEntry = App::Entry::None;
