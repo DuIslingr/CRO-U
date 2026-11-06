@@ -1,13 +1,23 @@
-# CRO-U v0.4.4
+# CRO-U v0.4.5
 
 A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux and Android.
 
 ## What's new
 
-- **HD textures:** `--export-textures` now writes ordinary PNGs and the game reads PNG replacements, so any upscaler or editor works without a converter. A replacement that doesn't keep its picture's shape is skipped and named in the log, instead of breaking the menus.
-- **Vita boot:** the Square Enix and Media.Vision logos are centred, as the Vita draws them.
+- **Story battles you're meant to lose** (650, 654, 674 ...) now go on with the story instead of
+  ending in a game over (reported by [metastigma](https://github.com/metastigma)).
+- **Skip:** the skip button skips while you hold it and stops when you let go, as in the original.
+- **Animation:** every change of motion blends over two frames, as the original does. The warp
+  crystals turn on their own again, and a few models (c151, j009, m009, m122 and others) get
+  motions that were missing.
+- **Battles:** attacks use the original's animation choice, so monsters like m225 no longer stand
+  idle through their attack; attackers only step in when their animation moves them; empty
+  animation slots pass to the next one.
+- **Fixes contributed by [metastigma](https://github.com/metastigma):** the player stops walking when a scene starts; an item window
+  no longer answers the question before it; characters riding another model stay attached;
+  turning HD Textures on in settings.ini updates the menus.
 
-The boot logos were checked centred on the Vita's own data. Physical Android devices and a real Windows PC without Vulkan are still untested.
+Thanks to [metastigma](https://github.com/metastigma) for the report, those fixes and testing. All of it was checked against the original iPad code.
 
 ## Downloads
 
