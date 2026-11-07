@@ -21004,6 +21004,30 @@ void videoArgs(App& app, int argc, char** argv) {
     }
 }
 
+// The game as the setup (platform/setup.hpp) knows it: the first start's on a PC, a Vita dump copied
+// into vita/ on any start
+static cr::SetupGame crSetupGame() {
+    cr::SetupGame setup;
+    setup.title = "Chaos Rings Omega", setup.port = "CRO-U", setup.vitaId = "PCSG00499", setup.trilogyDir = "CRO";
+    setup.trilogyAddon = "DIESELOM00ADDCON"; // (the Prequel Trilogy keeps the game's data in its add-on)
+    setup.obbHint = "main.110.com.square_enix.chaosringsomega.googleplay.obb";
+    setup.package = "com.square_enix.chaosringsomega.googleplay";
+    setup.iosOk = [](const std::string& p) {
+        const char* args[] = {"chaosringsomega", "--data", p.c_str()};
+        return !cr::findDataDir(3, const_cast<char**>(args)).empty();
+    };
+    setup.androidOk = [](const std::string& p) {
+        cr::ObbArchive probe;
+        return findAndroid(p, probe, nullptr);
+    };
+    setup.vitaOk = [](const std::string& p) {
+        for (const char* rel : {"CRO/resources/cro.psarc", "resources/cro.psarc", "cro.psarc"})
+            if (SDL_GetPathInfo((p + rel).c_str(), nullptr)) return true;
+        return false;
+    };
+    return setup;
+}
+
 SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
     SDL_SetAppMetadata("Chaos Rings Omega HD (reimplementation)", "0.1", "local.preservation.chaosringsomega");
@@ -21061,6 +21085,16 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     if (!vitaGiven) vitaArg = storedVitaPath();
     app->vitaPath = vitaArg == "none" ? std::string() : vitaArg; // (kept for settings.ini even if it fails to open)
     std::string vitaBeside; // (found in vita/: used, not written to settings.ini)
+    if (!vitaGiven && app->vitaPath.empty()) { // (a Vita dump copied into vita/ - a phone's way -, its files encrypted: decrypted into place first)
+        bool quiet = false; // (a capture's, a test's: logged, no messages)
+        for (int i = 1; i < argc; ++i)
+            for (const char* f : {"--capture", "--selftest", "--explore", "--export-textures", "--export-models"})
+                if (SDL_strcmp(argv[i], f) == 0) quiet = true;
+        for (const std::string& place : cr::gameFolders()) {
+            cr::SetupResult got;
+            if (cr::installDroppedVita(crSetupGame(), place, got, quiet)) break;
+        }
+    }
     if (!vitaGiven && app->vitaPath.empty()) vitaBeside = found("vita", vitaThere);
     if (app->dataDir.empty()) {
         std::string dataArg;
@@ -21149,17 +21183,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
                 if (SDL_strcmp(argv[i], f) == 0) plain = false;
         if (!setupAsked && (plain || cr::setupScripted()) && !SDL_getenv("CR_DATA")) {
             setupAsked = true;
-            cr::SetupGame setup;
-            setup.title = "Chaos Rings Omega", setup.port = "CRO-U", setup.vitaId = "PCSG00499", setup.trilogyDir = "CRO";
-            setup.trilogyAddon = "DIESELOM00ADDCON"; // (the Prequel Trilogy keeps the game's data in its add-on)
-            setup.obbHint = "main.110.com.square_enix.chaosringsomega.googleplay.obb";
-            setup.package = "com.square_enix.chaosringsomega.googleplay";
-            setup.iosOk = [](const std::string& p) {
-                const char* args[] = {"chaosringsomega", "--data", p.c_str()};
-                return !cr::findDataDir(3, const_cast<char**>(args)).empty();
-            };
-            setup.androidOk = androidThere;
-            setup.vitaOk = vitaThere;
+            const cr::SetupGame setup = crSetupGame();
             cr::SetupResult got;
             if (!cr::runSetup(setup, g.empty() ? cr::saveDir() : g.front(), cr::saveDir(), got)) return SDL_APP_SUCCESS; // (Quit)
             SDL_Log("setup: iOS %s, Android %s, Vita %s", got.ios.c_str(), got.android.c_str(), got.vita.c_str());
@@ -21179,7 +21203,8 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
                           (g.empty() ? std::string("(no folder)") : g.front()) +
                           "\n\n  ios/      the iPad's ChaosRingsOmegaHDeng.app (or the unpacked .ipa)"
                           "\n  android/  the Android release's main.110.com.square_enix.chaosringsomega.googleplay.obb and its APK"
-                          "\n  vita/     the Vita's PCSG00499 folder\n\nAlso looked in:";
+                          "\n  vita/     the Vita's PCSG00499 folder, or a NoNpDrm dump's folder (the Prequel Trilogy's with its"
+                          "\n            addcont/ beside its app/: decrypted here on the next start)\n\nAlso looked in:";
         for (size_t k = 1; k < g.size(); ++k) msg += "\n" + g[k];
         msg += "\n\nThe README's \"Your copy\" has the details.";
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Chaos Rings Omega", msg.c_str(), nullptr);
