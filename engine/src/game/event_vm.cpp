@@ -229,7 +229,7 @@ int EventRunner::eventNo() const { return vm_ ? vm_->eventNo : -1; }
 std::string EventRunner::where() const {
     if (!vm_) return "idle";
     static const char* const kWait[] = {"running", "waiting frames", "waiting for fade", "waiting for message",
-                                        "waiting for npc", "waiting for a choice", "showing a logo"};
+                                        "waiting for npc", "waiting for a choice", "showing a logo", "waiting for the window"};
     char buf[64];
     std::snprintf(buf, sizeof buf, "pc %#zx, %s", vm_->pc, kWait[int(vm_->wait)]);
     return buf;
@@ -604,6 +604,7 @@ bool EventRunner::step(EventHost* host) {
             const int n = vm.u8();
             if (n == 3 && host) { host->askYesNo(vm.var(0)); return yield(Vm::Wait::Choice); } // answer in flag var(0)
             if (host && host->menu(n)) return yield(Vm::Wait::Choice);
+            if (host) { vm.waitFrames = 1; return yield(Vm::Wait::Frames); } // (__EvtUtil returns -1 whatever it set up: the tick ends)
             break;
         }
         case 23: { // Eff: sound effect id | flags << 16 (bit 23 loop, bit 29 stop)

@@ -948,7 +948,7 @@ track 0x13; `ShopClr` plays the kept track back unless `SetShopBgmNoRecovery` wa
 their arguments; `CR_TEX2D_FLAGS=1` the Tex2d flags). 2035 (a battle animation preload) is a
 no-op: the port loads animations as they're needed.
 
-**Menus (`Util n`):** 0 title, 1 world choice, 2 shop, 3 yes/no, 4 start, 5 / 6 save and load, 7 staff roll (var 0), 8 last
+**Menus (`Util n`):** (`__EvtUtil` returns -1 whichever it sets up: the tick ends there) 0 title, 1 world choice, 2 shop, 3 yes/no, 4 start, 5 / 6 save and load, 7 staff roll (var 0), 8 last
 battle.
 - **Yes/no** (`_menuu_Event*`, `ComUty_YesNoChoiceProc`): the left button returns 2, the right 1;
   on close 2 sets flag var(0) and 1 clears it, so Yes sets the flag. `__menuu_EventPut`:

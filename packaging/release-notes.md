@@ -23,7 +23,7 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   the screen's edge, the "Battleship Napur" strip is centred and the movement tutorial's pad art is
   the original's pieces; a hidden-field `Screen` is no longer mistaken for a 255-frame fade; a
   script's warp within its area no longer runs the room's entry script a second time; a script
-  waiting for a tap with `Rept` isn't cut off after 45 s. On the deck and in the first dungeon:
+  waiting for a tap with `Rept` isn't cut off after 45 s; a `Util` menu call takes its frame. On the deck and in the first dungeon:
   `FrmAdjc2` turns an actor to its record's facing (at once, or over the move) as the original
   does; a `FrmPlayEff` effect faces the camera on the field too; a camera slide, a move, a scroll
   and a quake take their first step on the frame the script starts them; the original's one-pixel
