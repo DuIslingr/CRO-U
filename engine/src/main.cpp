@@ -371,6 +371,7 @@ struct App {
     // (the text waits), 3 up, 4 / 5 fading out over 5 frames, 6 gone
     struct MsgWin { int state = 0, t = 0; float alpha = 0; } msgWin;
     bool fieldHidden = false;              // Screen's toggle (gac + 0x8ecde): the field not drawn
+    bool npcNativesPending = false;        // npc_setup: the rows' natives (+8) to run for the room's NPCs as they are created
     int msgColour = -1;                    // the page's message's 0x16 colour (MessageInfo::colour), -1 none
     double playSeconds = 0;                // TOTAL PLAYTIME: time on the field and in battles
     // The save / load screen (__menuu_SaveLoad*): from the Camp menu (save) or the title's Start
@@ -1892,6 +1893,7 @@ void enterMap(App& app) {
         }
     }
     app.npcs = app.events.npcs(app.mapNumber);
+    app.npcNativesPending = true; // (their rows' natives on the first step: the fire walls' Uty_FireWall_Init)
     { // fldencount_init
         cr::EncounterTable table;
         const bool have = cr::encounterTable(app.events, app.mapNumber, table);
@@ -3094,6 +3096,11 @@ struct ViewerHost : cr::EventHost {
         moveNpc(id, v, 0, Facing::Keep, int(std::hypot(p.x - x, p.z - z) / speed), 0);
     }
     void fadeNpc(int id, float from, float to, int frames) override {
+        if (id == 0) { // the player's model (NpcFade 0: the field's slot 1), as mdl_set_alpha
+            app.playerAlphaFrom = from, app.playerAlphaTo = to, app.playerAlpha = from;
+            app.playerFadeFrames = app.playerFadeLeft = std::max(frames, 1);
+            return;
+        }
         for (auto* d : npc(id)) {
             d->alphaFrom = from; d->alphaTo = to; d->alpha = from;
             d->fadeFrames = d->fadeLeft = std::max(frames, 1);
@@ -3448,15 +3455,17 @@ struct ViewerHost : cr::EventHost {
     }
     bool windowClosed() override { return app.msgWin.state == 0 || app.msgWin.state == 6; }
     void toggleFieldHidden() override { app.fieldHidden = !app.fieldHidden; }
-    bool logoSeen() override { const bool seen = app.logoSeen; app.logoSeen = true; return seen; }
+    bool logoSeen() override { return app.logoSeen; }       // Uty_ChkLogo_flg with var 0 = 0: read alone
+    void setLogoSeen() override { app.logoSeen = true; }    // ... with var 0 set: set alone (a battle's start sets it too)
     void padArt() override { app.padArt = true; }
     // Uty_Btl_ParamUp01 / 02: battle fighter 1 / 0's attack, defense, speed and luck up for 6 rounds
     // (+0x8b..+0x8e = 6); outside a battle, for the next one
     void battleParamUp(int fighter) override {
-        if (fighter < 0 || fighter > 1) return;
-        if (app.battle.active) {
-            for (int st = cr::kStatusAttackUp; st <= cr::kStatusLuckUp; ++st) app.battle.rules.f[size_t(fighter)].status[st] = 6;
-        } else app.paramUp[fighter] = true;
+        // Uty_Btl_ParamUp01 / 02 set the fighter's +0x97 - the "doubled" byte the Ward skill (btlcalc_0435)
+        // sets: attack, defense, speed and luck doubled for the rest of the battle, an Up then
+        // +100 %; outside a battle it is nothing (prc's memset wipes it as a battle starts)
+        if (fighter < 0 || fighter > 1 || !app.battle.active) return;
+        app.battle.rules.f[size_t(fighter)].status[cr::kStatusWard] = 1;
     }
     void puzzleStart() override { app.puzzleBanner = App::PuzzleBanner(); app.puzzleBanner.on = true; } // Uty_PuzzleStart_Init
     void warpCrystalCamera(int npc) override { // SetFreeCamera, then the camera task
@@ -7320,6 +7329,7 @@ void drawFieldMenu(App& app) {
 }
 
 void toggleFieldMenu(App& app) {
+    if (app.puzzleTeleports > 0) return; // (__menuf_mainPrc: the main button ignored while puzzle_teleport_cnt counts down)
     App::FieldMenu& f = app.fieldMenu;
     if (f.anim > 0) return;
     f.open = !f.open;
@@ -10273,6 +10283,12 @@ void stepEvents(App& app) {
     // left them for its updates): the present packs - the second scenario's five extra trials and
     // their presents - open
     for (int f = 101; f <= 106; ++f) app.game.setFlag(f, true);
+    if (app.npcNativesPending) { // npc_setup: SetVar(0, id); UtyPrcTbl[row + 8].init() for every created, shown NPC with one
+        app.npcNativesPending = false;
+        ViewerHost natives(app);
+        for (const cr::FieldNpc& n : app.npcs)
+            if (n.native == 15 && npcActive(app, n)) app.game.vars[0] = n.id, natives.fireWall(n.id); // (the only one the rows use)
+    }
     // fast-forward while the skip is held: every page turns at once (choices still wait for an answer)
     if (app.skipScene && app.runner.running() && !app.dialogue.empty()) advanceDialogue(app);
     stepTyping(app);
@@ -10281,6 +10297,7 @@ void stepEvents(App& app) {
     updateVoices(app);
     if (!app.battle.active) stepEffects(app, app.fieldEffects), stepQuake(app.fieldQuake); // eff3d_prc, UpdateQuake
     if (app.nowLoading.on) app.nowLoading.frame = (app.nowLoading.frame + 1) & 15; // NowLoadProc
+    if (app.puzzleTeleports > 0) --app.puzzleTeleports; // (prc: puzzle_teleport_cnt counts down a frame; the field menu's button waits)
     stepTexDisp(app);
     stepVitaLogo(app);
     stepTutoTex(app);
@@ -19005,25 +19022,27 @@ int runSelfTest(App& app) {
         openShop(app);
         host.endMenu(2);
         const bool ended = !app.shop.open && host.bgmNo() == 0x13; // SetShopBgmNoRecovery
-        // 2030 / 2031: queued outside a battle, the next battle's fighter 1 / 0 starts with the four ups
+        // 2030 / 2031: outside a battle nothing (the original's byte is wiped as a battle starts)
         host.battleParamUp(1);
-        const bool queued = app.paramUp[1] && !app.paramUp[0];
+        const bool queued = app.paramUp[1] || app.paramUp[0];
         app.game = keepGame;
         startBattle(app, {1, 0, -1, 0}, 0);
         bool boosted = false;
-        if (app.battle.active) {
+        if (app.battle.active) { // Uty_Btl_ParamUp01 / 02 set the fighter's "doubled" byte (+0x97, the Ward skill's) for the
+            // battle: nothing before it (prc's memset wipes it), fighter 1 by 2030, fighter 0 by 2031
             const cr::Fighter& f1 = app.battle.rules.f[1];
-            boosted = f1.status[cr::kStatusAttackUp] == 6 && f1.status[cr::kStatusDefenseUp] == 6 &&
-                      f1.status[cr::kStatusSpeedUp] == 6 && f1.status[cr::kStatusLuckUp] == 6 &&
-                      app.battle.rules.f[0].status[cr::kStatusAttackUp] == 0 && !app.paramUp[1];
-            host.battleParamUp(0); // in a battle: at once
-            boosted &= app.battle.rules.f[0].status[cr::kStatusSpeedUp] == 6;
+            boosted = f1.status[cr::kStatusWard] == 0 && app.battle.rules.f[0].status[cr::kStatusWard] == 0;
+            const int atkBefore = app.battle.rules.atkOf(0);
+            host.battleParamUp(0); // in a battle: at once, fighter 0 doubled
+            boosted &= app.battle.rules.f[0].status[cr::kStatusWard] == 1 && app.battle.rules.atkOf(0) == atkBefore * 2 &&
+                       f1.status[cr::kStatusWard] == 0;
             endBattle(app, false);
         }
-        problems += !queued || !boosted;
+        problems += queued || !boosted;
         // 2029 / 2008: the logos once a run; the pad's picture while flag 0 is set
         app.logoSeen = false;
-        const bool logoOnce = !host.logoSeen() && host.logoSeen();
+        host.setLogoSeen(); // (var 0 set: the logos shown this run)
+        const bool logoOnce = host.logoSeen();
         app.game.setFlag(0, true);
         host.padArt();
         app.lastTicks = 0;
@@ -19033,7 +19052,7 @@ int runSelfTest(App& app) {
         drawFrame(app, false);
         const bool padGone = !app.padArt;
         problems += !logoOnce || !padGone || app.renderer.takeErrors();
-        std::printf("natives: battle stat ups (2030 / 2031) %s\n", queued && boosted ? "ok" : "WRONG");
+        std::printf("natives: battle stat ups (2030 / 2031) %s\n", !queued && boosted ? "ok" : "WRONG");
         app.runner.stop(); // (a script of the run before might turn it off: flag 4086 clear)
         host.nowLoading(true);
         const int frame0 = app.nowLoading.frame;

@@ -50,6 +50,11 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   Omega's Down and Ward status icons use their own sprites; "Critical!" and its kind slide in
   sideways; the Camp's item and equip sounds are the original's, and a No to using an item goes
   back to the list.
+- **Scripts' natives:** `NpcFade 0` fades the player (the second scenario's materialisation under
+  effect 143); the first dungeon's two fire walls burn (their NPC rows' own native, which the
+  original runs as the room is set up); `Uty_Btl_ParamUp` doubles the fighter's stats for the
+  battle (battle 657) as the original does, not +25 % for six turns; `Uty_ChkLogo_flg` reads or
+  sets as its var says; `puzzle_teleport_cnt` holds the field menu's button while it counts.
 - **On the field:** the view glides after the player (30 % of the way each frame, as
   `setScrollPlayer(0.3)`) instead of being bolted to him; a quick tap anywhere examines or talks
   (the original's CheckTap); standing by something, the leader turns to face it; the "!" bubble is

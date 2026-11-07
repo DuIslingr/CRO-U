@@ -48,6 +48,7 @@ struct FieldNpc {
     uint16_t kind = 0;           // NPC table +14: bit 0 + bit 15 = runs its script on touch
     uint16_t treasure = 0;       // NPC table +18: bit 0/1 = treasure box (TreasureBoxManager)
     uint16_t puzzle = 0;         // NPC table +20: the puzzle object it is (game/puzzle.hpp)
+    int native = 0;              // NPC table +8: the native run as it is created (npc_setup), 0 none
     int16_t link[4] = {0, 0, 0, 0}; // NPC table +22..+28: a candle switch's linked NPCs; a candle block's
                                     // start (+22, 0 = put away) and switch (+24)
     float scale = 1;             // NPC table +38: percent, -1 = 100
@@ -71,6 +72,7 @@ struct WarpEntry {
 struct NpcRow {
     int flagShow = -1, flagHide = -1, model = -1;
     int item = -1;          // +12: a treasure box's fixed item (-1 = chosen by TreasureBoxManager)
+    int native = 0;         // +8: a native (Call 2000 + n) npc_setup runs for the NPC as it is created, var 0 = its id (15: the fire walls)
     uint16_t kind = 0, box = 0;
     uint16_t puzzle = 0;    // +20: what a puzzle room makes of it (game/puzzle.hpp kPuzzle*)
     int16_t link[4] = {0, 0, 0, 0}; // +22..+28 (FieldNpc::link)

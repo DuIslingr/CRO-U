@@ -203,6 +203,7 @@ std::vector<FieldNpc> EventFile::npcs(int mapNumber) const {
             n.kind = r.kind;
             n.treasure = r.box;
             n.puzzle = r.puzzle;
+            n.native = r.native;
             std::memcpy(n.link, r.link, sizeof n.link);
             n.scale = r.scale;
         }
@@ -229,6 +230,8 @@ bool EventFile::npcRow(int id, NpcRow& out) const {
     out.box = box;
     out.puzzle = puzzle;
     for (int k = 0; k < 4; ++k) rd(data_, row + 22 + 2 * size_t(k), out.link[k]);
+    int16_t native = 0;
+    if (rd(data_, row + 8, native)) out.native = native;
     out.scale = scale < 0 ? 1.0f : float(scale) / 100.0f; // npc_setup: +38 / 100, -1 = 1.0
     return true;
 }
