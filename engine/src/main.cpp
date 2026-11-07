@@ -7930,6 +7930,9 @@ void newPairParty(App& app, int pair, bool clearData) {
     cr::GameState g = fromClear ? slot.game : app.game;
     if (fromClear) {
         for (int f : {0, 4089}) g.setFlag(f, app.game.flag(f)); // the boot script's own
+        // (and its variables: prty_init_new leaves the work alone - the vars the boot script has set
+        // this session, the scenario 0, the choice 1 and the rest, stay over the clear data's)
+        for (const auto& [k, v] : app.game.vars) g.vars[k] = v;
         g.openedBoxes.clear();
         app.treasureBoxes.clear();
     }
@@ -16749,6 +16752,45 @@ int storyLossSelfTest(App& app) {
     return problems;
 }
 
+// New with the clear data from the title, as a player begins it (scenario 0 cleared, its load flag
+// 31): the cleared save's own work - var 0, var 1 as a played game leaves them - must not take the
+// boot script's over (prty_init_new leaves the work alone); its New goes on to the opening, map 69,
+// as a plain one does, with var 1 = 3 and the scenario's story flags cleared
+int clearDataNewGameSelfTest(App& app, const cr::SaveData& base) {
+    cr::SaveData sd = base;
+    sd.game.setFlag(31, true);
+    sd.game.setFlag(1100, true);
+    sd.game.vars[0] = 7, sd.game.vars[1] = 4;
+    sd.leader = 0;
+    cr::writeSave(slotPath(app, 1), sd);
+    app.game = cr::GameState();
+    bootTitle(app);
+    for (int f = 0; f < 1000 && !app.titleOpen; ++f) stepEvents(app);
+    titleChoose(app, 0);
+    for (int f = 0; f < 300 && !app.charSelectOpen; ++f) stepEvents(app);
+    app.charSelectCursor = 0, app.charSelectPage = 0;
+    charSelectKey(app, SDLK_RETURN);
+    for (int f = 0; f < 300 && !app.saveScreen.open; ++f) stepEvents(app);
+    const std::vector<int> plates = savePlates(app);
+    const auto newPlate = std::find(plates.begin(), plates.end(), 2);
+    int opening = -1, var1 = -1;
+    const bool asked = app.saveScreen.open && newPlate != plates.end();
+    if (asked) {
+        saveScreenChoose(app, int(newPlate - plates.begin())); // New: with the clear data?
+        const bool clearQuestion = app.saveScreen.kind == 3;
+        saveScreenYes(app);
+        var1 = clearQuestion ? app.game.vars[1] : -2;
+        for (int f = 0; f < 1500 && opening < 0; ++f) {
+            stepEvents(app);
+            if (!app.booting && app.mapNumber >= 0) opening = app.mapNumber;
+        }
+    }
+    app.runner.stop();
+    const int problems = (var1 != 3) + (opening != 69) + app.game.flag(1100) + !app.game.flag(31);
+    std::printf("new game with clear data from the title: var 1 = %d, opening map %d; %d problems\n", var1, opening, problems);
+    return problems;
+}
+
 int runSelfTest(App& app) {
     app.persist = false;
     app.typeOn = false; // pages whole (the typing has its own test)
@@ -16802,6 +16844,18 @@ int runSelfTest(App& app) {
     if (SDL_getenv("CR_SELFTEST_STORY_LOSS")) return storyLossSelfTest(app) ? 1 : 0;
     if (SDL_getenv("CR_SELFTEST_SCENE_AUDIO")) return sceneAudioSelfTest(app) ? 1 : 0;
     if (SDL_getenv("CR_SELFTEST_GRAPHICS")) return graphicsRecoverySelfTest(app) ? 1 : 0;
+    if (SDL_getenv("CR_SELFTEST_CLEAR_NEW")) { // only New with the clear data from the title, in a folder of its own
+        const std::string keep = app.saveDirOverride;
+        app.saveDirOverride = userDir() + "clear-new-test-" + std::to_string(SDL_GetTicksNS()) + "/";
+        SDL_CreateDirectory(app.saveDirOverride.c_str());
+        setMode(app, Mode::Maps);
+        startNewGame(app, 0);
+        const int problems = clearDataNewGameSelfTest(app, captureSave(app));
+        for (const char* f : {"save1.dat", "save2.dat", "resume.dat"}) SDL_RemovePath(savePath(app, f).c_str());
+        SDL_RemovePath(app.saveDirOverride.c_str());
+        app.saveDirOverride = keep;
+        return problems ? 1 : 0;
+    }
     if (SDL_getenv("CR_SELFTEST_CANCEL")) return inputCancelSelfTest(app) ? 1 : 0;
     if (SDL_getenv("CR_SELFTEST_LIFECYCLE")) return fieldLifecycleSelfTest(app) ? 1 : 0;
     if (SDL_getenv("CR_SELFTEST_MOBILE")) return mobileInputSelfTest(app) + mobileTransitionSelfTest(app) ? 1 : 0;
@@ -17769,6 +17823,7 @@ int runSelfTest(App& app) {
         problems += app.game.scenario != 1 || app.game.pairs[1] != std::array<int, 2>{0, 2} || !app.game.flag(0xfee) ||
                     ownedCount(app, 480) < 1 || ownedCount(app, 188) < 1 || app.game.flag(0x1030);
         std::printf("new game with clear data: mode 3 carried %d of 13, mode 2 the records over, a fresh scenario 1 fresh\n", carry);
+        problems += clearDataNewGameSelfTest(app, before);
         app.game = cr::GameState();
         app.playerChar = 0;
         for (int f = 0; f < 2; ++f) {
