@@ -1,7 +1,7 @@
 #pragma once
 // Field music: bgmNN.caf (AAC-LC in CAF, 44.1 kHz stereo, ~128 kb/s) decoded with FAAD2 and
 // streamed through SDL audio, looping from the game's _BGM_REPEAT packet. _bgmgo semantics.
-// With a Vita source (setVitaSource), the Vita's cr_mNN.at9 instead (ATRAC9, 48 kHz stereo,
+// With a Vita source (setVitaSource), the Vita's cr_mNN.at9 / cr2_mNN.at9 instead (ATRAC9, 48 kHz stereo,
 // 144 kb/s: the same tracks but bgm31, looping sample-exactly between its 'smpl' points - the
 // files run on past the loop's end into an ending). With an Android source (setAndroidSource),
 // its j001mNN.mca instead - Ogg Vorbis after a 1 KB header, 44.1 kHz, ~96 kb/s, looping
@@ -50,6 +50,9 @@ public:
     // Reads a file of the Vita's bgm.psarc by name; empty: the data folder's tracks only
     using VitaReader = std::function<bool(const std::string& name, std::vector<uint8_t>& out)>;
     void setVitaSource(VitaReader read) { vita_ = std::move(read); }
+    // The Vita's file of a track: cr_mNN.at9 for bgmNN, Omega's own (bgm41..49, the title's
+    // bgm41 among them) cr2_mNN.at9 - the first the reader has ("" none), its bytes in out when given
+    static std::string vitaTrackFile(int track, const VitaReader& read, std::vector<uint8_t>* out);
     bool playingVita() const; // the current track is the Vita's
     // Reads a file of the Android expansion file by name; empty: none
     void setAndroidSource(VitaReader read) { android_ = std::move(read); }

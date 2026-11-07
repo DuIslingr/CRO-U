@@ -653,8 +653,8 @@ at +0x31dd0.
 
 Lookup for `EvtMsg id`:
 - **id < 51000:** m = id − 1000. The section is a table of u32 block offsets (from the file base;
-  it ends where the first block starts). Block m / 300 is a table of 300 u32 message offsets;
-  take entry m % 300.
+  it ends where the first block starts). Block m / 200 is a table of 200 u32 message offsets;
+  take entry m % 200 (`__EvtMsg`: Omega's blocks are 200 - CR1's 300).
 - **id ≥ 51000:** system texts from `sys.evt`, loaded once by `gameapp_init`. Its header u32[language]
   points to the same kind of block table, with blocks of 1000 entries (m = id − 51000).
 
@@ -722,7 +722,7 @@ NPC scripts play).
 | `FrmSetc2 npc, flag` | place the actor from the current record (position, Y rotation), y snapped to the floor (`get_floor`) |
 | `FrmSetc npc, dir` | place from the current record; `dir` −4499…999 = degrees, 1000 keep the facing, 2000 face the way it moved, else 0 |
 | `FrmAdjc npc, f, n, dir` | walk to record f's position over n frames in a straight line (`npc_autoctl_set_fream`), facing per `dir` |
-| `FrmAdjc2 npc, f, n, mode` | the same; mode 0 position, 1 position and rotation, 2 position including y |
+| `FrmAdjc2 npc, f, n, mode` | the same; mode 0 turns to the record's angles at once and moves (npc_autoctl mode 1), 2 moves in y too without turning (mode 4), anything else (the scripts' 10 / 20) turns to them over the move (mode 2) |
 | `SetDir a, b` | a turns to face b |
 | `Wait 0xFFFD, npc` | wait until the actor's move ends (`npc_autoctl_chk`; animations don't count) |
 
@@ -733,7 +733,7 @@ for a scene and `Born 0` shows it again.
 |---|---|
 | `LoadAct npc, a, slot` | load action file a (table of 205 `.mca` names at 0xd4a00, `kActionFile`) into the actor's slot (`read_act_set`); a negative npc picks the other loader. A model's own actions fill slots 0… (stand, walk, run); event actions go in 4 and up |
 | `UnloadAct npc, slot` | free the slot |
-| `Anim npc, slot, a, b` | `mdl_set_act_motion_loop`: play the slot's action, then loop frames a..b; a = −1 plays it once and holds the last frame (chest lids), a = b = 0 loops it whole. The action already playing isn't restarted. `Anim2` has the same first four operands |
+| `Anim npc, slot, a, b` | `mdl_set_act_motion_loop`: play the slot's action, then loop frames a..b; a = −1 plays it once and holds the last frame (chest lids), a = b = 0 loops it whole. The action already playing isn't restarted. `Anim2 npc, slot, a, b, start, blend` (`mdl_set_act_motion_loop_frm`) has the same first four operands, then the frame it starts from and the cross-fade's frames (0: a cut) - and always starts the action over, the one playing too (the opening's 409 salutes from frame 30, then its ending from 70) |
 | `NpcMdlRead npc` | load an NPC from the NPC table even if the room's list lacks it (e.g. 501 = `t0152bt.bin`, the 3D hall the opening is filmed in): `__EvtNpcMdlRead` puts it at the origin, facing 0, scale from row +0x26, hidden (+0x8c bit 0) when its create flags fail or its id is 400 or more - a `Born` shows it. A negative npc re-reads the model of one already there, at its list entry's place |
 | `Setc npc, x, y, z, dir` | place at world coordinates (shorts); `dir` as for `FrmSetc` |
 | `CameraFree` / `CameraPlayer` | a script drives the camera / the stage camera again (`SetFreeCamera`, `SetPlayerCamera`) |
@@ -741,9 +741,14 @@ for a scene and `Born 0` shows it again.
 | `FrmAdjCam id, n` | move to that shot over n frames |
 | `FrmPanCam dx, dy, dz, n` | shift the camera over n frames |
 
-`FrmSetCam` moves the 3D camera only in rooms filmed in 3D: maps 13, 29, 46, 88 and 113,
-maps 63–87, or while +0x2c0 bit 6 is set. Elsewhere it scrolls the painted background
-(`SetScroll`, `SetScroll2D`). Room 113 (`t0150`, j001_t01) has no painting and a zero
+`FrmSetCam` on the field (G+0x364 bit 0x40, "field running") always takes the 3D path:
+`SetScroll(0, 0)` and the live eye / target become the shot (the 2D `SetScroll` of the shot's
+x, y only off the field). `FrmAdjCam` slides the 3D camera on the maps 2.2.0 lists for 3D
+filming - 13, 29, 47, 66, 71, 91, 152, 191, 214 (0xd, 0x1d, 0x2f, 0x42, 0x47, 0x5b, 0x98, 0xbf,
+0xd6, the same list in `setCamera3D`'s near-plane rule) - and scrolls the painting elsewhere.
+`CameraPlayer` only switches the mode and clears the auto flags: a room without a painting
+keeps showing the last shot until the map is loaded again (`fldread_prc` copies the stage
+record back). Room 113 (`t0150`, j001_t01) has no painting and a zero
 camera: the opening (event 201, script 0's gosub 0x5f98) is shot there.
 
 ### 2D images (`Tex2d`)
@@ -831,7 +836,7 @@ gives 27,010/27,010 entries with no misaligned jump targets):
 
 **Open's windows** (`__EvtOpen`, `_SetWin`, `_PutWin`, `_PutMsg`; the same in 2.2.0). The style
 byte's first bit of 2 / 4 / 8 / 0x10 / 0x20 / 0x40 picks rect 0 / 2 / 4 / 6 / 8 / 10 (else 0),
-+1 when the lines are 1; the rects (0xd3d30, 4 shorts: x, y, -, the text's y below it; tex2d
++1 when the lines are 1; the rects (`_mwin` at 0xd824c, 4 shorts: x, y, -, the text's y below it; tex2d
 units, logical = 2 × + (32, 64)) are (0, 176, 60) ×2, (0, 8, 8), (0, 224, 8), (0, 16, 16), (0, 108,
 16), (0, 0, 44), -, (0, 0, 264), -, (0, 8, 16), (0, 216, 16). `PutWin` by style: 0x210 or 0x80 no
 window; 0x20 a black band x −16..512, y 252..352; 4 a light band x..480, y..+0x58; 8 a dark band
@@ -1743,8 +1748,9 @@ The iPhone release 2.2.0 (`ChaosRings.app/data`, unencrypted, stripped) and the 
   art (sheet 1 picture 16: 1.0.1's 1024 × 768, 2.2.0's 480 × 320) fills the screen and the
   "Character Select" banner (picture 18: 1024 × 164 / 480 × 84, narrowing downwards) hangs over
   its top, z −4 over −5.
-- **Vita audio** (`CR1/sound/*.psarc`: `voiceevnt` 2,900, `voicebtl` 1,220, `bgm` 29 `cr_mNN` - no
-  `cr_m07`, like iOS, and no `cr_m31`): RIFF WAVE `.at9` - 'fmt ' WAVE_FORMAT_EXTENSIBLE (0xFFFE),
+- **Vita audio** (`CRO/sound/*.psarc`: `voiceevnt` 2,557, `voicebtl` 1,732, `bgm` 38: `cr_mNN` for
+  bgm01..30 - no `cr_m07`, like iOS - and Omega's own bgm41..49 as `cr2_m41`..`cr2_m49`, the title's
+  theme (Bgm 29 = bgm41) among them): RIFF WAVE `.at9` - 'fmt ' WAVE_FORMAT_EXTENSIBLE (0xFFFE),
   block align = the superframe's bytes, sub-format {47E142D2-36BA-4D8D-88FC-61654F8C836C}, then a
   u32 version and the 4-byte ATRAC9 config at +44; 'fact' {u32 samples, u32 overlap delay, u32
   encoder delay (256)}; 'smpl' (music) one loop, start / end inclusive at +44 / +48 of the chunk.

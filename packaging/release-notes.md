@@ -10,6 +10,36 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   `amdvkffx64.dll` and (on Linux) ffx-vk-linux's `libffx_vk_linux.so` into `fsr4/` in the game
   folder - its `README.txt` says where each comes from. On Linux the DLLs run natively through
   ffx-vk-linux, no Wine. Without the files FSR 3.1 stays as it is.
+- **Vita music:** Omega's own tracks - the title theme among them - play from a Vita copy again.
+  The Vita names them `cr2_m41.at9`..`cr2_m49.at9`, which the game didn't look for, so with a
+  Vita copy alone the title was silent.
+- **Cutscenes closer to the original** (the opening checked opcode by opcode against the iOS code):
+  message windows fade in over 4 frames before their text and out over 5 after it, with the
+  original's open / close sounds, and a script's `Open` / `Close` / fade waits / swap-ins take the
+  frames the original spends on them (about 350 ms per window - Vieg's bow and "Now, now, Ayuta..."
+  no longer come early); line breaks and page turns type at the original's pace; the "next" mark no
+  longer blinks and the page counter is gone (the original has neither); `Anim2` starts its action
+  over from the frame the script names (the sailor's salute and its ending); portraits sit flush to
+  the screen's edge, the "Battleship Napur" strip is centred and the movement tutorial's pad art is
+  the original's pieces; a hidden-field `Screen` is no longer mistaken for a 255-frame fade; a
+  script's warp within its area no longer runs the room's entry script a second time; a script
+  waiting for a tap with `Rept` isn't cut off after 45 s. On the deck and in the first dungeon:
+  `FrmAdjc2` turns an actor to its record's facing (at once, or over the move) as the original
+  does; a `FrmPlayEff` effect faces the camera on the field too; a camera slide, a move, a scroll
+  and a quake take their first step on the frame the script starts them; the original's one-pixel
+  tremors show (the view's corner is rounded after the shake is added); `CameraPlayer` leaves a
+  room without a painting on its last shot, as the original's camera does.
+- **Battles started by a scene:** Escape is refused while a scene runs (the original dims it),
+  the battle's music is the one the scene names - random battles play Omega's battle theme
+  (track 31) instead of a track the iPad data doesn't have -, the music after a battle follows
+  the scene's var 60 (silence after the deck's and the first dungeon's fights, as the original),
+  the deck's first-battle tutorial picture (`battle_start`) shows, the scene's own "skip off"
+  (`Chg_MsgSkip`) now hides and disables the skip corner, the fade-in is the original's 20
+  frames, a tutorial's dimming fades over 100 ms, and a lost scene battle shows `gameover` and
+  waits for a tap before the title.
+- **Resuming:** leaving the game during a cutscene no longer makes the title's "resume from last
+  saved point?" put you on that cutscene's painting with nothing running. The resume point is only
+  what a scene's end (or an encounter) saved, as the original's is - quitting itself saves nothing.
 - **Story battles you're meant to lose** (650, 654, 674 ...) now go on with the story instead of
   ending in a game over (reported by [metastigma](https://github.com/metastigma)).
 - **Skip:** the skip button skips while you hold it and stops when you let go, as in the original.

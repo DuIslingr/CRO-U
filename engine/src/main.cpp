@@ -117,6 +117,7 @@ struct Effect {
     bool loop = false;
     float scale = 1, yaw = 0;
     float pitch = 0, roll = 0; // FrmPlayEff2: the record's X and Z angles (radians)
+    bool faceCamera = false;   // FrmPlayEff at a record's point: turned to the camera each frame (mdl + 0xfc7, as a battle's)
     int handle = 0;  // for stopping it
     int key = 0;     // FrmPlayEff's (effect + 1) x (actor + 1)
 };
@@ -365,6 +366,10 @@ struct App {
     unsigned skipHeld = 0;
     bool skipScene = false;
     int msgStyle = 2, msgLines = 2;        // the script's last Open: the message window's style and lines
+    // The window itself (PrcWin: _SetWin / _ClrWin): 0 none yet, 1 / 2 fading in over 4 frames
+    // (the text waits), 3 up, 4 / 5 fading out over 5 frames, 6 gone
+    struct MsgWin { int state = 0, t = 0; float alpha = 0; } msgWin;
+    bool fieldHidden = false;              // Screen's toggle (gac + 0x8ecde): the field not drawn
     int msgColour = -1;                    // the page's message's 0x16 colour (MessageInfo::colour), -1 none
     double playSeconds = 0;                // TOTAL PLAYTIME: time on the field and in battles
     // The save / load screen (__menuu_SaveLoad*): from the Camp menu (save) or the title's Start
@@ -507,6 +512,7 @@ struct App {
     struct MenuMask {
         int type = 0, want = -1;           // the shape; the menu asking for it (-1 none)
         int from = 0, to = 0, t = 0, ms = 1; // the fade: from + (to - from) x t / ms, t + 50 a frame
+        bool tuto = false;                 // a tutorial picture's (MuCom_MenuSetMask / ClrMask: 100 ms)
         float clock = 0;
     } menuMask;
     int fadeFrames = 0, fadeT = 0;
@@ -596,6 +602,8 @@ struct App {
         enum Phase { Intro, Command, Acting, WinTalk, BossDown, SetPiece, Won, Results, Lost, Fled, StoryEnd } phase = Intro;
         int phaseFrames = 0;
         bool wonTap = false; // a tap in the victory's hold (state 1099: 140 frames or pad_chk_trg_up)
+        bool lostTap = false;    // a tap on an event battle's game over (0x513: after 40 frames of its picture)
+        cr::Texture gameOver;    // btl_main 0x4b0: gameover.mct faded in over 20 frames for a lost event battle
         enum Menu { Top, Commands, Targets, Items, EscapeAsk, Genes } menu = Top;
         int cursor = 0;
         int member = 0;                    // solo: the member choosing
@@ -934,6 +942,7 @@ void clearSkip(App& app) {
 }
 // The skip button's corner, top right, in logical units
 bool skipCorner(const App& app, float lx, float ly) {
+    if (app.messageSkip) return false; // Uty_Chg_MsgSkip (G+0x2d): the corner ignored and its icon hidden while set
     return lx >= app.renderer.layoutRight() - 76 && ly < app.renderer.layoutTop() + 72;
 }
 
@@ -1973,6 +1982,10 @@ bool performWarp(App& app, const cr::WarpRequest& w, int fromEvent) {
         // colour and reveal the loaded field over 500 ms. Area-changing scripts
         // end at Warp and rely on this, notably puzzle crystals' white-out.
         app.fadeFrom = 1, app.fadeTo = 0, app.fadeFrames = 10, app.fadeT = 0;
+        // A script's warp within its area goes on with the script, and no room entry script
+        // (EvrStart 5) follows it: fldread_prc runs that only on the load flag's bit 3, which
+        // __EvtWarp never sets (0x22 / 1 / 4) - the lost battle's return does (prc: | 0xd)
+        if (fromEvent >= 0 && app.pendingEntry == App::Entry::Room) app.pendingEntry = App::Entry::None;
     }
     if (!app.havePlayer) return false;
     cr::Vec3 p{w.pos[0], w.pos[1], w.pos[2]};
@@ -2097,6 +2110,26 @@ void resetTyping(App& app) {
     app.dialogueClosing = false;
 }
 
+// PrcWin a frame: __WinOpen / __WinOpen2 take the window's alpha 0 -> 255 over 4 frames (t 4..0),
+// __WinClose / __WinClose2 255 -> 0 over 5 (t 0..4), then it is gone
+void stepMsgWin(App& app) {
+    App::MsgWin& w = app.msgWin;
+    switch (w.state) {
+    case 1: w.t = 4, w.state = 2; break;
+    case 2:
+        --w.t;
+        w.alpha = float(4 - w.t) / 4.0f;
+        if (w.t <= 0) w.state = 3, w.alpha = 1;
+        break;
+    case 4: w.t = 0, w.state = 5; break;
+    case 5:
+        w.alpha = float(4 - w.t) / 4.0f;
+        if (++w.t > 4) w.state = 6, w.alpha = 0;
+        break;
+    default: break;
+    }
+}
+
 // `tapped`: the reader's tap turned it (PrcMsg's 0x12 / its last page's wait); a page the window
 // clears or closes by itself (0x1a then 0x10 / 0x14) sets no flag
 void advanceDialogue(App& app, bool tapped = true) {
@@ -2105,25 +2138,30 @@ void advanceDialogue(App& app, bool tapped = true) {
     app.voiceQueue.clear();
     if (tapped) app.game.setFlag(4075, true); // PrcMsg: a page turned (or the last one closed) - MsgUty_TexDispProc's cue
     resetTyping(app);
-    if (++app.dialoguePage < app.dialogue.size()) return;
+    if (++app.dialoguePage < app.dialogue.size()) {
+        app.dialogueHold = 2; // (PrcMsg: the 0x12's frame, then the 0x10's, then the next page's first character)
+        return;
+    }
     app.lastPage = app.dialogue.back();
     app.lastPageInfo = app.dialogueInfo.size() == app.dialogue.size() ? app.dialogueInfo.back() : cr::MessageInfo();
     app.dialogue.clear();
     app.dialoguePage = 0;
 }
 
-// A page's characters, as PrcMsg types them (UTF-8 lead bytes; not the lines' \x01 marks)
+// A page's characters, as PrcMsg types them (UTF-8 lead bytes; not the lines' \x01 marks), and its
+// line breaks: each 0x11 takes PrcMsg a frame of its own, typing or not
 int pageChars(const std::vector<std::string>& page) {
-    int n = 0;
+    int n = page.size() > 1 ? int(page.size()) - 1 : 0;
     for (const std::string& l : page)
         for (unsigned char ch : l) n += (ch & 0xC0) != 0x80 && ch != 0x01;
     return n;
 }
 
-// The page cut to its first `limit` characters (the \x01 marks kept)
+// The page cut to its first `limit` characters (the \x01 marks kept; a line break counts as one)
 std::vector<std::string> typedPage(const std::vector<std::string>& page, int limit) {
     std::vector<std::string> out;
     for (const std::string& l : page) {
+        if (!out.empty() && limit-- <= 0) break;
         std::string t;
         for (char c : l) {
             const unsigned char ch = static_cast<unsigned char>(c);
@@ -2149,6 +2187,7 @@ bool pageTyped(const App& app) {
 // closes by itself once out
 void stepTyping(App& app) {
     if (app.dialogue.empty()) return;
+    if (app.msgWin.state == 1 || app.msgWin.state == 2) return; // PrcMsg: nothing until the window is up (state 3)
     const cr::MessageInfo* info = pageInfo(app);
     const int total = pageChars(app.dialogue[std::min(app.dialoguePage, app.dialogue.size() - 1)]);
     if (!app.typeOn) app.dialogueTyped = total;
@@ -2859,6 +2898,34 @@ void stepFieldScroll(App& app) {
 }
 
 // The scripts' shots on a painted field: jump (frames 0) or slide to offset (x, y)
+// A script's move (npc_autoctl_prc), a frame: true once it has arrived
+bool stepMove(App& app, App::Move& m) {
+    ++m.t;
+    const float t = float(m.t) / float(m.frames);
+    const cr::Vec3 p{m.from.x + (m.to.x - m.from.x) * t, m.from.y + (m.to.y - m.from.y) * t, m.from.z + (m.to.z - m.from.z) * t};
+    const float yaw = m.yawFrom + (m.yawTo - m.yawFrom) * t;
+    setActor(app, m.npc, p, m.turn ? &yaw : nullptr, m.mode == 2);
+    return m.t >= m.frames;
+}
+bool stepRescale(App& app, App::Rescale& r) { // (npc_autoctl_prc mode 3: the scale in a straight line)
+    ++r.t;
+    const float t = float(r.t) / float(r.frames);
+    if (cr::FieldNpc* n = findNpc(app, r.npc)) {
+        for (int k = 0; k < 3; ++k) n->axes[k] = r.from[k] + (r.to[k] - r.from[k]) * t;
+        for (auto& d : app.npcDraws)
+            if (d.id == r.npc) d.world = npcWorld(*n);
+    }
+    return r.t >= r.frames;
+}
+void stepScriptCam(App& app) { // (EvAutoCtl / CvAutoCtl: camera moves are straight lines)
+    if (app.cam.t >= app.cam.frames) return;
+    App::ScriptCam& c = app.cam;
+    ++c.t;
+    const float t = float(c.t) / float(c.frames);
+    c.eye = c.eyeFrom + (c.eyeTo - c.eyeFrom) * t;
+    c.target = c.tgtFrom + (c.tgtTo - c.tgtFrom) * t;
+}
+
 void scriptFieldScroll(App& app, float x, float y, int frames) {
     App::FieldScroll& fs = app.scroll;
     if (frames <= 0) {
@@ -2876,6 +2943,7 @@ void scriptFieldScroll(App& app, float x, float y, int frames) {
     fs.t = 0;
     fs.frames = frames;
     fs.sliding = true;
+    stepFieldScroll(app); // (ScrollAutoCtl's first step: this frame's, after the script - see stepEvents)
 }
 
 void openStaffRoll(App& app, int mode);
@@ -2921,6 +2989,22 @@ struct ViewerHost : cr::EventHost {
             d->loopTo = loopTo;
         }
     }
+    // Anim2 (mdl_set_act_motion_loop_frm): started over from `start` whatever plays, the pose before
+    // blended under it over `blend` frames - a cut when 0, as the opening's are
+    void playAnim2(int id, int slot, int loopFrom, int loopTo, int start, int blend) override {
+        int action = slot;
+        if (auto a = app.actorSlots.find(id); a != app.actorSlots.end())
+            if (auto it = a->second.find(slot); it != a->second.end()) action = it->second;
+        for (auto* d : npc(id)) {
+            const LoadedModel& lm = app.npcModels[d->model];
+            d->action = action;
+            d->time = float(std::max(start, 0));
+            d->once = loopFrom < 0;
+            d->loopFrom = loopFrom;
+            d->loopTo = loopTo;
+            d->blend.restart(action, d->time, float(std::max(blend, 0)), lm.actions);
+        }
+    }
     void loadAction(int id, int action, int slot) override {
         const cr::FieldNpc* n = findNpc(app, id);
         if (!n || n->model < 0 || n->model >= cr::kNumNpcModels || action < 0 || action >= cr::kNumActionFiles) return;
@@ -2950,8 +3034,13 @@ struct ViewerHost : cr::EventHost {
         }
         if (known->second >= 0) app.actorSlots[id][slot] = known->second;
     }
-    void unloadAction(int id, int slot) override {
+    void unloadAction(int id, int slot) override { // (__EvtUnloadAct: the slot freed and the model put on its action 0)
         if (auto a = app.actorSlots.find(id); a != app.actorSlots.end()) a->second.erase(slot);
+        for (auto* d : npc(id)) {
+            if (d->action == 0) continue;
+            d->action = 0, d->time = 0, d->once = false, d->loopFrom = d->loopTo = 0;
+            d->blend.restart(0, 0, 0, app.npcModels[d->model].actions);
+        }
     }
     // Wait 0xFFFD (npc_autoctl_chk): only a scripted move keeps it waiting, not an animation
     bool animBusy(int id) override {
@@ -2979,6 +3068,7 @@ struct ViewerHost : cr::EventHost {
         r.npc = id, r.frames = frames;
         for (int k = 0; k < 3; ++k) r.from[k] = n->axes[0] >= 0 ? n->axes[k] : n->scale, r.to[k] = s[k];
         app.rescales.push_back(r);
+        if (stepRescale(app, app.rescales.back())) app.rescales.pop_back(); // (the first step this frame's)
     }
     // Autoadj (npc_autoctl_set / prty_autoctl_set): a straight move to (x, its y, z) at `speed` a frame -
     // dist / speed frames, truncated (FPToFixed) - facing kept
@@ -3104,6 +3194,9 @@ struct ViewerHost : cr::EventHost {
         if (facing == Facing::Travel && std::fabs(m.to.x - m.from.x) + std::fabs(m.to.z - m.from.z) > 1e-4f) {
             const float yaw = std::atan2(m.to.x - m.from.x, m.to.z - m.from.z);
             setActor(app, id, m.from, &yaw, true);
+        } else if (facing == Facing::Snap) { // (FrmAdjc2 mode 0: the record's angles set as it starts)
+            const float yaw = yawDeg * kDeg;
+            setActor(app, id, m.from, &yaw, true);
         } else if (facing == Facing::Yaw) {
             m.turn = true;
             m.yawFrom = yawNow;
@@ -3114,6 +3207,7 @@ struct ViewerHost : cr::EventHost {
         app.rescales.erase(std::remove_if(app.rescales.begin(), app.rescales.end(), [&](const App::Rescale& o) { return o.npc == id; }),
                            app.rescales.end());
         app.moves.push_back(m);
+        if (stepMove(app, app.moves.back())) app.moves.pop_back(); // (its first step is this frame's: npc_autoctl_prc runs after PrcEvnt)
     }
     void tex2d(int slot, uint16_t f, int image, const int16_t (*extra)[3]) override {
         if (SDL_getenv("CR_TEXDISP_DEBUG")) std::printf("tex2d: slot %d flags %04x image %d\n", slot, f, image);
@@ -3131,23 +3225,28 @@ struct ViewerHost : cr::EventHost {
         // __EvtTex2d: the flags stay in the slot (placement bits replaced); every animation is a
         // straight blend over a few 20 Hz frames (tex2d_img_prc)
         p.flags = uint16_t((p.flags & ~0x3000) | f);
-        if (f & 0x1000) p.home = -32, p.y = 0, p.side = -1;
-        if (f & 0x2000) p.home = 512, p.y = 0, p.side = 1; // drawn mirrored (+0xbd0e)
+        // (the iPad's tex2d frame: screen = 2 tex2d + (32, 64); __EvtTex2d homes 0x1000 at tex2d
+        // (-16, 0) - flush left -, 0x2000 at (256, 0) - 32 px past the right edge -, 0x4000 at (176, 96))
+        if (f & 0x1000) p.home = 0, p.y = 0, p.side = -1;
+        if (f & 0x2000) p.home = 544, p.y = 0, p.side = 1; // drawn mirrored (+0xbd0e)
         if (f & 0x4000) {
-            p.home = 176, p.y = 96, p.side = 0;
+            p.home = 384, p.y = 256, p.side = 0;
             if (f & 0x40) { p.scale = 2; p.zoomT = 0; p.zoomFrames = 4; } // 200% -> 100%
         }
         if (f & 0x7000) { p.x = p.xFrom = p.xTo = p.home; p.yFrom = p.yTo = p.y; p.frames = p.t = 0; }
-        if (f & 0xC00) { // show / hide: 3 frames of fade and a 32 px slide from (show) / to (hide) its side
+        if (f & 0xC00) { // show: 3 frames of fade in and a 32 px slide in from its side; hide: a 32 px jump out
+                         // at once (the slide's home moved to its start) and 3 frames of fade out; a show
+                         // puts the grey level back to 255
             const bool show = f & 0x400;
             const float out = 32.0f * float(p.side);
-            p.aFrom = show ? 0 : p.alpha;
+            p.aFrom = show ? 0 : 1;
             p.aTo = show ? 1 : 0;
-            p.xFrom = show ? p.home + out : p.x;
+            p.xFrom = show ? p.home + out : p.home + out;
             p.xTo = show ? p.home : p.home + out;
             p.yFrom = p.yTo = p.y;
             p.x = p.xFrom;
             p.alpha = p.aFrom;
+            if (show) p.shade = p.gFrom = p.gTo = 1, p.gT = p.gFrames = 0;
             p.frames = p.aFrames = 3;
             p.t = p.aT = 0;
         }
@@ -3210,7 +3309,10 @@ struct ViewerHost : cr::EventHost {
         app.npcs.push_back(n);
         app.npcWarps.push_back(false);
     }
-    void freeCamera(bool on) override { app.cam.free = on; if (!on) app.cam.set = false; }
+    void freeCamera(bool on) override { // __EvtCameraPlayer: the mode and the auto flags only - the eye stays where the last shot put it
+        app.cam.free = on;
+        if (!on) app.cam.t = app.cam.frames = 0;
+    }
     void setCamera(const float* eye, const float* target, int frames) override {
         if (scrollingField(app)) { // a painted field: FrmAdjCam slides the painting to the shot's (x, y);
             // FrmSetCam on the field (flag word bit 64) takes the 3D path, which starts with SetScroll(0, 0)
@@ -3231,6 +3333,7 @@ struct ViewerHost : cr::EventHost {
         if (frames <= 0 || !c.set) { c.eye = e; c.target = t; c.frames = c.t = 0; }
         else { c.eyeFrom = c.eye; c.tgtFrom = c.target; c.eyeTo = e; c.tgtTo = t; c.frames = frames; c.t = 0; }
         c.set = true;
+        stepScriptCam(app); // (the slide's first step is this frame's: updateCamera runs after PrcEvnt)
     }
     void panCamera(const float* d, int frames) override {
         if (scrollingField(app)) { // FrmPanCam's 2D path: twice the deltas on the iPad
@@ -3259,6 +3362,7 @@ struct ViewerHost : cr::EventHost {
         ++app.scriptQuakes;
         if (frames < 0) startQuake(app.fieldQuake, float(amp), float(from), float(to), 1, true);
         else endQuake(app.fieldQuake, float(amp), float(from), float(to), frames);
+        if (!app.battle.active) stepQuake(app.fieldQuake); // (UpdateQuake runs after the script in the same frame)
     }
     void vitaLogo(int slot, int picture) override { // read_img_set(the table at 0x811122b0 [picture])
         static const char* const kLogo[8] = {"sqex", "mve", "mclogo", "title1", "title2", "chara3", "chara1", "chara2"};
@@ -3291,13 +3395,18 @@ struct ViewerHost : cr::EventHost {
         App::TutoTex& t = app.tutoTex;
         app.renderer.destroy(t.tex);
         t = App::TutoTex();
-        static const char* const kTuto[14] = { // 0xc9500: the puzzles' (0..7), the battles' (8..11, 13), the field's
+        // The table at 0xcd540 (24 bytes a name): the puzzles' (0..7), the battles' (8..11, 13, 20 -
+        // the deck's first-battle picture), the field's and the rest
+        static const char* const kTuto[26] = {
             "telepo_01_hd.mct", "telepo_02_hd.mct", "psyco_01_hd.mct", "psyco_02_hd.mct", "tough_01_hd.mct",
             "tough_02_hd.mct",  "pyro_01_hd.mct",   "pyro_02_hd.mct",  "battle_01_hd.mct", "battle_02_hd.mct",
-            "battle_03_hd.mct", "gene_01_hd.mct",   "puzzle_01_hd.mct", "battle_04_hd.mct"};
+            "battle_03_hd.mct", "gene_01_hd.mct",   "puzzle_01_hd.mct", "battle_04_hd.mct", "puzzle_02_hd.mct",
+            "encounter_hd.mct", "pheromone_hd.mct", "piupiucard_hd.mct", "collection_hd.mct", "labyrinth_hd.mct",
+            "battle_start_hd.mct", "change_hd.mct", "versionup_e_2_hd.mct", "versionup_e_3_hd.mct", "versionup_e_4_hd.mct",
+            "versionup_e_5_hd.mct"};
         const int pic = app.game.vars[1];
         cr::Image img;
-        if (pic >= 0 && pic < 14) { // the iPad's _hd sheet, else the iPhone's
+        if (pic >= 0 && pic < 26) { // the iPad's _hd sheet, else the iPhone's
             std::string name = kTuto[pic];
             if (loadImage(app, name, img) || loadImage(app, name.replace(name.find("_hd"), 3, ""), img)) t.tex = app.renderer.upload(img);
         }
@@ -3309,8 +3418,21 @@ struct ViewerHost : cr::EventHost {
         ++app.tutoCalls;
     }
     void exclamationMark() override { app.exclamation = true; ++app.exclamationCalls; }
-    void openWindow(int style, int lines) override { app.msgStyle = style, app.msgLines = lines, app.heldPage = false; }
-    void closeWindow() override { app.heldPage = false; } // Close: a page that ended itself goes with its window
+    void openWindow(int style, int lines) override { // __EvtOpen -> _SetWin: fading in (at once for style 0x10), SE 0x97 but for 0x30
+        app.msgStyle = style, app.msgLines = lines, app.heldPage = false;
+        app.msgWin.state = style & 0x10 ? 3 : 1, app.msgWin.t = 0, app.msgWin.alpha = style & 0x10 ? 1.0f : 0.0f;
+        if (!(style & 0x30)) app.sound.play(0x97);
+        stepMsgWin(app); // (PrcWin runs after PrcEvnt in the original's frame; ours ran before the script)
+    }
+    void closeWindow() override { // __EvtClose -> _ClrWin: fading out (at once for 0x110), SE 0x98 but for 0x30
+        app.heldPage = false; // Close: a page that ended itself goes with its window
+        app.msgWin.state = app.msgStyle & 0x110 ? 6 : 4, app.msgWin.t = 0;
+        if (app.msgWin.state == 6) app.msgWin.alpha = 0;
+        if (!(app.msgStyle & 0x30)) app.sound.play(0x98);
+        stepMsgWin(app);
+    }
+    bool windowClosed() override { return app.msgWin.state == 0 || app.msgWin.state == 6; }
+    void toggleFieldHidden() override { app.fieldHidden = !app.fieldHidden; }
     bool logoSeen() override { const bool seen = app.logoSeen; app.logoSeen = true; return seen; }
     void padArt() override { app.padArt = true; }
     // Uty_Btl_ParamUp01 / 02: battle fighter 1 / 0's attack, defense, speed and luck up for 6 rounds
@@ -3335,17 +3457,20 @@ struct ViewerHost : cr::EventHost {
                         angled ? " angled" : "", v ? v[0] : 0.0f, v ? v[1] : 0.0f, v ? v[2] : 0.0f, v ? v[3] : 0.0f, v ? v[4] : 0.0f,
                         v ? v[5] : 0.0f);
         float yaw = 0, pitch = 0, roll = 0;
+        bool faceCamera = false;
         if (!actorPos(app, actor, p)) { // not an NPC: where the scene's record has it
             if (!v) return;
             p = {v[0], v[1], v[2]};
-            // FrmPlayEff2 (eff3d_set_with_pos_and_ang) takes its angles too (the field's effects
-            // don't turn to the camera in Omega: drawEffects)
+            // FrmPlayEff2 (eff3d_set_with_pos_and_ang) takes its angles too; FrmPlayEff
+            // (eff3d_set_with_pos) sets the model's camera-facing flag (+0xfc7) itself, so
+            // mdl_put turns it to the camera every frame, on the field too
             if (angled) yaw = v[4] * kDeg, pitch = v[3] * kDeg, roll = v[5] * kDeg;
+            else faceCamera = true;
         }
         const int h = startEffect(app, app.fieldEffects, effect, p, true, float(scale) / 100.0f, yaw);
         if (h)
             for (Effect& fx : app.fieldEffects)
-                if (fx.handle == h) fx.pitch = pitch, fx.roll = roll;
+                if (fx.handle == h) fx.pitch = pitch, fx.roll = roll, fx.faceCamera = faceCamera;
         if (h && app.frameEffects.size() < 16) app.frameEffects.push_back({(effect + 1) * (actor + 1), effect, h});
     }
     void stopFrameEffect(int effect, int actor) override {
@@ -3421,7 +3546,7 @@ struct ViewerHost : cr::EventHost {
 
 extern const float kWinMessagePanel[4];
 extern const float kWinSmallPanel[4];
-void drawWinPiece(App& app, const float* piece, float x, float y, float w, float h);
+void drawWinPiece(App& app, const float* piece, float x, float y, float w, float h, float alpha = 1);
 
 // Mixer: master scales the three channels; saved to settings.ini in the user's save folder
 void applyMix(App& app) {
@@ -6952,9 +7077,11 @@ void drawTexDisp(App& app) {
     const float a = float(t.alpha) / 255.0f, ox = r.uiX();
     r.setOrigin(0);
     const float k = float(tex.width) / 1024.0f; // the HD sheet's pixels (1024 wide)
-    if (t.g[5] == 480 && t.g[6] == 96)
-        r.drawQuadUV(tex, ox + 2.0f * float(t.g[1]), 288, 1024, 192, 2.0f * float(t.g[3]) * k, 2.0f * float(t.g[4]) * k, 1024 * k,
-                     192 * k, 1, 1, 1, a);
+    // tex2d_add with an _hd sheet: x, y, u, v, w, h all doubled, the screen's (2x + 32, 2y + 64) -
+    // the title strip (0, 112) 480 x 96 of row v is (32, 288) 960 x 192 of texels (0, 2v): centred
+    if (t.g[5] > 0 && t.g[6] > 0 && (t.g[5] < 480 || t.g[6] < 320))
+        r.drawQuadUV(tex, ox + 32 + 2.0f * float(t.g[1]), 64 + 2.0f * float(t.g[2]), 2.0f * float(t.g[5]), 2.0f * float(t.g[6]),
+                     2.0f * float(t.g[3]) * k, 2.0f * float(t.g[4]) * k, 2.0f * float(t.g[5]) * k, 2.0f * float(t.g[6]) * k, 1, 1, 1, a);
     else r.drawQuadUV(tex, ox, 0, 1024, 768, 0, 0, 1024 * k, 768 * k, 1, 1, 1, a);
     r.setOrigin(ox);
 }
@@ -7006,13 +7133,15 @@ void drawTutoTex(App& app) {
 void drawPadArt(App& app) {
     if (!app.padArt) return;
     if (!app.game.flag(0)) { app.padArt = false; return; }
-    if (!app.windowTex.id || app.renderer.phoneLayout()) return; // (2.2.0's Uty_DrawController_Put draws nothing)
+    if (!app.windowTex.id) return;
     cr::Renderer& r = app.renderer;
     cr::MenuPainter& m = app.menu;
     m.begin(r, app.windowTex, &app.font);
     r.setOrigin(r.uiX());
-    m.pieceTo((64 + 32) / 2.0f, (384 + 64) / 2.0f, 72, 72, 932, 792, 72, 72, 1); // menu units: logical / 2
-    m.pieceTo((88 + 32) / 2.0f, (408 + 64) / 2.0f, 48, 48, 932, 724, 48, 48, 1);
+    // Uty_DrawController_Put (2.2.0's too): tex2d_add(0x2a, 32, 192, (928, 796) 96 x 96) - the grey
+    // ring - and (48, 208, (944, 724) 64 x 64) - the black button; the screen's (96, 448) and (128, 480)
+    m.pieceTo(48, 224, 96, 96, 928, 796, 96, 96, 1); // menu units: logical / 2
+    m.pieceTo(64, 240, 64, 64, 944, 724, 64, 64, 1);
 }
 
 // Uty_DrawExclamationMark_Put: the screen dimmed (black 0xc0) and the "!" (468, 440, 44 x 48) at
@@ -10104,6 +10233,7 @@ void stepEvents(App& app) {
     stepTexDisp(app);
     stepVitaLogo(app);
     stepTutoTex(app);
+    stepMsgWin(app);
     if (app.fadeT < app.fadeFrames) ++app.fadeT;
     for (auto& d : app.npcDraws)
         if (d.fadeLeft > 0) {
@@ -10119,39 +10249,20 @@ void stepEvents(App& app) {
     puzzle::step(app);
     puzzle::stepCrystalCam(app);
     puzzle::stepBanner(app);
-    // Script moves (npc_autoctl_prc): straight lines, y on the floor unless mode 2
+    // Script moves (npc_autoctl_prc): straight lines, y on the floor unless mode 2. (The original's
+    // frame runs the script first, then Field_Main's steps: a move, scale, scroll or camera slide a
+    // script starts takes its first step on that same frame - the starters step once themselves)
     for (size_t i = 0; i < app.moves.size();) {
-        App::Move& m = app.moves[i];
-        ++m.t;
-        const float t = float(m.t) / float(m.frames);
-        const cr::Vec3 p{m.from.x + (m.to.x - m.from.x) * t, m.from.y + (m.to.y - m.from.y) * t,
-                         m.from.z + (m.to.z - m.from.z) * t};
-        const float yaw = m.yawFrom + (m.yawTo - m.yawFrom) * t;
-        setActor(app, m.npc, p, m.turn ? &yaw : nullptr, m.mode == 2);
-        if (m.t >= m.frames) app.moves.erase(app.moves.begin() + long(i));
+        if (stepMove(app, app.moves[i])) app.moves.erase(app.moves.begin() + long(i));
         else ++i;
     }
     for (size_t i = 0; i < app.rescales.size();) { // (npc_autoctl_prc mode 3: the scale in a straight line)
-        App::Rescale& r = app.rescales[i];
-        ++r.t;
-        const float t = float(r.t) / float(r.frames);
-        if (cr::FieldNpc* n = findNpc(app, r.npc)) {
-            for (int k = 0; k < 3; ++k) n->axes[k] = r.from[k] + (r.to[k] - r.from[k]) * t;
-            for (auto& d : app.npcDraws)
-                if (d.id == r.npc) d.world = npcWorld(*n);
-        }
-        if (r.t >= r.frames) app.rescales.erase(app.rescales.begin() + long(i));
+        if (stepRescale(app, app.rescales[i])) app.rescales.erase(app.rescales.begin() + long(i));
         else ++i;
     }
     stepFieldScroll(app);
     stepSceneEffects(app);
-    if (app.cam.t < app.cam.frames) { // camera moves are straight lines
-        App::ScriptCam& c = app.cam;
-        ++c.t;
-        const float t = float(c.t) / float(c.frames);
-        c.eye = c.eyeFrom + (c.eyeTo - c.eyeFrom) * t;
-        c.target = c.tgtFrom + (c.tgtTo - c.tgtFrom) * t;
-    }
+    stepScriptCam(app);
     for (App::Portrait& p : app.portraits) // Tex2d slides and fades (tex2d_img_prc)
     {
         if (p.t < p.frames) {
@@ -10213,6 +10324,7 @@ void stepEvents(App& app) {
     }
     if (more) return;
     // Finished: report, and refresh what the script's flags changed (an opened box loses its lid)
+    app.messageSkip = false; // (__EvtAbort clears G+0x2d; a Return leaves it, but the scenes turn it back on before ending)
     trackerSceneEnd(app);
     const cr::EventResult& r = app.runner.result();
     if (!r.error.empty())
@@ -10906,6 +11018,11 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
     const float left = phone ? 32.0f : -r.uiX(), width = phone ? 960.0f : r.screenW();
     bool portraits = false;
     for (const App::Portrait& p : app.portraits) portraits = portraits || (p.tex.id && p.alpha > 0.5f);
+    // PrcWin / PutWin: the window fades in and out (its alpha); PutMsg draws the text, the name and
+    // the mark only while it is up (state 3) - a window never opened by a script draws as is
+    const int ws = app.msgWin.state;
+    const bool fading = ws == 1 || ws == 2 || ws == 4 || ws == 5, textOn = !fading;
+    const float wa = fading ? app.msgWin.alpha : 1.0f;
     if (!app.windowTex.id) { // no window art: a plain box
         app.dialogueHud.setTint(1, 1, 1);
         app.dialogueHud.drawAt(r, typedPage(page, app.textLimit), 60, H - 210, 2.0f, W - 120, 170);
@@ -10926,8 +11043,8 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         if (style & 0x80 || style & 0x210) { // no window: the text alone (0x10: outlined in black)
             outline = (style & 0x10) != 0;
         } else if (style & 0x20) { // a black band across the bottom (tex2d y 252..352), the name on its edge
-            r.fillRect(left, 2.0f * 252 + 64, width, 768 - (2.0f * 252 + 64), 0, 0, 0, 1);
-            if (!speaker.empty()) { // PutMsg: drawfont_l at tex2d (16, 236), just above the band
+            r.fillRect(left, 2.0f * 252 + 64, width, 768 - (2.0f * 252 + 64), 0, 0, 0, wa);
+            if (!speaker.empty() && textOn) { // PutMsg: drawfont_l at tex2d (16, 236), just above the band
                 const float nx = 2.0f * 16 + 32, ny = 2.0f * 236 + 64 - 11; // (the larger box's offset)
                 app.nameHud.setTint(0, 0, 0); // (an outline, so it reads over a bright scene too)
                 for (int k = 0; k < 4; ++k) app.nameHud.drawAt(r, {speaker}, nx + (k & 1 ? 2 : -2), ny + (k & 2 ? 2 : -2), kNameScale, 0, 0, 0.0f);
@@ -10935,7 +11052,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
                 app.nameHud.drawAt(r, {speaker}, nx, ny, kNameScale, 0, 0, 0.0f);
             }
         } else if (style & 8) { // a tutorial's band: dark, its edges soft (8 / 88 / 8 tex2d), the text further left
-            const float a = 0.75f, y1 = wy + 16, y2 = wy + 192;
+            const float a = 0.75f * wa, y1 = wy + 16, y2 = wy + 192;
             for (int k = 0; k < 8; ++k) { // the 2D path has no per-vertex colour: the edges in strips
                 const float t = (float(k) + 0.5f) / 8.0f;
                 r.fillRect(left, wy + 2.0f * float(k), width, 2.0f, 0, 0, 0, a * t);
@@ -10944,15 +11061,15 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
             r.fillRect(left, y1, width, y2 - y1, 0, 0, 0, a);
             if (app.language == 1) tx = 2.0f * 8 + 32;
         } else if (style & 0x40) { // the grey panel (960 x 192 at its rect)
-            drawWinPiece(app, kWinMessagePanel, 32, wy, 960, 192);
-            if (!speaker.empty()) {
+            drawWinPiece(app, kWinMessagePanel, 32, wy, 960, 192, wa);
+            if (!speaker.empty() && textOn) {
                 drawWinPiece(app, kWinSmallPanel, 32, wy - 36, 300, 40);
                 app.nameHud.setTint(1, 1, 1);
                 app.nameHud.drawAt(r, {speaker}, 62, wy - 34, 1.9f, 0, 0, 0.0f);
             }
         }
         const bool centreAll = (style & 0x10) != 0;
-        if (outline) {
+        if (outline && textOn) {
             app.dialogueHud.setTint(0, 0, 0);
             for (int k = 0; k < 8; ++k) {
                 static const float d[8][2] = {{-2, -2}, {0, -2}, {2, -2}, {-2, 0}, {2, 0}, {-2, 2}, {0, 2}, {2, 2}};
@@ -10961,16 +11078,13 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         }
         app.dialogueHud.setTint(1, 1, 1);
         ink();
-        drawMessageLines(app, page, tx, ty, kMsgScale, centreAll);
-        if (!pageNo.empty()) {
-            app.pageHud.setTint(1, 1, 1);
-            app.pageHud.drawAt(r, {pageNo}, right - 140, H - 48, 1.5f, 0, 0, 0.0f);
-        }
+        if (textOn) drawMessageLines(app, page, tx, ty, kMsgScale, centreAll);
+        (void)pageNo; // (PutMsg draws no page count)
         // PutMsg's "next" mark: tex2d x 452, at y 328 - beside a tutorial's band 84 below its
-        // top; none on the grey panel
+        // top; none on the grey panel - drawn steadily, no blink
         const float markY = style & 8 ? 2.0f * (rect[0] + 84) + 64 : H - 44;
-        if (next && !(style & 0x40) && (SDL_GetTicks() / 400) % 2 == 0) drawWinPiece(app, kWinNext, right - 76, markY, 46, 22);
-        if (app.runner.running()) drawWinPiece(app, kWinSkip, right - 66, top + 12, 50, 50);
+        if (next && textOn && !(style & 0x40)) drawWinPiece(app, kWinNext, right - 76, markY, 46, 22);
+        if (app.runner.running() && !app.messageSkip) drawWinPiece(app, kWinSkip, right - 66, top + 12, 50, 50);
         return;
     }
     (void)portraits;
@@ -10986,12 +11100,12 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         const float stripBottom = r.layoutTop() + cr::Renderer::kLogicalH / r.layoutScale();
         // Android's atlas needs its separate full-width strip and overlaid name streak even
         // when the selected layout is iPhone (including Auto), rather than Android.
-        if (!((app.androidWindow || r.androidScreen()) &&
+        if (!((app.androidWindow || r.androidScreen()) && !fading &&
               drawAndroidMessagePanel(app, (W - stripW) / 2, stripY, stripW, stripBottom - stripY,
                                       32, 2.0f * (pr[0] + 16) + 64))) {
-            drawWinPiece(app, kWinParchmentPhone, 32, 2.0f * (pr[0] + 16) + 64, 960, 256);
+            drawWinPiece(app, kWinParchmentPhone, 32, 2.0f * (pr[0] + 16) + 64, 960, 256, wa);
         }
-        if (!speaker.empty()) {
+        if (!speaker.empty() && textOn) {
             app.nameHud.setTint(1, 1, 1);
             app.nameHud.drawAt(r, {speaker}, 2.0f * 24 + 32, 2.0f * 206 + 64 - 25, kNameScale, 0, 0, 0.0f);
         }
@@ -11002,8 +11116,8 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         // y + 32) - the screen's bottom 288; PutMsg: the name at tex2d (24, 222), the lines at x 36
         // from y + text y + 18, the "next" mark at y 328
         const short* pr = kRect[app.msgLines == 1];
-        app.renderer.drawQuadUV(app.cutinTex, left, 2.0f * (pr[0] + 32 - 32) + 128, width, 288, 0, 112, 512, 144);
-        if (!speaker.empty()) {
+        app.renderer.drawQuadUV(app.cutinTex, left, 2.0f * (pr[0] + 32 - 32) + 128, width, 288, 0, 112, 512, 144, 1, 1, 1, wa);
+        if (!speaker.empty() && textOn) {
             app.nameHud.setTint(1, 1, 1);
             app.nameHud.drawAt(r, {speaker}, 2.0f * 24 + 32, 2.0f * 222 + 64 - 25, kNameScale, 0, 0, 0.0f);
         }
@@ -11011,8 +11125,8 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         textX = 2.0f * 36 + 32;
         textY = 2.0f * (pr[0] + pr[1] + 18) + 64;
     } else if (true) { // the parchment (style 2, and the default)
-        drawWinPiece(app, kWinParchment, left, H - 280, width, 280);
-        if (!speaker.empty()) {
+        drawWinPiece(app, kWinParchment, left, H - 280, width, 280, wa);
+        if (!speaker.empty() && textOn) {
             app.nameHud.setTint(1, 1, 1);
             app.nameHud.drawAt(r, {speaker}, left + 44, H - 285, kNameScale, 0, 0, 0.0f); // on the streak (piece y 14..52)
         }
@@ -11029,17 +11143,13 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         textY = H - 140;
     }
     ink();
-    drawMessageLines(app, page, textX, textY, kMsgScale, false); // text and name from the screen's left
-    if (!pageNo.empty()) {
-        app.pageHud.setTint(0.12f, 0.10f, 0.08f);
-        app.pageHud.drawAt(r, {pageNo}, right - 140, H - 48, 1.5f, 0, 0, 0.0f);
-    }
-    if (next && (SDL_GetTicks() / 400) % 2 == 0) drawWinPiece(app, kWinNext, right - 76, H - 44, 46, 22);
-    if (app.runner.running()) drawWinPiece(app, kWinSkip, right - 66, top + 12, 50, 50); // a scene is playing
+    if (textOn) drawMessageLines(app, page, textX, textY, kMsgScale, false); // text and name from the screen's left
+    if (next && textOn) drawWinPiece(app, kWinNext, right - 76, H - 44, 46, 22); // (steady: PutMsg doesn't blink it)
+    if (app.runner.running() && !app.messageSkip) drawWinPiece(app, kWinSkip, right - 66, top + 12, 50, 50); // a scene is playing
 }
 
-void drawWinPiece(App& app, const float* piece, float x, float y, float w, float h) {
-    app.renderer.drawQuadUV(app.windowTex, x, y, w, h, piece[0], piece[1], piece[2], piece[3]);
+void drawWinPiece(App& app, const float* piece, float x, float y, float w, float h, float alpha) {
+    app.renderer.drawQuadUV(app.windowTex, x, y, w, h, piece[0], piece[1], piece[2], piece[3], 1, 1, 1, alpha);
 }
 
 // ---- Battles (btl_main) ----
@@ -11481,7 +11591,9 @@ void drawEffects(App& app, const std::vector<Effect>& list, const cr::Mat4& vp, 
             }
         }
         // scaled, turned (Euler XYZ, mdl_put: R = Rz Ry Rx), at its point
-        const float yaw = eye && target ? std::atan2(eye->x - target->x, eye->z - target->z) : e.yaw;
+        // (a battle's effects all face the camera; a field's only those FrmPlayEff flagged)
+        const bool face = eye && target && (&list == &app.battle.effects || e.faceCamera);
+        const float yaw = face ? std::atan2(eye->x - target->x, eye->z - target->z) : e.yaw;
         const float cx = std::cos(e.pitch), sx = std::sin(e.pitch), cy = std::cos(yaw), sy = std::sin(yaw);
         const float cz = std::cos(e.roll), sz = std::sin(e.roll), k = e.scale;
         cr::Mat4 world;
@@ -11700,7 +11812,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     app.runner.setGate(battletalk::kFlag); // PrcEvnt in battle mode
     // CRView::prc: SetFade(white, 255, 255) as the field goes; btl_main 200: SetFade(white, 255, 0,
     // 1000 ms) - the battle comes in out of white over its opening (whatever the field's fade was)
-    app.fadeGrey = 1, app.fadeFrom = 1, app.fadeTo = 0, app.fadeFrames = 30, app.fadeT = 0;
+    app.fadeGrey = 1, app.fadeFrom = 1, app.fadeTo = 0, app.fadeFrames = 20, app.fadeT = 0; // (btl_main 200: SetFade(white, 255, 0, 1000 ms))
     b.frames = 0;
     b.clock = 0;
     b.formation = std::max(0, app.battleData.formation(ids));
@@ -11756,7 +11868,10 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     rules.group = start.group;
     rules.story = &app.game;
     rules.scenario = std::clamp(app.game.scenario, 0, cr::kScenarios - 1);
-    rules.escapeBlocked = flags != 0;
+    // __menub_mainPrc: Escape is dimmed and refused while a script runs (G+0x364 bit 0 - an
+    // event battle), group 0x298 apart; the opcode's flags byte (0x8a53e) is never read
+    rules.escapeBlocked = app.runner.running() && start.group != 0x298;
+    (void)flags;
     rules.setupParty(app.game, app.itemTable, route);
     // btl_enemy_init_lv: the scenario's level byte (the band the World Select chose)
     const int band = app.game.bands[size_t(std::clamp(app.game.scenario, 0, cr::kScenarios - 1))];
@@ -11801,10 +11916,13 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
         b.shownMp[i] = rules.f[size_t(i)].mp;
     }
     setBattleCamera(app, std::max(0, b.formation - 2)); // btl_main 200: the opening turn
+    // btl_main 0: var 58 names the battle's track (_BGM_FILE index); 38 and over - a random
+    // battle's 999 - play track 31 (bgm43); 997 leaves the field's music playing
     const auto v58 = app.game.vars.find(58);
-    const int track = v58 != app.game.vars.end() && v58->second >= 0 && v58->second <= 28 ? v58->second : 8;
+    const int want = v58 != app.game.vars.end() ? v58->second : 999;
+    const int track = want == 997 ? -1 : want >= 0 && want < cr::kBgmTracks ? want : 31;
     b.fieldTrack = app.music.current();
-    playBgm(app, uint32_t(track));
+    if (track >= 0) playBgm(app, uint32_t(track));
     app.dialogue.clear();
     ++app.battlesFought;
     if (SDL_getenv("CR_BATTLE_DEBUG"))
@@ -11874,7 +11992,18 @@ void endBattle(App& app, bool won) {
     app.fieldEffects.clear();
     b.actors.clear();
     b.active = false;
-    playBgm(app, b.fieldTrack >= 0 ? uint32_t(b.fieldTrack) : 1u << 29);
+    app.renderer.destroy(b.gameOver);
+    b.lostTap = false;
+    { // fldread_prc's state -1 (the field read back): var 60 says what plays - 998 nothing (the
+      // battle's music faded out at its end), 997 nothing new either (its music was never
+      // faded: it plays on), under 100 that track, else the field's last
+        const auto v60 = app.game.vars.find(60);
+        const int after = v60 != app.game.vars.end() ? v60->second : 999;
+        if (after == 998) playBgm(app, 1u << 29);
+        else if (after == 997) {}
+        else if (after >= 0 && after < 100) playBgm(app, uint32_t(after));
+        else playBgm(app, b.fieldTrack >= 0 ? uint32_t(b.fieldTrack) : 1u << 29);
+    }
     cr::EncounterTable table;
     const bool have = cr::encounterTable(app.events, app.mapNumber, table);
     app.encounters.enterMap(have ? &table : nullptr);
@@ -13647,8 +13776,17 @@ void stepBattle(App& app) {
         break;
     case App::Battle::Results: stepResults(app); break;
     case App::Battle::Lost: // 0x513, then (9000) btl_lose: a story battle starts over from the title,
-        // any other goes back to the pair's Ark (drawFrame does either, between frames)
-        if (b.phaseFrames >= 120) b.exit = b.eventBattle ? 2 : 3;
+        // any other goes back to the pair's Ark (drawFrame does either, between frames). An event
+        // battle's (0x4b0): gameover.mct fades in over 20 frames and a tap after 40 ends it
+        if (b.eventBattle) {
+            if (b.phaseFrames == 1 && !b.gameOver.id) {
+                cr::Image img;
+                if (loadImage(app, app.renderer.phoneLayout() ? "gameover.mct" : "gameover_hd.mct", img) || loadImage(app, "gameover.mct", img))
+                    b.gameOver = app.renderer.upload(img);
+            }
+            if (b.phaseFrames >= 40 && b.lostTap) b.exit = 2;
+            b.lostTap = false;
+        } else if (b.phaseFrames >= 120) b.exit = 3;
         break;
     case App::Battle::StoryEnd: // 9000 -> 0x238b: twelve frames, then back to the field (an event battle's script on)
         if (b.phaseFrames >= 12) b.exit = 1;
@@ -13979,6 +14117,13 @@ void drawBattleHud(App& app, float W, float H) {
         r.setOrigin(r.uiX());
         return;
     }
+    if (b.phase == App::Battle::Lost && b.eventBattle && b.gameOver.id) { // the game over picture: tex2d (112, 32), 20 frames in
+        r.setOrigin(r.uiX());
+        const float ga = std::min(1.0f, float(b.phaseFrames) / 20.0f);
+        const float gw = float(b.gameOver.width), gh = float(b.gameOver.height);
+        r.drawQuadUV(b.gameOver, 2.0f * 112 + 32, 2.0f * 32 + 64, gw, gh, 0, 0, gw, gh, 1, 1, 1, ga);
+        return;
+    }
     const float a = std::min(1.0f, float(b.frames) / 10.0f);
     // The iPhone layout (2.2.0's __menub_mainPut): the badge and the rows into its screen's
     // corners - (+16, +32) / (+16, -32) - the banner 32 lower, the menus where they are
@@ -14171,6 +14316,10 @@ void battleKey(App& app, SDL_Keycode key) {
         if (enter || back) b.wonTap = true;
         return;
     }
+    if (b.phase == App::Battle::Lost) {
+        if (enter || back) b.lostTap = true;
+        return;
+    }
     if (b.phase != App::Battle::Command) return;
     switch (b.menu) {
     case App::Battle::Top:
@@ -14227,6 +14376,10 @@ void battleClick(App& app, float px, float py) {
     }
     if (b.phase == App::Battle::Won) { // (anywhere ends the victory's hold)
         b.wonTap = true;
+        return;
+    }
+    if (b.phase == App::Battle::Lost) { // (anywhere: an event battle's game over goes on a tap)
+        b.lostTap = true;
         return;
     }
     if (b.phase != App::Battle::Command) return;
@@ -14323,8 +14476,12 @@ cr::Mat4 scriptCameraView(const App& app, const cr::Vec3& eye, const cr::Vec3& t
     const cr::StageCamera& sc = app.stageCam;
     const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
     const float w = fieldViewW(app), h = fieldViewH(app);
-    const float qx = std::trunc(app.fieldQuake.off[0]), qy = std::trunc(app.fieldQuake.off[1]);
-    const float rx = app.renderer.uiX() + (cr::Renderer::kLogicalW - w) / 2 + qx, ry = (H - h) / 2 + qy;
+    // (setCamera3D casts the corner's sum to int: a corner left of the screen moves a pixel on a
+    // positive fraction - the shake's whole pixels taken against the corner, the layout's own
+    // centring left as it is)
+    const float cx0 = (cr::Renderer::kLogicalW - w) / 2, cy0 = (H - h) / 2;
+    const float rx = app.renderer.uiX() + cx0 + (std::trunc(cx0 + app.fieldQuake.off[0]) - std::trunc(cx0));
+    const float ry = cy0 + (std::trunc(cy0 + app.fieldQuake.off[1]) - std::trunc(cy0));
     cr::Mat4 toScreen;
     toScreen.m[0] = w / SW, toScreen.m[5] = h / H;
     toScreen.m[12] = (2 * rx + w) / SW - 1, toScreen.m[13] = 1 - (2 * ry + h) / H;
@@ -14378,8 +14535,9 @@ void stepMenuMask(App& app) {
     App::MenuMask& m = app.menuMask;
     bool atOnce = false;
     const int want = menuMaskWanted(app, atOnce);
-    if (want >= 0 && (m.want < 0 || (atOnce && want != m.type))) m.from = 0, m.to = 0xa0, m.t = 0, m.ms = atOnce ? 1 : 400;
-    else if (want < 0 && m.want >= 0) m.from = menuMaskAlpha(app), m.to = 0, m.t = 0, m.ms = 400;
+    if (want >= 0 && (m.want < 0 || (atOnce && want != m.type)))
+        m.tuto = app.tutoTex.on, m.from = 0, m.to = 0xa0, m.t = 0, m.ms = atOnce ? 1 : m.tuto ? 100 : 400;
+    else if (want < 0 && m.want >= 0) m.from = menuMaskAlpha(app), m.to = 0, m.t = 0, m.ms = m.tuto ? 100 : 400;
     else m.t = std::min(m.t + 50, m.ms);
     if (want >= 0) m.type = want;
     m.want = want;
@@ -14480,7 +14638,9 @@ void drawFrame(App& app, bool present = true) {
         // screen's height (wider screens get bars at the sides) or its width (top and bottom cut).
         r.fillRect(0, 0, SW, H, 0, 0, 0, 1);
         // A room without a painting is fully 3D: there a script's free camera films the whole screen
-        const bool scriptCam = app.cam.free && app.cam.set && !app.background.id;
+        // (CameraPlayer leaves the live eye / target as the last shot set them, until the map is
+        // loaded again - FieldCamera keeps them; only fldread_prc copies the stage record back)
+        const bool scriptCam = app.cam.set && !app.background.id;
         cr::Vec3 eye, tgt;
         cr::Mat4 mvp;
         const bool have3D = app.haveStageCam || scriptCam;
@@ -14518,9 +14678,9 @@ void drawFrame(App& app, bool present = true) {
             vy = (H - vh) / 2;
         }
         // FieldCamera::setCameraBack / setCamera3D: the viewport moves by the quake's offset
-        // (whole pixels: it's set in ints)
-        const float qx = std::trunc(app.fieldQuake.off[0]), qy = std::trunc(app.fieldQuake.off[1]);
-        vx += qx, vy += qy;
+        // (whole pixels: the corner's sum is cast to int - toward zero, so a corner left of the
+        // screen moves a pixel on any positive fraction, as the original's 1-pixel tremors do)
+        vx += std::trunc(vx + app.fieldQuake.off[0]) - std::trunc(vx), vy += std::trunc(vy + app.fieldQuake.off[1]) - std::trunc(vy);
         // Layers are drawn at native pixel size, centred in the stage view (viewW x viewH:
         // 1024 for most fields, 512 for d0108/d0117/d0208/d0219). 512x1024 backgrounds such
         // as d0501/d0507/d0511 occupy the middle strip x 256..768
@@ -14535,7 +14695,10 @@ void drawFrame(App& app, bool present = true) {
         if (app.background.id) drawLayer(app.background);
         r.setOrigin(0);
         if (have3D) {
-            if (scriptCam) r.begin3DRect(app.haveStageCam && app.stageCam.viewWidth > 0 ? 0 : qx, app.haveStageCam && app.stageCam.viewWidth > 0 ? 0 : qy, SW, H);
+            if (scriptCam) {
+                const bool whole = app.haveStageCam && app.stageCam.viewWidth > 0; // (scriptCameraView places the view, quake and all)
+                r.begin3DRect(whole ? 0 : std::trunc(app.fieldQuake.off[0]), whole ? 0 : std::trunc(app.fieldQuake.off[1]), SW, H);
+            }
             else r.begin3DRect(vx, vy, vw, vh);
             // Field props are occlusion geometry: all their materials are untextured / solid-alpha
             // and black-diffuse, placed over pillars and door frames of the painting. They only
@@ -14546,7 +14709,7 @@ void drawFrame(App& app, bool present = true) {
             drawNpcs(app, mvp);
             if (app.havePlayer && playerShown(app)) drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app)), modelDrawn(app);
             if (app.puzzle.stage >= 0) puzzle::drawFx(app, mvp);
-            drawEffects(app, app.fieldEffects, mvp, nullptr, nullptr);
+            drawEffects(app, app.fieldEffects, mvp, &eye, &tgt); // (the camera: for FrmPlayEff's camera-facing effects)
             if (app.showCollision && app.collision.vao) {
                 cr::Material colMat; // translucent so the painted floor shows through
                 colMat.culling = 0;
@@ -14605,7 +14768,7 @@ void drawFrame(App& app, bool present = true) {
         if (app.mode == Mode::Maps && app.havePlayer && playerShown(app))
             drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app)), modelDrawn(app);
         if (app.mode == Mode::Maps && app.puzzle.stage >= 0) puzzle::drawFx(app, mvp);
-        if (app.mode == Mode::Maps) drawEffects(app, app.fieldEffects, mvp, nullptr, nullptr);
+        if (app.mode == Mode::Maps) drawEffects(app, app.fieldEffects, mvp, &eye, &c);
         if (app.mode == Mode::Maps && app.collision.vao && app.showCollision) {
             cr::Material colMat;          // opaque, untextured, double-sided, depth test + write
             colMat.culling = 0;
@@ -14634,6 +14797,7 @@ void drawFrame(App& app, bool present = true) {
         drawPrompt(app, prompt.vp, prompt.x, prompt.y, prompt.w, prompt.h);
     }
     if (app.mode == Mode::Maps) {
+        if (app.fieldHidden && !app.booting) r.fillRect(0, 0, SW, H, 0, 0, 0, 1); // Screen's toggle: the field not drawn (drawBack / mdl_put skipped)
         const float a = screenFadeAlpha(app); // Screen: fades to / from a grey level
         if (a > 0.001f) r.fillRect(0, 0, SW, H, app.fadeGrey, app.fadeGrey, app.fadeGrey, a);
         for (app.menuMask.clock += dt; app.menuMask.clock >= 1.0f / kFramesPerSecond; app.menuMask.clock -= 1.0f / kFramesPerSecond)
@@ -14763,10 +14927,11 @@ void drawFrame(App& app, bool present = true) {
         const cr::MessageInfo* info = pageInfo(app);
         if (app.typeOn) app.textLimit = app.dialogueTyped;
         app.msgColour = info ? info->colour : -1;
-        drawMessageBox(app, app.dialogue[pi], speaker, pageTyped(app) && !(info && info->closeAfter >= 0),
-                       app.dialogue.size() > 1 ? std::to_string(app.dialoguePage + 1) + "/" + std::to_string(app.dialogue.size())
-                                               : std::string());
+        drawMessageBox(app, app.dialogue[pi], speaker, pageTyped(app) && !(info && info->closeAfter >= 0), std::string());
         app.textLimit = 1 << 30;
+    } else if (app.mode == Mode::Maps && !app.heldPage && app.choiceFlag < 0 &&
+               (app.msgWin.state == 1 || app.msgWin.state == 2 || app.msgWin.state == 4 || app.msgWin.state == 5)) {
+        drawMessageBox(app, {}, "", false, ""); // the window alone, fading in before its text or out after it
     }
     // The menus over everything else (Options draws above them)
     if (app.charSelectOpen) {
@@ -16695,6 +16860,7 @@ int storyLossSelfTest(App& app) {
             }
             if (f % 45 == 44 && !app.dialogue.empty()) advanceDialogue(app);
             lostShown |= b.phase == App::Battle::Lost;
+            if (b.phase == App::Battle::Lost && b.phaseFrames >= 40) b.lostTap = true; // (the game over waits for a tap)
             if (b.exit) { exit = b.exit, b.exit = 0; break; }
             stepBattle(app);
         }
@@ -18534,8 +18700,8 @@ int runSelfTest(App& app) {
         host.freeCamera(true);
         const float startY = app.scroll.offY;
         const float pan[3] = {0, -100, 0};
-        host.panCamera(pan, 10);
-        for (int f = 0; f < 5; ++f) stepFieldScroll(app);
+        host.panCamera(pan, 10); // (its first step is the pan's own frame: ScrollAutoCtl runs after PrcEvnt)
+        for (int f = 0; f < 4; ++f) stepFieldScroll(app);
         const float halfway = app.scroll.offY;
         for (int f = 0; f < 10; ++f) stepFieldScroll(app);
         const float wantY = std::clamp(startY + 200, -(fieldViewH(app) - H) / 2, (fieldViewH(app) - H) / 2);
@@ -18699,9 +18865,12 @@ int runSelfTest(App& app) {
         const bool music = app.vitaBgm.read("cr_m01.at9", f) && cr::parseAt9(f, track) && track.loopStart > 0 &&
                            track.loopEnd > track.loopStart && cr::decodeAt9(f, pcm, rate, ch) && (frames = int64_t(pcm.size()) / std::max(ch, 1)) == track.samples;
         problems += !music;
-        std::printf("vita assets: %d languages, voices %s (%d / 2 clips decoded), track 1 %s (%lld frames, loop %.3f..%.3f s); %d problems\n",
+        // Omega's own tracks are the Vita's cr2_mNN.at9: the title's (Bgm 29 = bgm41) must resolve to one
+        const std::string titleFile = cr::MusicPlayer::vitaTrackFile(29, [&app](const std::string& n, std::vector<uint8_t>& out) { return app.vitaBgm.read(n, out); }, nullptr);
+        problems += titleFile != "cr2_m41.at9";
+        std::printf("vita assets: %d languages, voices %s (%d / 2 clips decoded), track 1 %s (%lld frames, loop %.3f..%.3f s), the title's track 29 %s; %d problems\n",
                     languages, voices ? "yes" : "NO", decoded, music ? "decoded" : "NOT decoded", (long long)frames,
-                    double(track.loopStart) / 48000, double(track.loopEnd) / 48000, problems);
+                    double(track.loopStart) / 48000, double(track.loopEnd) / 48000, titleFile.empty() ? "NOT found" : titleFile.c_str(), problems);
         mapErrors += problems;
     }
     { // The scripts' small natives: 2018 the pair's HP / MP, 2024 / 2026 the music by var, 2025 the shop
@@ -19798,6 +19967,8 @@ void bootTitle(App& app) {
     app.entryArea = 0;
     app.pendingEntry = App::Entry::None;
     app.musicArea = -1;
+    app.fieldHidden = false; // (the boot script toggles it on at its start and off before the warp out)
+    app.msgWin = App::MsgWin();
     playBgm(app, 1u << 29); // the script starts the title music
     std::string err;
     if (!app.events.load(app.dataDir, 0, &err)) {
@@ -22199,7 +22370,10 @@ void SDL_AppQuit(void* state, SDL_AppResult) {
     if (!app) return;
     app->clock.stop();
     app->inputCancel.stop();
-    writeResume(*app); // the Progress Tracker: left on the field, resumed from the title next time
+    // (the Progress Tracker: nothing new is written here - the original's ContData_Save, on
+    // leaving, writes only the snapshot a scene's end or an encounter took (_ContData_Save_set's
+    // pending mark 0x3f6), never the live state, so a game left mid-cutscene resumes at the last
+    // scene's end; ours writes those snapshots as they are taken, the Vita's way)
     if (app->rendererReady) {
         app->renderer.destroy(app->currentTex);
         unloadModel(*app);

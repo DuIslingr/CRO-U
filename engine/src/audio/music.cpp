@@ -275,6 +275,16 @@ bool MusicPlayer::init(const std::string& dataDir) {
     return impl_->device != 0;
 }
 
+std::string MusicPlayer::vitaTrackFile(int track, const VitaReader& read, std::vector<uint8_t>* out) {
+    if (track < 0 || track >= kBgmTracks || !read) return {};
+    std::vector<uint8_t> local;
+    for (const char* prefix : {"cr_m", "cr2_m"}) {
+        const std::string name = std::string(prefix) + (kBgmFile[track] + 3) + ".at9";
+        if (read(name, out ? *out : local)) return name;
+    }
+    return {};
+}
+
 void MusicPlayer::command(uint32_t v) {
     if (!impl_ || !impl_->device) return;
     auto stopNow = [&] {
@@ -290,11 +300,11 @@ void MusicPlayer::command(uint32_t v) {
     if (t >= kBgmTracks || (t == track_ && impl_->stream)) return;
     std::string err;
 #ifdef CR_HAVE_ATRAC9
-    { // the Vita's cr_mNN.at9 for bgmNN
+    { // the Vita's cr_mNN.at9 for bgmNN - Omega's own tracks (bgm41..49, the title's among them) are its cr2_mNN.at9
         std::vector<uint8_t> file;
         At9File at9;
-        const std::string name = std::string("cr_m") + (kBgmFile[t] + 3) + ".at9";
-        if (vita_ && vita_(name, file) && parseAt9(file, at9, &err)) {
+        const std::string name = vitaTrackFile(t, [&](const std::string& n, std::vector<uint8_t>& out) { return vita_ && vita_(n, out); }, &file);
+        if (!name.empty() && parseAt9(file, at9, &err)) {
             stopNow();
             Impl& m = *impl_;
             m.at9Bytes = std::move(file);

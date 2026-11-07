@@ -88,12 +88,18 @@ public:
     // one-line place)
     virtual void openWindow(int /*style*/, int /*lines*/) {}
     virtual void closeWindow() {}
+    virtual bool windowClosed() { return true; }          // Close waits for the window's fade-out
+    virtual void toggleFieldHidden() {}                   // Screen with frames < 0: the field's drawing on / off
     virtual bool messageOpen() { return false; }         // the script waits while true
     virtual bool tapped() { return false; }              // action key pressed this frame (touch_up_chk)
     virtual void showItemWindow(int /*item*/) {}         // Uty_GetItem
     // Anim npc, slot, a, b (mdl_set_act_motion_loop): play the action in `slot`, then loop frames
     // a..b; a = -1 plays it once and holds the end, a = b = 0 loops it whole
     virtual void playAnim(int /*npc*/, int /*slot*/, int /*loopFrom*/ = 0, int /*loopTo*/ = 0) {}
+    // Anim2 npc, slot, a, b, start, blend (mdl_set_act_motion_loop_frm): as Anim, but always started
+    // over from frame `start`, cross-faded from the pose before over `blend` frames (0: cut) - the
+    // same slot too (Anim leaves a slot already playing as it is)
+    virtual void playAnim2(int npc, int slot, int loopFrom, int loopTo, int /*start*/, int /*blend*/) { playAnim(npc, slot, loopFrom, loopTo); }
     // LoadAct npc, action, slot (read_act_set): kActionFile[action] into the actor's slot; UnloadAct frees it
     virtual void loadAction(int /*npc*/, int /*action*/, int /*slot*/) {}
     virtual void unloadAction(int /*npc*/, int /*slot*/) {}
@@ -113,7 +119,7 @@ public:
     // Cutscene staging (EvtFrmSetc / FrmSetc2 / FrmAdjc / FrmAdjc2 / SetDir); npc 0 is the party
     // leader. Positions are world units; the y is snapped to the floor unless `mode` is 2.
     // Facing: Yaw turns to `yawDegrees`, Keep leaves it, Travel faces the way it moves.
-    enum class Facing { Yaw, Keep, Travel };
+    enum class Facing { Yaw, Keep, Travel, Snap }; // Yaw: turned to it over the move; Snap: set to it as the move starts
     virtual void placeNpc(int /*npc*/, const float* /*pos*/, float /*yawDegrees*/, Facing /*facing*/) {}
     // Moves in a straight line over `frames` (npc_autoctl_set_fream); mode 0 position, 1 position
     // and turn, 2 position including y. Wait 0xFFFD waits for it (animBusy).
