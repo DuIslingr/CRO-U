@@ -37,6 +37,22 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   (`Chg_MsgSkip`) now hides and disables the skip corner, the fade-in is the original's 20
   frames, a tutorial's dimming fades over 100 ms, and a lost scene battle shows `gameover` and
   waits for a tap before the title.
+- **Battles, every one:** a first strike or an ambush is announced with the original's text from
+  the first frame (there was no "Ambush!" at all); a boss's intro lasts 60 frames with its camera;
+  the battle's music fades for ten frames before the victory; every battle ends with the original's
+  fade to black and its music fading, and the field comes back out of black (the Ark came back out
+  of white after a loss); an ordinary defeat waits for a tap, as the original, instead of ending by
+  itself.
+- **On the field:** the view glides after the player (30 % of the way each frame, as
+  `setScrollPlayer(0.3)`) instead of being bolted to him; a quick tap anywhere examines or talks
+  (the original's CheckTap); standing by something, the leader turns to face it; the "!" bubble is
+  the original's piece over the object's top; the puzzle rooms' player radius is 4; turned trigger
+  boxes are tested turned.
+- **The Ark:** a scene's "Save data?" (`Util 6`) leads to the title whether you save or not, asking
+  "return to the title without saving?" on a No, as the original - it no longer dropped you back on
+  the field; the shop sells the genes' stock and the OMU items one at a time, gives Sexy Pose's
+  discount for the pair actually fighting, and plays the original's sounds for a sale's No and for
+  equipping.
 - **Resuming:** leaving the game during a cutscene no longer makes the title's "resume from last
   saved point?" put you on that cutscene's painting with nothing running. The resume point is only
   what a scene's end (or an encounter) saved, as the original's is - quitting itself saves nothing.
