@@ -43,6 +43,13 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   fade to black and its music fading, and the field comes back out of black (the Ark came back out
   of white after a loss); an ordinary defeat waits for a tap, as the original, instead of ending by
   itself.
+- **In a battle:** a round ends with the original's thirty frames on the formation's camera
+  before the commands; an attack lets its actors come to rest and waits ten frames, a gene or
+  item forty after its hit, a cancelled command sixty on its user; Defend takes the guard pose as
+  it is chosen; the top menu's sound (0x22) plays; a party-wide target takes the original's camera;
+  Omega's Down and Ward status icons use their own sprites; "Critical!" and its kind slide in
+  sideways; the Camp's item and equip sounds are the original's, and a No to using an item goes
+  back to the list.
 - **On the field:** the view glides after the player (30 % of the way each frame, as
   `setScrollPlayer(0.3)`) instead of being bolted to him; a quick tap anywhere examines or talks
   (the original's CheckTap); standing by something, the leader turns to face it; the "!" bubble is

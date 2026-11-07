@@ -602,12 +602,13 @@ struct App {
         int requestFlags = 0;
         // The rules (game/battle_rules.hpp) and the scene around them (btl_main's states)
         cr::BattleRules rules;
-        enum Phase { Intro, Command, Acting, WinTalk, BossDown, SetPiece, Won, Results, Lost, Fled, StoryEnd } phase = Intro;
+        enum Phase { Intro, Command, Acting, WinTalk, BossDown, SetPiece, Won, Results, Lost, Fled, StoryEnd, RoundEnd } phase = Intro;
         int phaseFrames = 0;
         bool wonTap = false; // a tap in the victory's hold (state 1099: 140 frames or pad_chk_trg_up)
         bool lostTap = false;    // a tap on the defeat (0x513: at once, or after 40 frames of an event battle's game over picture)
         bool ending = false;     // btl_main 9000 -> 0x238b: the black mask over 10 frames, the music fading, 12 frames, then the way out
         int endFrames = 0, pendingExit = 0;
+        int idleSince = -1;      // the action's frame its actors came to rest (btlact 1999: ten frames more, then the next)
         cr::Texture gameOver;    // btl_main 0x4b0: gameover.mct faded in over 20 frames for a lost event battle
         enum Menu { Top, Commands, Targets, Items, EscapeAsk, Genes } menu = Top;
         int cursor = 0;
@@ -5665,7 +5666,7 @@ constexpr float kRowX = 192, kRowY = 92, kRowH = 48;
 constexpr int kRows = 4;
 constexpr float kBackX = 192, kBackY = 344;
 constexpr float kPhoneBackY = 286; // 2.2.0's (__MuCamp_NextProc's box (192, 286, 256, 34)); it has no Save plate
-constexpr uint32_t kSoundEquip = 21, kSoundUse = 22;
+constexpr uint32_t kSoundEquip = 0x91 + 21, kSoundUse = 0x91 + 20; // __ChangeEquipItem's 0xa6, an item used (CampMainPrc 7)'s 0xa5
 } // namespace campui
 
 bool keyHints(const App& app) { return app.showHud && !app.renderer.phoneLayout(); }
@@ -6006,7 +6007,11 @@ void campChoose(App& app) {
             c.count = 1;
             c.confirm = 0;
         } else if (c.phase == App::Camp::Ask) {
-            if (c.confirm != 0) { campBack(app); return; }
+            if (c.confirm != 0) { // No: back to the list (CampMainPrc 7 -> 1), 0x93
+                menuSound(app, se::kChoose);
+                c.phase = App::Camp::List;
+                return;
+            }
             if (campUseItem(app, campCharacter(app, c.member), item, c.count)) menuSound(app, campui::kSoundUse);
             else menuSound(app, se::kBuzzer); // full already (the original's buzzer, effgo 4)
             c.phase = App::Camp::List;
@@ -11392,7 +11397,7 @@ int enemyCameraSlot(const App& app, int fighter) {
 
 void cameraForTarget(App& app, int target, bool group) {
     App::Battle& b = app.battle;
-    if (target < 2) setBattleCamera(app, b.rules.pair || group ? 30 : 28 + target);
+    if (target < 2) setBattleCamera(app, group ? 0x26 + (b.rules.pair ? 1 : 0) : b.rules.pair ? 30 : 28 + target); // (_btlord_make_select: a party-wide scope's 0x26 + pair)
     else if (group) setBattleCamera(app, b.formation + 0x26, 2);
     else {
         const int size = monsterSize(app, target);
@@ -12095,6 +12100,7 @@ void battleMenu(App& app, App::Battle::Menu menu) {
     b.pick = b.pickTop = 0;
     if (menu != App::Battle::Targets) setBanner(app, "");
     // the camera: the field of battle for the first menu, the member (or the pair) choosing
+    if (menu == App::Battle::Top) app.sound.play(0x22); // (__menub_mainPrc 1 -> 2: the top menu in place)
     if (menu == App::Battle::Top || menu == App::Battle::EscapeAsk) setBattleCamera(app, b.formation + 12);
     else if (menu == App::Battle::Commands) {
         setBattleCamera(app, b.rules.pair ? 30 : 28 + b.member);
@@ -12265,8 +12271,9 @@ void battleChooseCommand(App& app, int i) {
         b.pick = b.pickTop = 0;
         break;
     }
-    case 3: // Defend
+    case 3: // Defend: the guard pose at once (__menub_mainPrc: the loop motion starts as it is chosen)
         c.kind = cr::kCmdDefend;
+        if (App::Battle::Actor* a = battleActor(app, b.member)) playSlot(app, *a, btlui::kSlotGuard);
         battletalk::tutorial(app, 0xfa9); // the first time: what it does
         battleCommandDone(app);
         break;
@@ -13044,9 +13051,13 @@ void startTurn(App& app) {
     b.hitsShown = false;
     b.hitFrame = 20;
     b.bounceAt = -1;
-    if (t.cancelled) { // btlque_make_que: its message for 40 frames in place of the action
+    b.idleSince = -1;
+    if (t.cancelled) { // btlact_none: its message for 40 frames in place of the action, 60 frames on the
+        // user's camera (0x53 + member, a pair's 0x55, a monster's 0x54 + its slot)
         setBanner(app, sysText(app, t.message), 40);
-        b.hitFrame = 0;
+        b.hitFrame = 0; // (sixty frames, the Acting step's rule for a cancelled one)
+        const int u = t.actors[0];
+        if (u >= 0) setBattleCamera(app, u < 2 ? (b.rules.pair ? 0x55 : 0x53 + u) : 0x54 + (u - 2));
         return;
     }
     if (t.kind == cr::kCmdEscape) {
@@ -13609,12 +13620,12 @@ void endRound(App& app) {
             b.phaseFrames = 0;
             b.setPiece = piece ? piece : 0x37a;
             b.setPieceStage = stage;
-        } else {
-            b.phase = App::Battle::Command;
+        } else { // btl_main 800 -> 0x352: thirty frames on the formation's camera, then the commands (400)
+            b.phase = App::Battle::RoundEnd;
             b.phaseFrames = 0;
             b.member = 0;
             b.commandSaid[0] = b.commandSaid[1] = false; // +0xafc / +0xafd
-            battleMenu(app, App::Battle::Top);
+            setBattleCamera(app, std::max(0, b.formation - 2));
         }
         if (b.start.group == 0x294 && app.game.scenario == 0) { // btl_main 800: group 0x294's rounds - the quake
             // dying away over 60 frames under a line, the rumble (0x11) fading over 40; the 10th held, looping
@@ -13805,10 +13816,16 @@ void stepBattle(App& app) {
             for (int k = 0; k < 2; ++k)
                 if (const App::Battle::Actor* u = b.turn.actors[k] >= 0 ? battleActor(app, b.turn.actors[k]) : nullptr)
                     busy |= u->then >= 0 && u->slot != btlui::kSlotHit;
+            // (the tail after the action: an attack's ten frames once its actors are back (btlact_attack
+            // 1999), a gene's or item's forty after its hit (btlact_gene / item 2000))
+            if (!busy && b.turnFrame >= b.hitFrame && b.idleSince < 0) b.idleSince = b.turnFrame;
+            const bool attackLike = b.turn.kind == cr::kCmdAttack || b.turn.cancelled;
             const bool over = b.turn.kind == cr::kCmdEscape ? b.turnFrame >= (b.turn.escaped ? 30 + 40 : 40)
                               : b.stageAction && b.stageEnd ? b.turnFrame >= std::max(b.stageEnd, b.hitFrame + 1)
                               : b.stageAction ? b.turnFrame >= b.hitFrame + b.stageWait // the staged ones' wait
-                                              : (!busy && b.turnFrame >= b.hitFrame + 24) || b.turnFrame > 400;
+                              : b.turn.cancelled ? b.turnFrame >= 60
+                              : attackLike ? (b.idleSince >= 0 && b.turnFrame >= b.idleSince + 10) || b.turnFrame > 400
+                                           : (!busy && b.turnFrame >= b.hitFrame + 40) || b.turnFrame > 400;
             if (over) {
                 b.stageAction = 0;
                 b.stageSkip = 0;
@@ -13831,6 +13848,13 @@ void stepBattle(App& app) {
                         if (u->slot != btlui::kSlotGuard) u->yaw = u->homeYaw;
                     }
             }
+        }
+        break;
+    case App::Battle::RoundEnd: // (800 -> 0x352: thirty frames, then the menu slides in)
+        if (b.phaseFrames >= 30) {
+            b.phase = App::Battle::Command;
+            b.phaseFrames = 0;
+            battleMenu(app, App::Battle::Top);
         }
         break;
     case App::Battle::Won: // (1000: ten frames of the music's fade; 0x3e9 / 1099: the victory held 140 frames or a tap)
@@ -14016,7 +14040,9 @@ void drawBattleStatus(cr::MenuPainter& m, const cr::Fighter& f, float x, float y
     float at = x + 20;
     for (int k = 0; k < cr::kStatusCount; ++k)
         if (f.status[k] > 0 && k != cr::kStatusUnused92) {
-            m.piece(at, y, float(140 + 20 * k), 924, 20, 20, a);
+            // menub_param_put: the sheet's row at 924, 20 a status - Omega's own Down (+0x96) at u 120 and Ward (+0x97) at 100
+            const float u = k == cr::kStatusDown ? 120.0f : k == cr::kStatusWard ? 100.0f : float(140 + 20 * k);
+            m.piece(at, y, u, 924, 20, 20, a);
             at += 20;
         }
 }
@@ -14228,14 +14254,14 @@ void drawBattleHud(App& app, float W, float H) {
         const float x = px / 2, y = py / 2;
         const int step = (kPopupTime - p.timer) >> 4;
         if (p.type >= 1 && p.type <= 7) { // the label: Blowout! Critical! Weak! / No Effect! Guard! Miss!
-            float ly = y - 24, la = 1;
+            float lx = x - 72, ly = y - 24, la = 1;
             const int idx = p.type - 1;
-            if (p.type < 4) {
-                if (p.timer >= 320) { const int k = 4 - (step); ly += -18.0f * float(std::max(0, k)); la = 1 - 0.25f * float(std::max(0, k)); }
-                else if (p.timer < 64) { const int k = 4 - (p.timer >> 4); ly += -18.0f * float(k); la = 1 - 0.25f * float(k); }
+            if (p.type < 4) { // __dmg_prc: Blowout / Critical / Weak slide in from the right and out to the left (x += 18k in, -= 18k out)
+                if (p.timer >= 320) { const int k = 4 - (step); lx += 18.0f * float(std::max(0, k)); la = 1 - 0.25f * float(std::max(0, k)); }
+                else if (p.timer < 64) { const int k = 4 - (p.timer >> 4); lx -= 18.0f * float(k); la = 1 - 0.25f * float(k); }
             } else if (step < 8)
                 ly -= float(kLabelHop[step]);
-            m.piece(x - 72, ly, float(idx % 4 * 144), float(idx / 4 * 24 + 72), 144, 24, a * la);
+            m.piece(lx, ly, float(idx % 4 * 144), float(idx / 4 * 24 + 72), 144, 24, a * la);
         }
         const bool number = p.type == cr::kHitNormal || p.type == cr::kHitCritical || p.type == cr::kHitWeak ||
                             p.type == cr::kHitResist;
