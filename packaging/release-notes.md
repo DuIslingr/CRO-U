@@ -38,7 +38,7 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   the scene's var 60 (silence after the deck's and the first dungeon's fights, as the original),
   the deck's first-battle tutorial picture (`battle_start`) shows, the scene's own "skip off"
   (`Chg_MsgSkip`) now hides and disables the skip corner, the fade-in is the original's 20
-  frames, a tutorial's dimming fades over 100 ms, and a lost scene battle shows `gameover` and
+  frames, and a lost scene battle shows `gameover` and
   waits for a tap before the title.
 - **Battles, every one:** a first strike or an ambush is announced with the original's text from
   the first frame (there was no "Ambush!" at all); a boss's intro lasts 60 frames with its camera;
@@ -80,7 +80,11 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
 - **Checked against the newest release (3.1.0):** the game logic of the passes above was re-read in
   the 3.1.0 code; two rules changed there and the port now follows them - the Counter skill (154)
   answers every physical hit it survives (1.0.0 rolled 10 / 20 %), and a pair attack whose partner
-  has fallen becomes the survivor's own attack, announced anew.
+  has fallen becomes the survivor's own attack, announced anew. The same re-read caught three
+  slips of the port's own: a same-map warp on map 152 no longer reloads the room, the second
+  scenario's new game+ keeps items 541 and 631, and a tutorial's dimming takes the menus' 400 ms.
+  With 3.1.0's data in French, German, Spanish, Chinese or Korean, the area title cards come in the
+  language's own sheet.
 - **One save for both scenarios:** the game now keeps a single `data.dat`, as the original's
   `_prty` is - both scenarios' records, bags and Oz, one set of flags and variables, and each
   scenario's own saved place. The second scenario therefore sees what the first earned (the shared

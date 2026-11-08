@@ -532,7 +532,7 @@ struct App {
     struct MenuMask {
         int type = 0, want = -1;           // the shape; the menu asking for it (-1 none)
         int from = 0, to = 0, t = 0, ms = 1; // the fade: from + (to - from) x t / ms, t + 50 a frame
-        bool tuto = false;                 // a tutorial picture's (MuCom_MenuSetMask / ClrMask: 100 ms)
+        bool tuto = false;                 // a tutorial picture's (MuCom_MenuSetMask / ClrMask: the same 400 ms)
         float clock = 0;
     } menuMask;
     int fadeFrames = 0, fadeT = 0;
@@ -2014,7 +2014,7 @@ bool performWarp(App& app, const cr::WarpRequest& wIn, int fromEvent) {
     const auto it = std::find(app.maps.begin(), app.maps.end(), std::string(cr::kMapCollisionFile[w.map]));
     if (it == app.maps.end()) return false;
     const int fromMap = app.mapNumber;
-    static const int kReloads[] = {13, 29, 47, 66, 71, 91, 152, 191, 214}; // (the 3D rooms)
+    static const int kReloads[] = {13, 29, 47, 66, 71, 91, 191, 214}; // (__EvtWarp's eight; 152 is only the cameras' list's)
     const bool reloads = std::find(std::begin(kReloads), std::end(kReloads), w.map) != std::end(kReloads);
     if (keepPlace && app.havePlayer) w.pos[0] = app.walker.pos.x, w.pos[1] = app.walker.pos.y, w.pos[2] = app.walker.pos.z,
                                      w.angleDegrees = app.walker.heading * 180.0f / 3.14159265f;
@@ -3292,7 +3292,19 @@ struct ViewerHost : cr::EventHost {
             app.renderer.destroy(p.tex);
             p = App::Portrait();
             cr::Image img;
-            if (loadImage(app, cr::kTex2dImage[image], img)) p.tex = app.renderer.upload(img);
+            // (3.1.0's __EvtTex2d: images 11 / 12 - MAPtitle, MAPtitle02 - come in the language's own
+            // sheet, MAPtitle_<fr|de|es|cs|ct|kr>, for languages 2..7; the plain one otherwise)
+            static const char* const kLangSuffix[6] = {"fr", "de", "es", "cs", "ct", "kr"};
+            bool loaded = false;
+            if ((image == 11 || image == 12) && app.language >= 2 && app.language <= 7) {
+                std::string name = cr::kTex2dImage[image];
+                const size_t dot = name.rfind('.');
+                if (dot != std::string::npos) {
+                    name.insert(dot, std::string("_") + kLangSuffix[app.language - 2]);
+                    loaded = loadImage(app, name, img);
+                }
+            }
+            if (loaded || loadImage(app, cr::kTex2dImage[image], img)) p.tex = app.renderer.upload(img);
             p.image = image;
             // (0x8000 only sizes it - a full-screen card; a load alone shows nothing: tex2d_img_prc
             // draws a slot once 0x200 / 0x400 has turned it on - Uty_TexDisp draws loaded ones itself)
@@ -8367,7 +8379,7 @@ void newPairParty(App& app, int pair, bool clearData) {
             const cr::ItemParam* ip = app.itemTable.item(it->first);
             const int n = it->first;
             const bool gone = (ip && ip->kind == 3) ||
-                              (p == 1 && ((n >= 551 && n <= 631) || (n >= 521 && n <= 541) || n == 219 || n == 309 ||
+                              (p == 1 && ((n >= 551 && n <= 630) || (n >= 521 && n <= 540) || n == 219 || n == 309 ||
                                           (n >= 385 && n <= 387) || n == 394));
             if (gone) it = g.items.erase(it);
             else ++it;
@@ -14994,8 +15006,8 @@ void stepMenuMask(App& app) {
     bool atOnce = false;
     const int want = menuMaskWanted(app, atOnce);
     if (want >= 0 && (m.want < 0 || (atOnce && want != m.type)))
-        m.tuto = app.tutoTex.on, m.from = 0, m.to = 0xa0, m.t = 0, m.ms = atOnce ? 1 : m.tuto ? 100 : 400;
-    else if (want < 0 && m.want >= 0) m.from = menuMaskAlpha(app), m.to = 0, m.t = 0, m.ms = m.tuto ? 100 : 400;
+        m.tuto = app.tutoTex.on, m.from = 0, m.to = 0xa0, m.t = 0, m.ms = atOnce ? 1 : 400; // (_SetFade_back 400 ms, tutorials too)
+    else if (want < 0 && m.want >= 0) m.from = menuMaskAlpha(app), m.to = 0, m.t = 0, m.ms = 400;
     else m.t = std::min(m.t + 50, m.ms);
     if (want >= 0) m.type = want;
     m.want = want;
