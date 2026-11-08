@@ -278,3 +278,29 @@ Port side: `CR_CAPTURE_SIZE=1280x720 --layout android --android <set>` captures 
 | The second scenario's staff roll (EndBack02: the photos, the lines, "The End / to be continued") | Part 14 1452-1530 s, Part 15 3792-3840 s | Consistent: `CR_CAPTURE_STAFF=1:n` - the picture at x 128..1151 as the video's; the end card at offset (0, 0) (0.98) |
 | The tutorial band (style 8) with centred lines and a TexDisp picture (Piu-Piu's story, message 6266) | Part 15 (_RVbadtmxeU) 18-220 s, 133 s | Consistent: `CR_CAPTURE_STYLE=8 CR_CAPTURE_PAGE=1 --area 10 --message 6266`: lines centred, widths within 4 px (785 / 777 for the longest), 7 px lower (the font); the mark at 1224..1255 x 240..256. The picture's frame as round 1's (450..830 x 360..612, the video's here too) |
 | A mastered plate's row (ComUty_ComPlate_Equip_GenePlate: MASTER, picture 96 at (176, 24)) | Part 13 (DlUFrh31Kgc) 672 s: "Deer Genes" MASTER | Confirmed: `--give-items 113,160,164,156,474-480 --camp-view plate`: MASTER at x 915..1043 (video 916..1043), the row's patch at offset (0, 0) to the row's place (0.97) |
+
+Coverage of Parts 8-15 (keyframe contact sheets, one frame each 4 s - 3,800 frames, 63 sheets - plus the
+OCR index). Moment types and where they are checked:
+
+| Moment type | Parts (time) | Checked by |
+|---|---|---|
+| Battles: intro / first strike / ambush, commands, targets, gene and item lists with HELP, hits, labels, Break, messages, results; bosses' staged attacks; story battles' talk | every part (most of 9, 10, 11, 12, 15) | Battle rows (both rounds; this section: the banner's lag, a repeated go) |
+| Learned genes / skills ("You learned the X command!") | 8 (2054 s), 11, 12 (1542 s) | Battle rows (round 1) |
+| The Camp: main page, Items, Equip (slots, lists, plates' entries, MASTER), Genes, the Emergency Exit | 8, 10, 12, 13, 14, 15 | Camp rows (both rounds; this section: page changes, Back, the Exit, MASTER) |
+| The Camp's Status page | none | Code reading only (this section) |
+| The shop: plates, categories, lists, counts, Talk | 8, 11, 12 (366, 2142-2202 s), 13 (850-948 s), 14 | Screens rows; Talk this section |
+| The World Select (gates, bands, the question) | 8 (0-9 s), 9 (3132 s), 10 (6 s), 11 (402, 1632 s), 12 (384, 1224, 2226 s), 13 (360, 1518 s) | This section |
+| The field's map (the maze's three pages; d01-d04 maps) | 10 (384, 1374, 1668 s), 11 (1674 s), 13 (1956 s) | This section (the maze); the d01-d04 maps share the code (not compared) |
+| Speech on the parchment with portraits; 0x20 letterbox; grey panels (0x40) with Yes / No; tutorial bands (0x08) | every part | Field rows and round 2's Parts 1-7 section; style 8 with a picture this section |
+| Text alone on black (style 16, Yorath's monologue) | 8 (1320-1490 s) | This section |
+| Item get bands, "Save complete" / "Load complete" boards, the save screen | every part | Field and screens rows |
+| Piu-Piu cards, COMPLETE, the photos; Collection Completed; Scenarios with the cards' row | 14 (126-198, 534-558 s), 15 (2484, 3612-3636 s) | This section; Collection: the Camp rows (Part 15 534 s) |
+| Staff rolls (EndBack01 / 02, "The End") and the end card | 8 (4494-4800 s), 14 (1452-1530 s), 15 (3792-3846 s) | Field rows (round 1) and this section |
+| The title, Character Select, Scenarios, Options, the achievement list | 8 (4890-4940 s), 15 (3858-3900 s) | Screens rows; the achievement list: the achievements section |
+| Android's achievement banner | 13, 14 (1080 s), 15 (2352 s) | Achievements section |
+| Puzzle rooms, the dungeon floor view, area title cards, white warps, quakes | 8, 9, 10, 11, 12 | Field rows and round 2's Parts 1-7 section (the floor view and title cards Open there) |
+| YouTube end cards, the phone's notification shade (14 1362 s) | each part's end | Not the game's |
+
+Code reading only here: the Status page's lists over the portrait (no video); the ambush's
+first action's banner lag beyond the two clips; the World Select's band list and "Skip the first
+half?" (not in the videos at a settled frame).
