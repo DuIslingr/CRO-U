@@ -17881,8 +17881,12 @@ void drawFrame(App& app, bool present = true) {
             app.menu.begin(r, app.windowTex, &app.font);
             r.setOrigin(r.uiX());
             const PhoneMenu phoneMenu(app, app.menu);
-            app.menu.plate(336 + dx, 104, 0, 0, app.choiceCursor == 0, 1, false);
-            app.menu.plate(336 + dx, 160, 1, 1, app.choiceCursor == 1, 1, false);
+            // (__menuu_EventPrc 0x321 clears the lit plate (+0x34) every frame and ComUty_YesNoChoiceProc
+            // sets it only while a finger is down on one: touch play shows both dark - Part 6 58.5 s,
+            // "Retry puzzle?" -; keys and pads keep the cursor's lit)
+            const bool lit = !app.pointerLast;
+            app.menu.plate(336 + dx, 104, 0, 0, lit && app.choiceCursor == 0, 1, false);
+            app.menu.plate(336 + dx, 160, 1, 1, lit && app.choiceCursor == 1, 1, false);
         } else {
             const float cx = W - 260, cy = H - 360;
             r.fillRect(cx, cy, 200, 110, 0.05f, 0.08f, 0.2f, 0.85f);
@@ -26060,9 +26064,10 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         std::printf("typed: %d of %d characters\n", app.dialogueTyped,
                     app.dialogue.empty() ? 0 : pageChars(app.dialogue[std::min(app.dialoguePage, app.dialogue.size() - 1)]));
     }
-    if (SDL_getenv("CR_CAPTURE_CHOICE")) { // the event Yes / No over it (Util 3), settled
+    if (const char* ch = SDL_getenv("CR_CAPTURE_CHOICE")) { // the event Yes / No over it (Util 3), settled
         app.msgStyle = 64, app.msgLines = 1;
         app.choiceFlag = 0, app.choiceCursor = 0, app.choiceAnim = 4;
+        if (SDL_strcmp(ch, "touch") == 0) app.pointerLast = true; // (touch play's look)
     }
     if (!app.captureShop.empty()) { // the Ark's shop (Omega: j001_t01, area 9), with some Oz and things to sell
         if (app.area != 9 && app.mapNumber >= 169) {
