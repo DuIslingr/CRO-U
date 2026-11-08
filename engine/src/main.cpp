@@ -14319,7 +14319,11 @@ void battleMenu(App& app, App::Battle::Menu menu) {
     ++b.page;
     b.cursor = 0;
     b.pick = b.pickTop = 0;
-    if (menu != App::Battle::Targets) setBanner(app, "");
+    // the pages' own kept lines (the target page's 901, the escape question's 801) go with them; a
+    // timed message stays until it runs out or the next replaces it - __menub_mainPrc clears slot 11
+    // only there (Part 3 1319.36-1321.66 s: "Vieg's team attacks first!" stays over the first page
+    // until "Run from battle?" replaces it)
+    if (menu != App::Battle::Targets && b.bannerFrames > (1 << 19)) setBanner(app, "");
     // the camera: the field of battle for the first menu, the member (or the pair) choosing
     if (menu == App::Battle::Top || menu == App::Battle::EscapeAsk) setBattleCamera(app, b.formation + 12);
     else if (menu == App::Battle::Commands) {
@@ -14356,7 +14360,11 @@ void battleStartRound(App& app) {
     b.phaseFrames = 0;
     b.turnOn = false;
     b.roundWait = true; // (the menu goes first: menub_mainPrc 0x270e, then btl_main 500 / 600)
-    setBanner(app, "");
+    // btl_main 500: the message queue's count (+0xae4) back to 0; the banner up stays - 500 / 600 /
+    // 700 don't wait for it (only 799, between actions, does), and the first action's name replaces it
+    // (Part 9 2972.18-2973.84 s: "Monster Assault!!" from the fade's start until the first action's
+    // camera, 33 frames, with no blank frame before "Stress")
+    b.notices.clear();
 }
 
 // A command is set: the second member's turn (solo), else the round
@@ -16182,6 +16190,13 @@ void turnOver(App::Battle::Actor& a, float want, float frames) {
 void stepBattle(App& app) {
     rollPartyNumbers(app.battle);
     App::Battle& b = app.battle;
+    if (SDL_getenv("CR_BATTLE_BANNERLOG")) { // the top banner's changes, by battle frame (the last frame's state)
+        static std::string shown;
+        static int shownPhase = -1;
+        if (b.banner != shown || int(b.phase) != shownPhase)
+            std::printf("battle frame %d: phase %d, banner '%s' (%d left), camera %d\n", b.frames, int(b.phase), b.banner.c_str(), b.bannerFrames, b.cam);
+        shown = b.banner, shownPhase = int(b.phase);
+    }
     ++b.frames;
     ++b.phaseFrames;
     stepEffects(app);
@@ -16316,8 +16331,9 @@ void stepBattle(App& app) {
             break;
         }
         if (!b.turnOn) {
-            // btl_main: no next action while a message is up or waiting
-            if (!b.notices.empty() || (b.bannerFrames > 0 && b.bannerFrames <= btlui::kMessageFrames)) break;
+            // btl_main 799: no next action while a message is up or waiting (the round's first comes
+            // from 500 / 600 straight)
+            if (!b.roundWait && (!b.notices.empty() || (b.bannerFrames > 0 && b.bannerFrames <= btlui::kMessageFrames))) break;
             if (b.roundWait && (b.viewState != 0 || b.menuGone < 2)) break; // the menu goes first
             b.roundWait = false;
             if (b.rules.nextTurn(app.battleActions, b.turn)) {
@@ -25671,7 +25687,8 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         }
         if (!SDL_getenv("CR_CAPTURE_TUTORIALS")) // the battles' tutorials seen (else the first one holds the view)
             for (int f : {0xff1, 0xff2, 0xff3, 0xff4, 0xff5, 0xfa8, 0xfa9}) app.game.setFlag(f, true);
-        startBattle(app, {app.captureBattle[0], app.captureBattle[1], -1, 0}, 0);
+        // (CR_BATTLE_STRIKE: 1 the party strikes first, 2 an ambush)
+        startBattle(app, {app.captureBattle[0], app.captureBattle[1], -1, SDL_getenv("CR_BATTLE_STRIKE") ? SDL_atoi(SDL_getenv("CR_BATTLE_STRIKE")) : 0}, 0);
         // --battle-view top|commands|targets|items|escape|hit|results: a screen of it; intro@n: the
         // opening n battle frames in (btl_main 200 at kIntroWhite)
         const std::string& v = app.captureBattleView;

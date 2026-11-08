@@ -62,6 +62,13 @@ video moves under a seek: pause it first, and label each grab with the frame cal
 | Android layout: the puzzle panel and the key icons (`_menuf_mainPut`) | Part 3 1232 s (panel 0..160 x 24..96, Retry at (16, 112), HELP at (168, 28)); 1170 s (key icons at x 10..135, y 650..705) | The video matches Android's formula (- ox, - oy for the panel; - ox, + oy for the keys), which the port now applies. No port capture: there is no puzzle-room or key-icon capture |
 | Android layout: low battery, the Pheromones button, the "!" button, the loading spinner, the staff roll's fast button | - | Code reading only |
 
+## Battles, Parts 4-15 (agent)
+
+| Behaviour (source) | Video, time | Result |
+|---|---|---|
+| An ambush's opening: "Monster Assault!!" (sys 0x37) from the fade's start, 300's 30 frames, then 400 -> 500 -> 600 -> 700 - the enemies' first action at once (btl_main) | Part 9 (8FlV44F1OS0) 2972.18-2973.84 s, ffmpeg at 50 fps: the banner from the fade's first frame; at 2973.82 the camera cuts to the acting monster with "Monster Assault!!" still up, the next game frame "Stress" replaces it - 33 frames, no blank frame | Contradicted, fixed: the port cleared the banner as the round began (frame 35 blank, the name at 36). btl_main 500 only resets the message queue (+0xae4); the first action's name replaces the banner; 799 alone waits for it between actions. `CR_BATTLE_STRIKE=2 CR_BATTLE_BANNERLOG=1 --battle 1 0 --battle-view intro@80`: the banner frames 4-35, the action's name and camera at 36 (the video's camera cut a frame before its name: open, 1 frame) |
+| A first strike's banner stays over the first page (sys 0x36, 60 frames) | Part 3 (SGuslIKuXyI) 1319.36-1321.66 s: "Vieg's team attacks first!" from the fade, still up after the commands' camera and page (1320.92 s), replaced by "Run from battle?" at 1321.68 | Contradicted, fixed: the port's battleMenu cleared the banner on every page. __menub_mainPrc writes slot 11 only for its own lines (the escape question, the target page); now only those kept lines go with a page change. `--battle-view escape` with `CR_BATTLE_STRIKE=1`: the banner up to frame 36, then the question |
+
 Everything else from the 3.1.0 audit rounds rests on code reading; check it here before claiming it
 is what players saw.
 
