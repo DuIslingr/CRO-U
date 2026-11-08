@@ -15544,7 +15544,9 @@ void startTurn(App& app) {
         return;          // then 40; stayed - 40
     }
     const cr::BattleActionDef* a = app.battleActions.get(t.action);
-    setBanner(app, sysText(app, 54000 + t.action - 1));
+    // btlque_make_que: a counter (+0x608, taken from +0x564) is announced as action 0xdc's name, "Counter",
+    // whatever blow it is (font_set_utf16(11, 3, 0xdb, 40); Part 5 131.5 s: "Counter" over Huotou's Chomp)
+    setBanner(app, sysText(app, 54000 + (t.counter ? 0xdb : t.action - 1)));
     for (int k : t.actors) // the gene's MP leaves as it's cast
         if (k >= 0) b.shownMp[k] = b.rules.f[size_t(k)].mp;
     b.stageAction = 0;
@@ -16399,9 +16401,12 @@ void stepBattle(App& app) {
     if (SDL_getenv("CR_BATTLE_BANNERLOG")) { // the top banner's changes, by battle frame (the last frame's state)
         static std::string shown;
         static int shownPhase = -1;
+        static bool shownHits = false;
         if (b.banner != shown || int(b.phase) != shownPhase)
             std::printf("battle frame %d: phase %d, banner '%s' (%d left), camera %d\n", b.frames, int(b.phase), b.banner.c_str(), b.bannerFrames, b.cam);
-        shown = b.banner, shownPhase = int(b.phase);
+        const bool hits = b.turnOn && b.hitsShown;
+        if (hits && !shownHits) std::printf("battle frame %d: action %d's hits shown\n", b.frames, b.turn.action);
+        shown = b.banner, shownPhase = int(b.phase), shownHits = hits;
     }
     ++b.frames;
     ++b.phaseFrames;
@@ -25963,6 +25968,18 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             spawnEffect(app, id, 2);
             for (int f = 0; f < frames; ++f) stepBattle(app);
             std::printf("battle view %s: %zu effects playing\n", v.c_str(), b.effects.size());
+        }
+        if (v.rfind("status", 0) == 0) { // status<k>[.<k2>...][:<element>]: those statuses (and element) on the pair and the first enemy
+            for (size_t at = 6; at < v.size() && v[at] != ':';) {
+                const int k = SDL_atoi(v.c_str() + at);
+                for (int i : {0, 1, 2})
+                    if (k >= 0 && k < cr::kStatusCount) b.rules.f[size_t(i)].status[k] = 3;
+                at = v.find_first_of(".:", at);
+                if (at == std::string::npos || v[at] == ':') break;
+                ++at;
+            }
+            if (const size_t c = v.find(':'); c != std::string::npos)
+                for (int i : {0, 1, 2}) b.rules.f[size_t(i)].element = SDL_atoi(v.c_str() + c + 1);
         }
         if (v.rfind("label", 0) == 0) { // label<type>[@n]: a hit's label (and number) of that type over each member, n frames in
             const int type = SDL_atoi(v.c_str() + 5);
