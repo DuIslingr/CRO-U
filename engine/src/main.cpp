@@ -1829,6 +1829,8 @@ void showModel(App& app, int index) {
 void placePlayer(App& app);
 int triggerAt(const App& app, const cr::Vec3& p);
 void showMessages(App& app, const std::vector<int>& ids);
+float androidEdgeX(const App& app);
+float androidEdgeY(const App& app);
 void drawItemWindow(App& app);
 bool checkTriggers(App& app, bool instant = false);
 bool interact(App& app, bool instant = false);
@@ -3210,8 +3212,10 @@ void drawSceneEffects(App& app, bool battle = false) {
             drawSceneLayer(app, 0x4c, kAdjX, kAdjY, kAdjW, kAdjH, b * -1.42222f + 128 - sx, b * -1.42222f - sy, 255);
             break;
         }
-        case 10: // the steam along the deck: (-16, 128) 512 x 256 on the iPad
-            drawSceneLayer(app, 0x44, -16, 128, 512, 256, a * 2.133f - sx, 0, 255);
+        case 10: // the puzzle rooms' clouds: (-16, 128) 512 x 256 on the iPad; off the iPad (Android
+            // 1.1.6 0x394e8) y oy / scale + 64, the texture's dense bottom on the screen's - Part 3
+            // 1231-1233 s: the clouds move from y 560 down, as the port's now
+            drawSceneLayer(app, 0x44, -16, r.phoneLayout() ? 64 + androidEdgeY(app) : 128.0f, 512, 256, a * 2.133f - sx, 0, 255);
             break;
         case 11: case 12: { // the magma's smoke (with Environment Effects)
             if (!app.environmentEffects) break;
