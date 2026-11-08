@@ -17217,10 +17217,10 @@ void stepBattle(App& app) {
     for (App::Battle::Popup& p : b.popups)
         if (p.on && (p.timer -= 16) < 0) p.on = false;
 
-    stepMenuView(app);
     battletalk::rules(app);
     if (app.game.flag(battletalk::kFlag)) { // a talk: the script runs (its fades with it), the battle waits
         battletalk::step(app);
+        stepMenuView(app);
         turnActors(app);
         stepBattleCamera(app);
         stepQuake(app);
@@ -17284,7 +17284,9 @@ void stepBattle(App& app) {
             // btl_main 799: no next action while a message is up or waiting (the round's first comes
             // from 500 / 600 straight)
             if (!b.roundWait && (!b.notices.empty() || (b.bannerFrames > 0 && b.bannerFrames <= btlui::kMessageFrames))) break;
-            if (b.roundWait && (b.viewState != 0 || b.menuGone < 2)) break; // the menu goes first
+            // the menu goes first (0x270e, then two frames: __menub_mainPrc runs before btl_prc in the
+            // original's frame, the port's view after the logic - so the logic sees the view a frame on)
+            if (b.roundWait && (b.viewState != 0 || b.menuGone < 1)) break;
             b.roundWait = false;
             if (b.rules.nextTurn(app.battleActions, b.turn)) {
                 b.turnOn = true;
@@ -17441,6 +17443,10 @@ void stepBattle(App& app) {
         const auto v60 = app.game.vars.find(60);
         if (v60 == app.game.vars.end() || v60->second != 997) playBgm(app, 1u << 26);
     } else if (b.ending && ++b.endFrames >= 12) b.exit = b.pendingExit, b.ending = false;
+    // the pages after the frame's logic: a page set this frame starts at its distance with its camera's
+    // cut (Part 2 1248.62-1248.82 s: the cut, the plates partly in 3 game frames after it, settled at 4 -
+    // as CR1's video 02 1634.70-1634.90 s)
+    stepMenuView(app);
     turnActors(app); // (btl_prc's mdl_put)
     stepBattleCamera(app); // (btl_main's end: btlcamera_prc; btl_prc: the eye, the easing)
     stepQuake(app); // gameapp_prc: UpdateQuake and PutMask after the battle's frame
@@ -25652,7 +25658,9 @@ int runSelfTest(App& app) {
         bool analyzeOk = false;
         if (b.active) {
             for (int f = 0; f < 60 && b.phase != App::Battle::Command; ++f) stepBattle(app);
-            // the first page comes in: 240, 160, 80, 0 - a key before it's in does nothing
+            // the first page comes in: at 320 on the frame it is set (with its camera's cut), then 240, 160,
+            // 80, 0 - a key before it's in does nothing
+            const bool atCut = b.slide == 320 && b.viewState == 1;
             const int page = b.page;
             battleKey(app, SDLK_RETURN);
             gated = b.menu == App::Battle::Top && b.page == page;
@@ -25661,7 +25669,7 @@ int runSelfTest(App& app) {
                 slideSeq += (slideSeq.empty() ? "" : " ") + std::to_string(b.slide);
                 if (battleMenuReady(app)) inFrames = f;
             }
-            slides = slideSeq == "320 240 160 80 0"; // (state 0 -> 1 puts it at 320, then 4 frames in)
+            slides = atCut && slideSeq == "240 160 80 0"; // (Part 2 1248.62-1248.82 s: in 4 frames after the cut)
             // touch play's look: no plate lit while the page is in after a click, the plate just chosen as
             // it goes; keys light the cursor's (the flag the events set)
             {
@@ -25754,7 +25762,7 @@ int runSelfTest(App& app) {
             analyzeOk = each && size_t(analyzePages) == want && analyzeHeld == analyzePages && analyzeEnd == 40;
             endBattle(app, false);
         }
-        problems += !touchLook + !gated + !slides + (inFrames != 5) + !askBanner + !askHeld + !noBack + !hudOut + !hudIn + (firstAt != 6) + !analyzeOk;
+        problems += !touchLook + !gated + !slides + (inFrames != 4) + !askBanner + !askHeld + !noBack + !hudOut + !hudIn + (firstAt != 6) + !analyzeOk;
         std::printf("battle menus: touch play's unlit plates %s; a page in over %d frames (%s), keys before %s; Escape's ask on the banner %s, held %s, No "
                     "back %s; the left HUD out for a talk %s, back %s; the first action %d frames after the last command; "
                     "Analyze %d lines (\"%s\", \"%s\"), each held %d, over %d frames after %s; %d problems\n",
