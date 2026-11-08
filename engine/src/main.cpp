@@ -751,8 +751,9 @@ struct App {
         std::vector<cr::BattleNotice> notices; // G+0xa14: the calcs' messages, one per free banner
         int shownHp[5] = {}, shownMp[5] = {}; // what the HUD shows (changes as the hits land)
         int rollHp[2] = {}, rollMp[2] = {};   // the party board's numbers and bars (+0x60 / +0x68): a fifth of the way a frame
-        int gaugeShown = 0;                // the badge's gauge, a step a frame toward the rules'
+        int gaugeShown = 0;                // the badge's gauge, a step every other frame toward the rules'
         float breakPop = 0;
+        uint32_t steps = 0;                // battle steps taken (prc's +0x918c4, raised a 20 Hz frame: its parity paces the gauge)
         std::vector<int> levelled;
         bool settled = false;              // the save has the battle's results
         int exit = 0;                      // 1 back to the field (fled), 2 to the title (lost), 4 won
@@ -16154,8 +16155,10 @@ void stepBattle(App& app) {
         }
         if (a.fading) a.alpha = std::max(0.0f, a.alpha - 1.0f / 20.0f);
     }
-    // The badge's gauge follows the rules' a step a frame (menub_mainPut), the pop shrinks
-    if (b.gaugeShown != b.rules.breakGauge) b.gaugeShown += b.gaugeShown < b.rules.breakGauge ? 1 : -1;
+    // The badge's gauge follows the rules' a step every other frame (menub_mainPut: only while
+    // prc's frame count +0x918c4 is even; Part 3 1117.02-1117.38 s: a tick each 0.1 s), the pop shrinks
+    if (b.gaugeShown != b.rules.breakGauge && (b.steps & 1) == 0) b.gaugeShown += b.gaugeShown < b.rules.breakGauge ? 1 : -1;
+    ++b.steps;
     if (b.breakPop >= 1.0f) b.breakPop -= 4.0f / 7.0f;
     if (b.bannerFrames > 0) --b.bannerFrames;
     if (b.bannerFrames == 0 && !b.notices.empty()) { // menub_mainPut: the next queued message
