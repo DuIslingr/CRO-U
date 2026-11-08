@@ -5983,16 +5983,17 @@ void drawShopBar(cr::MenuPainter& m, float x, float y, float value, float most, 
 // ComUty_HelpWindowDraw: picture 0x11 (the 336 x 68 striped panel) at (144, 8), the "HELP" tag (0x12) at
 // (144, -4), up to three lines at x 156 from y 32 / 26 / 18 (one / two / three lines: DAT_d1698 + 8),
 // 16 apart (Part 3 403 s: the panel at 450..1117 x 58 on the 1280 x 720 phone)
-void drawHelpWindow(App& app, cr::MenuPainter& m, int item, float a) {
+// (dx, dy: a group drawn in units shifted from tex2d's - the battle's right-hand group, +16 / +32)
+void drawHelpWindow(App& app, cr::MenuPainter& m, int item, float a, float dx = 0, float dy = 0) {
     if (item <= 0) return;
-    m.picture(17, 144, 8, a);
-    m.picture(18, 144, -4, a);
+    m.picture(17, 144 + dx, 8 + dy, a);
+    m.picture(18, 144 + dx, -4 + dy, a);
     std::vector<std::vector<std::string>> help;
     if (!app.systemText.message(cr::itemHelpId(item), app.language, nullptr, help) || help.empty()) return;
     const int n = std::min(3, int(help[0].size()));
     static const int kTop[4] = {0, 24, 18, 10};
     // (MuComFontDisp style 1: black, edged white - Part 3 403 s, a dark 2 px core with light either side)
-    for (int i = 0; i < n; ++i) m.text(help[0][size_t(i)], 156, float(kTop[n] + 8 + 16 * i), true, a, 13);
+    for (int i = 0; i < n; ++i) m.text(help[0][size_t(i)], 156 + dx, float(kTop[n] + 8 + 16 * i) + dy, true, a, 13);
 }
 
 // ComUty_StateBoardDraw at (bx, by) for character c; `item` (if > 0) shows what wearing it changes;
@@ -7237,7 +7238,21 @@ void drawCampRow(App& app, cr::MenuPainter& m, float x, float y, int item, int c
         m.piece(x + 12, y + 8, float(p->icon % 16) * 32, 248 + float(p->icon / 16) * 32, 32, 32, a);
     m.text(item > 0 ? itemName(app, item) : std::string("-"), x + 56, y + 12, false, a, 14);
     if (!label.empty()) m.text(label, x + 56, y + 30, false, a * 0.8f, 11);
-    if (count > 0) drawShopNumber(m, count, x + 222 - 10, y + 30, 2, 10, a, 2);
+    if (count > 0) drawShopNumber(m, count, x + 222, y + 30, 2, 10, a, 2); // (ComUty_PictNumDraw(x + 0xde, 2 digits): the field from 222)
+}
+
+// A plate's entry in the Camp (MuScrList type 7: ComUty_ComPlate_Equip_GeneAbility): the base plate,
+// then for a gene (0x51..0x82) "MP/" (picture 0x1b at (188, 34)) and its cost in three digits from
+// (218, 30) - halved while the member has skill 0x84; a skill shows no cost (Part 3 406 s:
+// "Healing (HP) MP/ 20", "Analyze MP/ 4", "Beast Wavelength")
+void drawGeneAbilityRow(App& app, cr::MenuPainter& m, float x, float y, int it, int ch, bool lit, float a) {
+    drawCampRow(app, m, x, y, it, 0, lit, a);
+    if (cr::isSkill(it)) return;
+    const cr::BattleActionDef* act = app.battleActions.get(cr::geneAction(it));
+    if (!act) return;
+    const int cost = ch >= 0 && ch < cr::kCharacters && cr::hasSkill(app.game, ch, 132) ? act->mp / 2 : act->mp;
+    m.picture(27, x + 188, y + 34, a);
+    drawShopNumber(m, cost, x + 218, y + 30, 3, 10, a, 2);
 }
 
 // A gene plate's row (ComUty_ComPlate_Equip_GenePlate): plate 8 / 9, its icon and name - yellow
@@ -9142,7 +9157,7 @@ void drawCamp(App& app) {
             right();
             for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
                 const int index = c.listTop + k, it = c.list[size_t(index)];
-                drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, 0, index == c.listCursor, ease, cr::isSkill(it) ? "Skill" : "Gene");
+                drawGeneAbilityRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, ch, index == c.listCursor, ease);
             }
             drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
             if (!campWears(app, ch, c.plate)) m.plate(336, kEntriesEquipY, -1, -1, true, ease, false, sysText(app, 58059));
@@ -9177,7 +9192,7 @@ void drawCamp(App& app) {
             right();
             for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
                 const int index = c.listTop + k, it = c.list[size_t(index)];
-                drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, 0, index == c.listCursor, ease, cr::isSkill(it) ? "Skill" : "Gene");
+                drawGeneAbilityRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, ch, index == c.listCursor, ease);
             }
             drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
             left();
@@ -16960,19 +16975,7 @@ void drawBattleHud(App& app, float W, float H) {
         b.member = v.member, b.rules.pair = v.pair;
         m.setOffset(float(b.slide), 0);
         // the HELP board across the top (ComUty_HelpWindowDraw): the item's or gene's target and effect
-        auto helpBoard = [&](int item) {
-            const float hx = 152;
-            m.stretch(12, hx, 0, 512 - hx, 66, a);
-            m.picture(18, hx + 4, 2, a);
-            std::vector<std::vector<std::string>> help;
-            if (app.systemText.message(cr::itemHelpId(item), app.language, nullptr, help) && !help.empty()) {
-                float hy = 20;
-                for (const std::string& line : help[0]) {
-                    m.text(line, hx + 14, hy, true, a, 13); // (black, edged white: Part 3 877 s)
-                    if ((hy += 16) > 52) break;
-                }
-            }
-        };
+        auto helpBoard = [&](int item) { drawHelpWindow(app, m, item, a, 16, 32); }; // (Part 3 877 s: the Camp's panel and place)
         switch (v.menu) {
         case App::Battle::Top:
             for (int i = 0; i < 4; ++i) {
@@ -17019,7 +17022,7 @@ void drawBattleHud(App& app, float W, float H) {
                 // (three digits to (218, 30)), dim when the MP won't pay
                 drawCampRow(app, m, 232, y, g, 0, index == v.pick, ra);
                 m.picture(27, 232 + 188, y + 34, ra);
-                drawShopNumber(m, cost, 232 + 218 - 20, y + 30, 3, 10, ra, 2);
+                drawShopNumber(m, cost, 232 + 218, y + 30, 3, 10, ra, 2); // (ComUty_PictNumDraw: the field from 218, right-aligned)
             }
             m.backBar(kBackX, kBackY, false, a);
             if (v.pick >= 0 && v.pick < n) helpBoard(v.picks[size_t(v.pick)]); // the gene's target and effect
