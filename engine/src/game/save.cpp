@@ -49,6 +49,7 @@ bool writeSave(const std::string& path, const SaveData& s) {
           << m.equip[1] << ' ' << m.equip[2] << ' ' << m.seeds[0] << ' ' << m.seeds[1] << ' ' << m.seeds[2] << ' '
           << m.seeds[3] << ' ' << m.genes[0] << ' ' << m.genes[1] << ' ' << m.genes[2] << ' ' << m.genes[3];
         for (int b : m.boosts) o << ' ' << b;
+        o << ' ' << m.start;
     }
     o << "\nnoencounters";
     for (bool b : s.game.noEncounters) o << ' ' << int(b);
@@ -133,6 +134,8 @@ bool readSave(const std::string& path, SaveData& s, std::string* error) {
                 for (int& b : m.boosts)
                     if (!(l >> b)) b = 0;
                     else b = std::clamp(b, -9999999, 9999999);
+                if (!(l >> m.start)) m.start = -1; // older saves: the record's own start (fixed below)
+                else m.start = std::clamp(m.start, 1, kMaxLevel);
                 out.game.party[size_t(c)] = m;
             }
         }
@@ -173,6 +176,13 @@ bool readSave(const std::string& path, SaveData& s, std::string* error) {
     // this file's order or the Vita import's: boxes and what follows it aren't in the import's)
     if (out.area < 0 || out.area >= kNumAreas || out.map < 0 || out.map >= kNumMaps || !lastLineWhole || parts < 6 || partyLines < kCharacters) return fail("incomplete save");
     ensureStartingGenes(out.game); // saves from before genes were kept
+    { // saves from before the start level was kept: each record's own (0..2 are the scenario's block in play)
+        const Party fresh = newParty();
+        const int sc = std::clamp(out.game.scenario, 0, kScenarios - 1);
+        for (int c = 0; c < kCharacters; ++c)
+            if (out.game.party[size_t(c)].start < 1)
+                out.game.party[size_t(c)].start = fresh[size_t(c < 3 ? 4 + 3 * sc + c : c)].start;
+    }
     out.leader = std::clamp(out.leader, 0, 3);
     out.game.oz = std::clamp(out.game.oz, 0, 9999999);
     s = std::move(out);

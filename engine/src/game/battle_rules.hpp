@@ -7,8 +7,8 @@
 //  - The pair (btlpcparam_prty_init): the menus' stats (level + equipment); HP full at the start of
 //    every battle, MP from the save (written back afterwards).
 //  - Enemies (read_btlcpl / btl_enemy_init_lv): the monster row's stats grown by level L (normal:
-//    HP 30L, attack 6L, defense 4L, speed 5L, luck 4L, Oz 10L; strong growth (+28): 200L, 12L, 10L,
-//    8L, 9L, 15L; experience + L squared either way). L is the row's level (+32) if set, else the
+//    HP 25L, attack 7L, defense 3L, speed 4L, luck 3L, Oz 10L; strong growth (+28): 150L, 10L, 8L,
+//    6L, 7L, 15L; experience (row + L squared) / 10, at least 1). L is the row's level (+32) if set, else the
 //    leader's level, or the pair's average when it's the route's own pair; ordinary monsters
 //    without a level pick one in the area's band (10b+1..10b+10, kept within L-5..L+2).
 //
@@ -18,8 +18,9 @@
 // 4 any), pick +14 (the AI's target: 1 random, 2 lowest HP, 3 highest, 4 / 5 the first / second),
 // always hits +15, variance % +16, motion +17, element +18 (sets the user's), affinity +22 (the
 // element triangle applies).
-//  - 10..17 each character's attack (character + 10; monsters use them too), 18..21 the routes'
-//    pair attacks (route + 18), 26 defend, 100..126 battle items 21..47, 201.. genes.
+//  - 10..17 the monster species' attacks, 27..30 a member's own (record + 27), 36 the pair's (37
+//    with record 1 as member 1; 18..21 are the first game's pair attacks, unused), 26 defend,
+//    100..126 battle items 21..47, 201.. genes.
 //
 // A round (btl_main 400-899): commands (the pair's, then each enemy's from its AI lists), a queue
 // by speed (the actors' average + the action's +6; +19998 with the "act first" status), then the
@@ -38,8 +39,8 @@
 //  - monsters' resistances (+16 physical, +18 genes, +20/22/24 elements 1-3, none without one):
 //    1 none (immune), 2 half, 3 x1.5, 4 instant death
 //  - variance: x (100 - v + random(2v + 1)) / 100
-//  - healing: -(bonus + power) x (sum of luck) / 100, bonus party +100 with the Break, +50 when
-//    actor 1 casts; enemies 150 with the Break, else 50
+//  - healing: -(bonus + power) x (sum of luck) / 100, bonus by the target's side: party +100 with
+//    the Break, +50 when either actor is the sorcerer; enemies 150 with the Break, else 50
 //  Attack, defense, speed and luck are x1.25 under their status (+0x8b..+0x8e); defense doubles
 //  while defending.
 //
@@ -51,10 +52,11 @@
 //
 // Rewards (btlcalc_chk_dead): each enemy's experience and Oz when it falls. The pair gets the
 // experience (both members, as the result screen shows them), the Oz goes to the purse. A fallen
-// monster may also leave an item (btlcalc_0505: row +0xc0 below level 20, +0xc2 or +0xc0 to 39,
-// +0xc4 a third of the time from 40; 20 / 30 / 40 / 50% for the attackers' average level + 10 less
-// its level < -4 / < 1 / < 6 / more), teach a gene (btlcalc_0506, game/genes.hpp) and leave its
-// gene plate.
+// monster may also leave an item (btlcalc_0505: row +0xc8 below level 25, else a third of the time
+// +0xca / +0xcc / +0xce / +0xd0 by its level 25 / 50 / 100 / 150 on; 20 / 30 / 40 / 50% for the
+// attackers' average level + 10 less its level < -4 / < 1 / < 6 / more; a gene or skill goes into
+// the bag at once, the rest waits for the result screen), teach a gene (btlcalc_0506,
+// game/genes.hpp) and leave its gene plate.
 //
 // Skills (chk_skill_btl; the pair's from their worn plates, in pair mode either member's; a
 // monster's from its row's +0xaa list once it's level 20): 131 / 136 block a physical / gene hit
@@ -172,6 +174,7 @@ struct BattleHit {
     bool fell = false;    // this hit took the target's last HP
     int status = -1;      // a status it set (BattleStatus), -1 none
     bool revived = false; // calc 19 brought it back
+    bool critical = false; // que +0xab: it was a critical, whatever the type says now (the Break's event 8)
 };
 
 enum BattleCommandKind { kCmdNone = 0, kCmdAttack = 1, kCmdGene = 2, kCmdItem = 3, kCmdDefend = 4, kCmdEscape = 5 };
@@ -222,9 +225,10 @@ public:
     int round = 0;               // +0x1a
     int strike = 0;              // BattleStart::strike, for the first round
     bool escapeBlocked = false;  // G+0x2c0 bit 0 (script battles)
-    bool allyAuto = false;       // +0xa4f: member 1 is a guest who acts by itself (btlord_enemy_rand)
-    int allyScript = 0;          // its rotation: 1 (group 370), 2 (groups 372 / 373)
-    int allyCounter = 0;         // +0x17c
+    // btlord_enemy_rand: in scenario 0's group 694 (0x2b6) member 1 takes no orders - every round
+    // it attacks (action 16) a random one of enemy slots 2 / 3
+    bool allyAuto = false;
+    int formation = 0;           // +0x10: read_btlcpl's formation (2: two size-1 monsters - the enemy pair's)
     int stage = -1;              // the battle stage (btlflrname index: +0x8a53d)
     int forceAction = 0;         // tests (--battle-view stage<n>): enemy 2 always chooses this action
     GameState* story = nullptr;  // the save's flags some calcs read and set (calc 40: 0x584 / 0x594)
@@ -238,8 +242,8 @@ public:
     int ozStolen = 0;            // what the enemies took
     bool doubleExp = false, doubleOz = false; // calcs 35 / 36 (Paradise Apples)
     std::vector<int> drops;      // items (btlcalc_0505), gene plates (chk_dead), in the order won
-    std::vector<int> learned;    // abilities and skills taught (btlcalc_0506)
-    std::vector<int> stolen;     // Steal Item's catch (btlcalc_0504: kept whatever the outcome)
+    std::vector<int> learned;    // abilities and skills taught (btlcalc_0506) or dropped (0505): in the bag at once
+    std::vector<int> stolen;     // Steal Item's catch (btlcalc_0504: in the bag at once, never on the result screen)
     std::vector<std::string> unsupported; // calcs it met that aren't implemented
     // What the battle tutorials (EvrStart 2, var 1 = 0xff3..0xff5) look for, set for the rest of
     // the battle: G+0xa6 a gene gave its users (0406) or its targets (zokusei_chr1) its
@@ -323,16 +327,21 @@ private:
     std::array<int, 3> kiss_{{4, 10, 21}}; // _kiss_tbl
     struct Entry {
         bool counter = false;
-        int repeats = 1;          // +0xb: monsters with row +0x3e 2 act twice; Asura Lotus 2..5 times
+        int repeats = 1;          // +0xb: monsters with row +0x3e 2 act twice; Asura Lotus 2..5 times; 234 / 239 twice, 243 six times
         bool paid = false;        // a repeat: the MP went with the first
+        bool rechoose = false;    // a twice-acting monster's second go: chosen afresh as it comes (btlque_make_que)
         bool done = false;        // +0x399: acted, or cancelled (Trompe-L'oeil)
         int kind = kCmdNone;
         int action = 0, item = 0;
         int actors[2] = {-1, -1};
         int target = -1;
+        int target2 = -1;         // a counter's second target (btlque_add_counter: all the blow's actors)
         int speed = 0;
+        int actionSpeed = 0;      // the action's +6, added to the actors' average
         int order = 0;
     };
+    size_t pickNext();            // btlque_make_que: the fastest entry left (speeds read afresh), counters and the escape first
+    bool invincible(int t) const; // Is_invincible: a pair's (or enemy pair's) either member
     std::vector<Entry> queue_;
     size_t next_ = 0;
     std::vector<BattleNotice> notices_; // this action's, handed to BattleTurn::notices

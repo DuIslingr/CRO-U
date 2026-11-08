@@ -47,7 +47,7 @@ PartyMember startRecord(int record) {
     PartyMember m;
     if (record < 3 || record >= kCharacters) return m;
     const short* e = kStart[record - 3];
-    m.level = e[0];
+    m.level = m.start = e[0];
     m.exp = kExp[std::clamp(m.level, 1, kMaxLevel) - 1];
     for (int s = 0; s < kEquipSlots; ++s) m.equip[s] = e[1 + s];
     m.genes[0] = e[4];
@@ -74,13 +74,14 @@ int expForLevel(int level) { return kExp[std::clamp(level, 1, kMaxLevel) - 1]; }
 
 int baseStat(int character, Stat stat) { return kBase[std::clamp(character, 0, kCharacters - 1)][stat]; }
 
-int levelGrowth(int level, Stat stat) {
-    const int n = std::max(0, std::clamp(level, 1, kMaxLevel) - 20); // the level-ups from 20
-    return stat == kHp ? 10 * n : n;                                // 10 HP, 1 to each of the others
+int levelGrowth(int level, Stat stat, int start) {
+    const int from = std::max(20, std::clamp(start, 1, kMaxLevel)); // the level-ups from 20 on, after the record's start
+    const int n = std::max(0, std::clamp(level, 1, kMaxLevel) - from);
+    return stat == kHp ? 10 * n : n; // 10 HP, 1 to each of the others
 }
 
 int statBonus(const PartyMember& m, Stat stat) {
-    int v = levelGrowth(m.level, stat) + m.boosts[stat];
+    int v = levelGrowth(m.level, stat, m.start) + m.boosts[stat];
     if (stat >= kAttack) v += m.seeds[stat - kAttack];
     return std::min(v, stat == kHp ? kMaxHpBonus : kMaxStatBonus);
 }

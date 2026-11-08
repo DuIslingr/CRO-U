@@ -204,7 +204,10 @@ int BattleRules::spdOf(int i) const { return statWith(f[size_t(i)], f[size_t(i)]
 int BattleRules::lckOf(int i) const { return statWith(f[size_t(i)], f[size_t(i)].lck, kStatusLuckUp); }
 
 int BattleRules::attackAction(int fighter) const {
-    if (fighter < 2 && pair) return f[0].character / 2 + 18;
+    // __menub_mainPrc: the pair's attack is action 0x24 (0x25 when member 1 is record 1); a member's
+    // own its record + 0x1b (27..30, power 150); a monster's its species + 10 (btlque_make_que)
+    if (fighter < 2 && pair) return f[1].character == 1 ? 37 : 36;
+    if (fighter < 2) return f[size_t(fighter)].character + 27;
     return f[size_t(fighter)].character + 10;
 }
 
@@ -302,10 +305,12 @@ void BattleRules::breakEvent(int who, int event, int target) {
 }
 
 bool BattleRules::fighterKind(int i, bool sorcerer) const {
+    // is_btl_warrior / is_btl_sorcerer on the fighter's +0xa2: a member's is its record + 8 (record 0
+    // 11 once Vieg and Olgar are both known): 8, 9, 11 warriors, 10 the sorcerer; 12 on (records 4..9,
+    // never in play) neither
     if (i < 0 || i >= 2 || !f[size_t(i)].alive()) return false;
-    const int c = f[size_t(i)].character;
-    const int slot = c >= 4 ? (c - 4) % 3 : c; // (records 4..6 / 7..9: each scenario's three in that order)
-    return sorcerer ? slot == 2 : slot != 2;
+    const int kind = f[size_t(i)].character + 8;
+    return sorcerer ? kind == 10 : kind == 8 || kind == 9 || kind == 11;
 }
 
 int BattleRules::bonusFor(const int actors[2], bool magic) const {
@@ -372,8 +377,8 @@ BattleHit BattleRules::physical(const BattleActionDef& a, const int actors[2], i
     int bonus = bonusFor(actors, false);
     // skill 135: an attack (Omega: actions 10..99) is critical the first time, when every attacker has it
     bool firstCrit = a.id >= 10 && a.id < 100;
-    for (int k = 0; k < 2; ++k)
-        if (actors[k] >= 0) firstCrit &= f[size_t(actors[k])].skills[135 - 131] && f[size_t(actors[k])].firstAttack;
+    for (int k = 0; k < 2; ++k) // (chk_skill_btl: in pair mode either member's)
+        if (actors[k] >= 0) firstCrit &= has(actors[k], 135) && f[size_t(actors[k])].firstAttack;
     // btlcalc_critical: the attackers' average level against the target's
     // (against the action's first target's level, whichever target this is)
     const int dl = (n ? levels / n : 0) - f[size_t(firstTarget_ >= 0 ? firstTarget_ : target)].level;
@@ -382,6 +387,7 @@ BattleHit BattleRules::physical(const BattleActionDef& a, const int actors[2], i
     if (crit) {
         bonus += 50;
         h.type = kHitCritical;
+        h.critical = true;
     }
     const int grd = crit && has(actors[0], 137) ? 0 : grdOf(target); // 137: a critical pierces
     int dmg = (bonus + a.power) * atkSum / 100 - grd;
@@ -469,7 +475,8 @@ void BattleRules::enemyChoice(int enemy, bool asPair, Entry& e, const BattleActi
             const int a = monsterField(x, base + listNo * 10 + 2 * k);
             if (a <= 0 || a == exclude) continue;
             const bool idle = a - 413u < 17u;
-            if (x.status[kStatusSilence] && (a - 261u > 140u) && (a - 1u > 125u) && !idle) continue;
+            const bool silenced = x.status[kStatusSilence] || (asPair && f[3].status[kStatusSilence]); // (either of the pair)
+            if (silenced && (a - 261u > 140u) && (a - 1u > 125u) && !idle) continue;
             list.push_back({a, idle || a - 459u < 9u || a - 478u < 8u ? 10 : weight});
         }
     };
@@ -554,21 +561,23 @@ int BattleRules::aiTarget(const BattleActionDef& a, int user) {
                 best = i;
         return best;
     };
+    // (a pick btlai_prc doesn't handle leaves the target unset, and btlque_make_que then takes the
+    // actor itself for an own-side action, a random living opponent for the rest)
+    auto opponent = [&]() { return user < 2 ? pickFrom(2, 5) : pickFrom(0, 2); };
     switch (a.side) {
     case 1: return user;
     case 2: // its own side (the enemies)
-        if (a.pick == 4) return alive(2) ? 2 : pickFrom(2, 5);
+        if (a.pick == 4) return alive(2) ? 2 : user;
         if (a.pick == 2) return byHp(2, 5, true);
         return pickFrom(2, 5);
     case 3: // the pair
         switch (a.pick) {
-        case 2: return byHp(0, 2, true);
         case 3: return byHp(0, 2, false);
         case 4: return alive(0) ? 0 : pickFrom(0, 2);
         case 5: return alive(1) ? 1 : pickFrom(0, 2);
         default: return pickFrom(0, 2);
         }
-    default: return pickFrom(0, 5);
+    default: return a.pick == 1 ? pickFrom(0, 5) : opponent();
     }
 }
 
@@ -604,32 +613,32 @@ void BattleRules::beginRound(const BattleCommand cmd[2], const BattleActionTable
                 for (int a : e.actors)
                     if (a >= 0) f[size_t(a)].guarding = true;
                 continue; // done (btl_main 500)
-            case kCmdEscape: e.action = 0; break;
+            case kCmdEscape: // __menub_mainPrc: both members' entries become the escape - one action of theirs
+                e.action = 0;
+                e.actors[0] = 0, e.actors[1] = f[1].alive() ? 1 : -1;
+                if (!f[0].alive()) std::swap(e.actors[0], e.actors[1]);
+                k = 2;
+                break;
             default: continue;
             }
             queue_.push_back(e);
         }
-    // btlord_enemy_rand: the guest's rotation (370: attack, attack, Cremate; 372 / 373: Möwe,
-    // attack, Asura Lotus), on a random enemy
+    // btlord_enemy_rand: scenario 0's group 0x2b6 - member 1's entry is made for it every round:
+    // a plain attack (action 16) on slot 2 or 3 at random (a fallen one: make_que retargets)
     if (allyAuto && f[1].alive() && !partySkips) {
-        const int c = allyCounter;
-        allyCounter = (allyCounter + 1) % 3;
         Entry e;
         e.order = order++;
         e.actors[0] = 1;
-        if (allyScript == 1) e.action = c == 0 ? 212 : 14;
-        else e.action = c == 0 ? 214 : c == 1 ? 14 : 207;
-        e.kind = e.action == 14 ? kCmdAttack : kCmdGene;
-        std::vector<int> foes;
-        for (int i = 2; i < 5; ++i) if (f[size_t(i)].alive()) foes.push_back(i);
-        e.target = foes.empty() ? 2 : foes[size_t(random(int(foes.size())))];
+        e.action = 16;
+        e.kind = kCmdAttack;
+        e.target = random(2) + 2;
         queue_.push_back(e);
     }
-    // btlord_enemy_rand: with two enemies standing (the two-enemy formations; Omega: not group
-    // 0x297's) a third of the rounds they act together
+    // btlord_enemy_rand: in formation 2 (two size-1 monsters) with both standing, not group
+    // 0x297's, a third of the rounds they act together
     enemyPair = false;
     if (!enemiesSkip) {
-        if (f[2].alive() && f[3].alive() && !f[4].present && group != 663 && random(3) == 1) { // (not 0x297's)
+        if (formation == 2 && f[2].alive() && f[3].alive() && group != 663 && random(3) == 1) {
             enemyPair = true;
             Entry e;
             e.order = order++;
@@ -665,10 +674,15 @@ void BattleRules::beginRound(const BattleCommand cmd[2], const BattleActionTable
         for (int a : e.actors)
             if (a >= 0) sum += spdOf(a), ++n;
         e.speed = (n ? sum / n : 0);
-        if (const BattleActionDef* d = actions.get(e.action)) e.speed += d->speed;
+        if (const BattleActionDef* d = actions.get(e.action)) e.actionSpeed = d->speed;
+        e.speed += e.actionSpeed;
     }
-    for (Entry& e : queue_) // Asura Lotus strikes 2..5 times (2..3 in pair mode)
+    for (Entry& e : queue_) { // Asura Lotus strikes 2..5 times (2..3 in pair mode); 234 / 239 twice, 243 six times, whoever acts
         if (e.action == 207) e.repeats = random(e.actors[0] < 2 ? (pair ? 2 : 4) : (enemyPair ? 2 : 4)) + 2;
+        if (e.action == 234 || e.action == 239) e.repeats = 2;
+        if (e.action == 243) e.repeats = 6;
+        if (e.kind == kCmdEscape) e.speed = 1 << 20; // btlque_make_que: an escape goes first, whatever the speeds
+    }
     for (const Entry& e : queue_) // btlque_make_que +0xa4a: the party member queued last
         if (e.actors[0] >= 0 && e.actors[0] < 2) soloMember_ = e.actors[0];
     std::stable_sort(queue_.begin(), queue_.end(), [](const Entry& a, const Entry& b) { return a.speed > b.speed; });
@@ -686,6 +700,9 @@ std::vector<int> BattleRules::resolveTargets(const BattleActionDef& a, const Ent
             t = pool[size_t(random(int(pool.size())))];
         out.push_back(t);
     }
+    if (e.target2 >= 0 && !isGroupScope(a) && a.scope != 0 && f[size_t(e.target2)].alive() &&
+        std::find(out.begin(), out.end(), e.target2) == out.end())
+        out.push_back(e.target2); // (btlque_add_counter: all the blow's actors)
     // btlque_make_que: in pair mode a single target on the pair's side is both
     if (pair && out.size() == 1 && out[0] < 2 && a.scope != 1) {
         out.clear();
@@ -695,20 +712,51 @@ std::vector<int> BattleRules::resolveTargets(const BattleActionDef& a, const Ent
     return out;
 }
 
+size_t BattleRules::pickNext() {
+    // btlque_make_que: btlord_calc first (every entry's speed from its actors as they are now - a
+    // Speed Up, Down or Ward taken this round moves the rest of it), then a counter, then an escape,
+    // then the fastest - the first of equals (the entries stand in fighter order)
+    size_t best = queue_.size();
+    int bestKey = 0;
+    for (size_t i = next_; i < queue_.size(); ++i) {
+        Entry& e = queue_[i];
+        if (e.done) continue;
+        int sum = 0, n = 0;
+        for (int a : e.actors)
+            if (a >= 0 && f[size_t(a)].alive()) sum += spdOf(a), ++n;
+        if (e.kind != kCmdEscape) e.speed = (n ? sum / n : 0) + (e.actionSpeed);
+        const int key = e.counter ? (1 << 22) : e.kind == kCmdEscape ? (1 << 21) : e.speed;
+        if (best == queue_.size() || key > bestKey) best = i, bestKey = key;
+    }
+    return best;
+}
+
 bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
     while (next_ < queue_.size()) {
         if (outcome() != 0) return false;
+        {
+            const size_t i = pickNext();
+            if (i == queue_.size()) return false;
+            if (i != next_) std::rotate(queue_.begin() + std::ptrdiff_t(next_), queue_.begin() + std::ptrdiff_t(i), queue_.begin() + std::ptrdiff_t(i) + 1);
+        }
         Entry e = queue_[next_++];
-        if (e.repeats > 1 && outcome() == 0) { // btlque_make_que: it acts again straight after
+        if (e.rechoose && e.actors[0] >= 2) { // btlque_make_que: a twice-acting monster's second go is chosen as it comes
+            const int was = e.action;
+            Entry fresh = e;
+            fresh.rechoose = false;
+            enemyChoice(e.actors[0], e.actors[1] >= 0, fresh, actions, was);
+            fresh.repeats = 1;
+            if (fresh.kind == kCmdNone) continue;
+            e = fresh;
+        }
+        if (e.repeats > 1 && outcome() == 0) { // btlque_make_que: the entry stays for another go
             Entry again = e;
             --again.repeats;
             again.paid = true;
-            if (e.actors[0] >= 2 && e.action != 207) { // a twice-acting monster chooses afresh
-                const int was = e.action;
-                enemyChoice(e.actors[0], e.actors[1] >= 0, again, actions, was);
-                again.repeats = e.repeats - 1;
-            }
-            if (again.kind != kCmdNone) queue_.insert(queue_.begin() + std::ptrdiff_t(next_), again);
+            // a monster whose row (+0x3e) has it act twice chooses afresh then (not Asura Lotus); the
+            // 234 / 239 / 243 repeats are the same action over
+            if (e.actors[0] >= 2 && e.action != 207 && monsterField(f[size_t(e.actors[0])], 0x3e) > 1) again.rechoose = true;
+            queue_.insert(queue_.begin() + std::ptrdiff_t(next_), again);
         }
         for (int& a : e.actors) // the fallen don't act
             if (a >= 0 && !f[size_t(a)].alive()) a = -1;
@@ -726,7 +774,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
         if (e.kind == kCmdEscape) {
             // btlact_escape_init: certain while the pair holds the Break, else by levels
             int chance = 100;
-            if (breakGauge < 1 && !has(0, 160) && !has(1, 160)) { // 160: Beast Wavelength
+            if (group != 664 && breakGauge < 1 && !has(0, 160) && !has(1, 160)) { // 160: Beast Wavelength; group 0x298 always
                 int pl = 0, pn = 0, el = 0, en = 0;
                 for (int i = 0; i < 2; ++i)
                     if (f[size_t(i)].alive()) pl += f[size_t(i)].level, ++pn;
@@ -902,9 +950,13 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                 h.amount = -std::min(tx.hpMax, recovery(tx.hpMax * (holdsBreak(t) ? 100 : 50) / 100));
                 h.revived = true;
                 break;
-            case 22: case 23: // 042700 poison cured / 042701 every status (and the element) gone
+            case 22: case 23: // 042700 poison cured / 042701 every status but the Ward (and the element) gone
                 if (calc == 22) tx.status[kStatusPoison] = 0;
-                else { for (int& s : tx.status) s = 0; tx.element = 0; }
+                else {
+                    for (int k = 0; k < kStatusCount; ++k)
+                        if (k != kStatusWard) tx.status[k] = 0;
+                    tx.element = 0;
+                }
                 h.type = kHitQuiet;
                 out.hits.push_back(h);
                 continue;
@@ -972,6 +1024,11 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                     out.hits.push_back(h);
                     continue;
                 }
+                if (calc >= 27 && calc <= 30 && tx.status[kStatusWard]) { // is_param_berserk: no up under the Ward - "No effect" (57047)
+                    note_ = 57047;
+                    out.hits.push_back(h);
+                    continue;
+                }
                 h.status = calc == 26 ? kStatusBarrier : calc == 31 ? kStatusSilence : calc == 33 ? kStatusInvincible
                                                                                    : kStatusAttackUp + (calc - 27);
                 f[size_t(t)].status[h.status] = calc == 33 ? 2 : 5;
@@ -1005,30 +1062,34 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                 if (h.amount <= 0) { h.type = kHitQuiet; out.hits.push_back(h); continue; }
                 break;
             }
-            case 39: // btlcalc_0431 (242): the target's element at random (0..3)
+            case 39: // btlcalc_0431 (242): the target's element at random (0..3); 57100 on the first target
                 tx.element = random(4);
+                if (t == firstTarget_) note_ = 57100;
                 h.type = kHitQuiet;
                 out.hits.push_back(h);
                 continue;
-            case 40: // btlcalc_0432 (437): all its HP - or 1000 once flag 0x584 is set (0x594 the first time)
+            case 40: // btlcalc_0432 (437): all its HP - or 1000 once flag 0x584 is set (57102 the first time, 0x594; 57105 after)
                 if (story && story->flag(0x584)) {
-                    if (!story->flag(0x594)) story->setFlag(0x594, true);
+                    if (!story->flag(0x594)) story->setFlag(0x594, true), note_ = 57102;
+                    else note_ = 57105;
                     h.amount = 1000;
                 } else h.amount = tx.hp;
                 break;
-            case 42: // btlcalc_0434 (441): unwarded, the ups gone and Down for 5 rounds
+            case 42: // btlcalc_0434 (441): unwarded, the ups gone and Down for 5 rounds (57107; 57047 under the Ward)
                 if (!tx.status[kStatusWard]) {
                     for (int k = kStatusAttackUp; k <= kStatusLuckUp; ++k) tx.status[k] = 0;
                     tx.status[kStatusDown] = 5;
                     statusTaken = true;
-                }
+                    note_ = 57107;
+                } else note_ = 57047;
                 h.type = kHitQuiet;
                 out.hits.push_back(h);
                 continue;
-            case 43: // btlcalc_0435 (126): the Ward, the ups gone
+            case 43: // btlcalc_0435 (126): the Ward, the ups gone (57108)
                 tx.status[kStatusWard] = 1;
                 for (int k = kStatusAttackUp; k <= kStatusLuckUp; ++k) tx.status[k] = 0;
                 statusTaken = true;
+                note_ = 57108;
                 h.type = kHitQuiet;
                 out.hits.push_back(h);
                 continue;
@@ -1048,7 +1109,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             Fighter& tf = f[size_t(t)];
             const int before = tf.hp;
             if (h.type == kHitKill) h.amount = tf.hp;
-            if (h.amount > 0 && tf.status[kStatusInvincible]) h.amount = 0, h.type = kHitNoEffect; // Is_invincible
+            if (h.amount > 0 && invincible(t)) h.amount = 0, h.type = kHitNoEffect; // Is_invincible (a pair's either member)
             if (scenario == 0 && group == 693 && e.actors[0] < 2 && e.actors[1] < 0 && h.amount > 0) // btlcalc_dmg_hp: 0x2b5's
                 h.amount = 0, h.type = 0, nullHit = true;                                         // solo blows don't land (+0xa78)
             h.amount = floored(t, h.amount); // chk_karaok_dmg_hp
@@ -1059,10 +1120,11 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                 tf.status[kStatusEndure] = 0;
                 tf.hp = 1;
             }
-            if (h.type == kHitCritical) breakEvent(breakBy, 8, t);
+            if (h.type == kHitCritical || h.critical) breakEvent(breakBy, 8, t); // (que +0xab: a critical the triangle relabelled, or that didn't land)
             if (before > 0 && tf.hp == 0) { // btlcalc_chk_dead
                 h.fell = true;
                 for (int& s : tf.status) s = 0;
+                if (t < 2) tf.element = 0; // (a member's element goes with it)
                 tf.guarding = false;
                 if (tf.enemy && !tf.rewarded) {
                     tf.rewarded = true;
@@ -1150,16 +1212,18 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                     out.hits.push_back(back);
                 }
         if (counterBy >= 0 && e.actors[0] >= 0) { // btlque_add_counter: next in the queue
+            // one answer by all the blow's targets (que +0x7a) on all its actors (+0x70), with the
+            // firing fighter's row's counter action (+0xb8; a member's row is the character's)
             Entry c;
             c.counter = true;
             c.kind = kCmdAttack;
             c.actors[0] = counterBy;
+            for (int t : hitList)
+                if (t != counterBy && f[size_t(t)].alive() && (t < 2) == (counterBy < 2) && c.actors[1] < 0) c.actors[1] = t;
             c.target = e.actors[0];
-            if (counterBy < 2) c.action = attackAction(counterBy);
-            else { // btlque_add_counter: a monster answers with its row's counter (+0xb8)
-                c.action = monsterField(f[size_t(counterBy)], 0xb8);
-                if (!actions.get(c.action)) c.action = 10;
-            }
+            c.target2 = e.actors[1];
+            c.action = monsterField(f[size_t(counterBy)], 0xb8);
+            if (!actions.get(c.action)) c.action = attackAction(counterBy);
             queue_.insert(queue_.begin() + std::ptrdiff_t(next_), c);
         }
         catchUpBreak();
@@ -1206,7 +1270,15 @@ void BattleRules::endRound() {
         if (regenFull[size_t(i)]) d = x.hp - x.hpMax; // (group 0x293's, until flag 0x58c)
         if (d > 0) d = floored(i, d);
         x.hp = std::clamp(x.hp - d, 0, x.hpMax);
+        if (x.hp == 0 && d > 0 && x.status[kStatusEndure]) x.hp = 1, x.status[kStatusEndure] = 0; // (btlcalc_dmg_hp: Endure holds here too)
     }
+}
+
+bool BattleRules::invincible(int t) const {
+    if (t < 0 || t > 4) return false;
+    if (t < 2 && pair) return f[0].status[kStatusInvincible] || f[1].status[kStatusInvincible];
+    if (t >= 2 && enemyPair && (t == 2 || t == 3)) return f[2].status[kStatusInvincible] || f[3].status[kStatusInvincible];
+    return f[size_t(t)].status[kStatusInvincible] != 0;
 }
 
 // btlcalc_0504 / 0505: which of a row's five items - from level 25 a third of the time the one
@@ -1236,7 +1308,9 @@ void BattleRules::fallRewards(int enemy, const int actors[2], bool itemsAndGenes
         const int chance = d < -4 ? 20 : d < 1 ? 30 : d < 6 ? 40 : 50;
         if (random(100) < chance) {
             const int item = row(0xc8 + 2 * levelBand(lv)); // five, by level
-            if (item > 0 && !((item >= 81 && item <= 191) && knows(item))) drops.push_back(item); // (steal_item_add: 81..191 learned)
+            if (item >= 81 && item <= 191) { // steal_item_add: a gene or skill is learned at once, no result line
+                if (!knows(item) && std::find(learned.begin(), learned.end(), item) == learned.end()) learned.push_back(item);
+            } else if (item > 0) drops.push_back(item);
         }
     }
     if (itemsAndGenes && row(0xbc) != 0) { // a gene
@@ -1300,7 +1374,7 @@ std::vector<int> BattleRules::applyRewards(GameState& gs) const {
             const int gained = expGained * (doubleExp ? 2 : 1);
             m.exp += x.hp > 0 ? gained : gained / 2; // MbResultSet: a fallen member gets half
             const int before = m.level;
-            while (m.level < kMaxLevel && m.exp >= expForLevel(m.level + 1)) ++m.level;
+            while (m.level < levelCap(gs.scenario) && m.exp >= expForLevel(m.level + 1)) ++m.level; // (GetLvMax)
             if (m.level != before) {
                 levelled.push_back(x.character);
                 levelUpBoosts(gs, x.character, m.level - before);
@@ -1308,12 +1382,13 @@ std::vector<int> BattleRules::applyRewards(GameState& gs) const {
         }
     }
     if (ozStolen > 0) addOz(gs, -ozStolen);
-    if (outcome() != 3)
-        for (int item : stolen) gs.items[item] = std::min(kMaxItemCount, gs.items[item] + 1);
+    // steal_item_add / add2: a catch and a gene taught go into the bag the moment they happen,
+    // whatever the battle's outcome; only the other drops wait for the result screen (MbResultSet)
+    for (int item : stolen) gs.items[item] = std::min(kMaxItemCount, gs.items[item] + 1);
+    for (int item : learned) gs.items[item] = std::max(1, gs.items[item]);
     if (won) {
         addOz(gs, ozGained * (doubleOz ? 2 : 1));
         for (int item : drops) gs.items[item] = std::min(kMaxItemCount, gs.items[item] + 1);
-        for (int item : learned) gs.items[item] = std::max(1, gs.items[item]);
     }
     return levelled;
 }

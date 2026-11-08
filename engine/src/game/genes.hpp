@@ -11,10 +11,10 @@
 // wears.
 //
 // Learning: a fallen monster may teach the first not known yet of the six abilities / skills it
-// carries (its plate's: row +0xb4 any level, +0xb6 from level 5, +0xb8 10, +0xba 15, +0xbc 20,
-// +0xbe 25), 80 / 40 / 30 / 10% for the attackers' average level (less 15 with skill 158) less
-// its level < -4 / < 1 / < 6 / more (btlcalc_0506); and models 13..72 leave their gene plate
-// (481 + (model - 13) / 3: three models a plate) when the bag hasn't one (chk_dead).
+// carries (row +0xbc any level, +0xbe from level 10, +0xc0 25, +0xc2 50, +0xc4 75, +0xc6 100),
+// 80 / 40 / 30 / 10% for the attackers' average level (less 15 with skill 158) less its level
+// < -4 / < 1 / < 6 / more (btlcalc_0506); and battle models 33..138 leave their gene plate
+// (481 + _btlanmtbl's column 15) when the bag hasn't one (chk_dead).
 // A new game (prty_init_new, 0xcb3f0): each character wears the Human Genes and knows its own
 // ability and skill; the pair starts with 3 Emergency Exits and 2 Chocolates.
 
@@ -45,10 +45,11 @@ bool hasSkill(const GameState& gs, int character, int skill);
 // chk_gene2: gear that resists an element counts as its skill (148 Blaze / 149 Aqua / 150 Gale
 // Resistance): offsets 21..26 of each 28-item set (201..368) - 0 none
 int armorSkill(int armor);
-// pcparam_max_*: the stat with equipment, seeds, boosts and the skills' (175..186, the Gates:
-// each known stage worn adds its item's stat)
+// pcparam_max_*: the stat with equipment, seeds, boosts and the Gates' (175..177 Attack, 178..180
+// Defense, 181..183 Speed, 184..186 Luck: each known stage worn adds its item's own stat; HP and
+// MP take none), clamped as the original's (1..99999 HP, 1..9999 the rest)
 int memberStat(const GameState& gs, int character, int stat, const ItemTable& items, int swap = 0);
-// MbResult's level-ups with skills 164..169 worn: +10 HP / +1 MP, Attack, Defense, Speed, Luck a level
+// pcparam_change_lv's level-ups with skills 164..169 worn: +30 HP / +3 MP / +5 Attack, Defense, Speed, Luck a level
 void levelUpBoosts(GameState& gs, int character, int levels);
 // The gene plate a monster of battle model `model` leaves (0 none)
 int plateDrop(int model);

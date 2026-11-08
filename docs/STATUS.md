@@ -134,7 +134,7 @@ separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
       fixed damage, heals, revives, status and stat changes, 0429 .. 0435's)
 - [x] level-ups as `pcparam_change_lv` has them (from 20: 10 HP and 1 to each other stat a level;
       the level-up genes 30 HP / 3 MP / 5), seeds 10 a seed to 9999 (`use_item`,
-      `MuCom_GetUsedItemLimitNum`); group 695's guest takes orders and leaves the enemies' levels to
+      `MuCom_GetUsedItemLimitNum`); group 695's guest takes orders (694's partner attacks on his own, `btlord_enemy_rand`) and leaves the enemies' levels to
       Olgar's; the save screen's load flags (31 / 32) and clear data; gold boxes (`Uty_ChkItem`, key 2)
 - [x] Omega's text at its own size (PutMsg's lines doubled with the rest of its tex2d; names at
       about three quarters), the item band (`Uty_GetItem_*`), SD full-screen cards (the second

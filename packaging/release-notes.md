@@ -61,6 +61,22 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
 - **Options:** Return to Title asks first and leaves through the original's black fade with the
   music stopping; the sound-effects gauge plays the original's test sound; the last battle's header
   is the original's picture.
+- **The battle rules** (checked formula by formula against the iOS code): the pair's attack is
+  the original's action (power 120, not the first game's 130..150), the Defense Gate skills no
+  longer add to max HP and MP (the original's Gates each raise their own stat only), the first
+  scenario's level cap is 100 as the original's, Dante's starting record no longer carries growth
+  for levels it never gained, a Steal Item catch or a gene a monster teaches goes into the bag at
+  once (kept on an escape or defeat, never listed on the result screen); two monsters only act
+  together in the two-small-monster formation (not every pair of monsters), the bosses' 243 hits
+  six times and 234 / 239 twice as the original's, an Escape resolves before any other action,
+  group 664's always succeeds and its animation takes the original's frames, the first scenario's
+  group 694 has your partner attack on his own; stat-up genes and items have no effect under the
+  Ward ("No effect"), Panacea leaves the Ward, Endure holds against poison, a pair's Invincible
+  covers both, a fallen member loses his element, criticals move the Break gauge even when the
+  element triangle relabels them, a counter is the original's (all the blow's targets answer all
+  its actors with the fighter's own counter action), and speeds are read afresh for every action
+  of a round (a Speed Up or Down moves the rest of the round); the AI's fallback targets are the
+  original's (a random living opponent).
 - **The title:** the title's art stands alone until a tap or key (its sound), then the logo goes and
   the plates slide in, as the original's title does; the "resume from last saved point?" offer
   comes after Start, not before the plates, and its Yes stops the music and fades to black before

@@ -5399,7 +5399,7 @@ void drawShopBoard(App& app, float bx, float by, int c, int item, float a) {
         const float x = bx - 2, y = by + 96;
         const int from = cr::expForLevel(pm.level), to = cr::expForLevel(pm.level + 1);
         m.picture(64, x, y, a);
-        drawShopNumber(m, std::max(0, to - pm.exp), x + 82, y - 4, 6, 12, a);
+        drawShopNumber(m, pm.level >= cr::levelCap(app.game.scenario) ? 0 : std::max(0, to - pm.exp), x + 82, y - 4, 6, 12, a);
         drawShopBar(m, x + 16, y + 9, 1, 1, 0, a);
         drawShopBar(m, x + 15, y + 8, float(pm.exp - from), float(std::max(1, to - from)), 3, a);
     }
@@ -5794,7 +5794,7 @@ void drawFaceBoard(App& app, cr::MenuPainter& m, float x, float y, int c, int hp
     const float nx = x + 96, ny = y + 90;
     const int from = cr::expForLevel(pm.level), to = cr::expForLevel(pm.level + 1);
     m.picture(64, nx, ny, a);
-    drawShopNumber(m, pm.level >= cr::kMaxLevel ? 0 : std::max(0, to - pm.exp), nx + 82, ny - 4, 6, 12, a, 2);
+    drawShopNumber(m, pm.level >= cr::levelCap(app.game.scenario) ? 0 : std::max(0, to - pm.exp), nx + 82, ny - 4, 6, 12, a, 2);
     drawShopBar(m, nx + 16, ny + 9, 1, 1, 0, a);
     drawShopBar(m, nx + 15, ny + 8, float(pm.exp - from), float(std::max(1, to - from)), 3, a);
 }
@@ -12006,6 +12006,8 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     rules.group = start.group;
     rules.story = &app.game;
     rules.scenario = std::clamp(app.game.scenario, 0, cr::kScenarios - 1);
+    rules.formation = b.formation;
+    rules.allyAuto = rules.scenario == 0 && start.group == 694; // btlord_enemy_rand: 0x2b6's member 1 attacks on its own
     // __menub_mainPrc: Escape is dimmed and refused while a script runs (G+0x364 bit 0 - an
     // event battle), group 0x298 apart; the opcode's flags byte (0x8a53e) is never read
     rules.escapeBlocked = app.runner.running() && start.group != 0x298;
@@ -12107,8 +12109,7 @@ void settleBattle(App& app) {
             if (it == item) { ++n; return; }
         rs.items.push_back({item, 1});
     };
-    for (int item : b.rules.drops) addItem(item);
-    for (int item : b.rules.stolen) addItem(item);
+    for (int item : b.rules.drops) addItem(item); // (a Steal Item catch is in the bag already and isn't listed)
 }
 
 // Back to the field: its music again, the encounter count restarted (fldencount_init), and the
@@ -13898,7 +13899,7 @@ void stepBattle(App& app) {
             // 1999), a gene's or item's forty after its hit (btlact_gene / item 2000))
             if (!busy && b.turnFrame >= b.hitFrame && b.idleSince < 0) b.idleSince = b.turnFrame;
             const bool attackLike = b.turn.kind == cr::kCmdAttack || b.turn.cancelled;
-            const bool over = b.turn.kind == cr::kCmdEscape ? b.turnFrame >= (b.turn.escaped ? 30 + 40 : 40)
+            const bool over = b.turn.kind == cr::kCmdEscape ? b.turnFrame >= (b.turn.escaped ? 10 + 40 : 40) // (btlact_escape: 0x3f2 ten frames, then the 40)
                               : b.stageAction && b.stageEnd ? b.turnFrame >= std::max(b.stageEnd, b.hitFrame + 1)
                               : b.stageAction ? b.turnFrame >= b.hitFrame + b.stageWait // the staged ones' wait
                               : b.turn.cancelled ? b.turnFrame >= 60
@@ -15277,6 +15278,7 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
             // physical: (50 solo bonus + 150) x 200 / 100 - 100 = 300, a critical (+50) 400
             for (cr::Fighter& x : r.f) x = cr::Fighter();
             r.f[0].present = r.f[2].present = true;
+            r.f[0].character = 0; // (record 0: a warrior, the +50 solo bonus)
             r.f[0].atk = 200, r.f[0].spd = 100, r.f[0].level = r.f[2].level = 1, r.f[0].hp = r.f[0].hpMax = 100;
             r.f[2].grd = 100, r.f[2].lck = 0, r.f[2].hp = r.f[2].hpMax = 10000, r.f[2].enemy = true;
             cr::BattleActionDef atk;
@@ -15537,6 +15539,7 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 cr::BattleRules q;
                 for (cr::Fighter& x : q.f) x = cr::Fighter();
                 q.f[0].present = q.f[2].present = true;
+                q.f[0].character = 0; // (record 0: a warrior, the +50 solo bonus)
                 q.f[0].atk = 200, q.f[0].spd = 100, q.f[0].level = q.f[2].level = 1, q.f[0].hp = q.f[0].hpMax = 100;
                 q.f[2].grd = 100, q.f[2].lck = -1000, q.f[2].hp = q.f[2].hpMax = 10000, q.f[2].enemy = true;
                 cr::BattleActionDef hit;

@@ -21,6 +21,8 @@ class ItemTable;
 
 constexpr int kCharacters = 10; // the records above
 constexpr int kMaxLevel = 255;
+// GetLvMax: 100 in the first scenario, 255 in the second (GetNextExp gives 0 past it)
+inline int levelCap(int scenario) { return scenario == 0 ? 100 : kMaxLevel; }
 enum Stat { kHp, kMp, kAttack, kDefense, kSpeed, kLuck, kStats };
 enum EquipSlot { kWeapon, kArmor, kJewel, kEquipSlots };
 
@@ -32,6 +34,9 @@ struct PartyMember {
     int seeds[4] = {0, 0, 0, 0};        // seed points: Attack, Defense, Speed, Luck
     int genes[4] = {0, 0, 0, 0};        // gene plates worn (game/genes.hpp): Human Genes, then 3
     int boosts[6] = {0, 0, 0, 0, 0, 0}; // level-up skills' points (164..169): HP, MP, Attack.. Luck
+    // the level the record was made at: prty_init_new sets no bonus, so the levels' growth
+    // (pcparam_change_lv) counts from there - Dante's scenario-0 record starts at 32 with none
+    int start = 1;
 };
 constexpr int kMaxSeedPoints = 9999;
 constexpr int kSeedPoints = 10; // what one seed adds
@@ -51,8 +56,9 @@ int expForLevel(int level); // total experience level `level` needs (level 1 = 0
 int maxStat(const PartyMember& m, int character, Stat stat, const ItemTable& items, int swap = 0);
 // _pcparam (0xd2cd0): the character's level-0 stat
 int baseStat(int character, Stat stat);
-// What levels 20..level added to `stat` (pcparam_change_lv)
-int levelGrowth(int level, Stat stat);
+// What the level-ups from max(20, start) to `level` added to `stat` (pcparam_change_lv: leaving
+// a level of 20 or more adds 10 HP and 1 to each of the others)
+int levelGrowth(int level, Stat stat, int start = 1);
 // The per-stat bonus: growth, boosts and (Attack..Luck) seeds, capped
 int statBonus(const PartyMember& m, Stat stat);
 // How many more seeds of `stat` (kAttack..kLuck) the member can take (MuCom_GetUsedItemLimitNum)
