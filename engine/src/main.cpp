@@ -9268,34 +9268,6 @@ void drawCamp(App& app) {
         if (campScenariosNew(app)) m.picture(128, 12 - 120 * out, 236, 1 - out);
         if (app.game.scenario != 0) m.picture(161, 84 - 120 * out, 236, 1 - out);
     }
-    // The Items page's title and section (windows 9, 0x10 / 0x11) are its list's: off from the member
-    // choice to the list again (CampMainPrc 0's 2 -> 3 .. 10 -> 1). Equip's and Status's come with the member
-    // (__MuEquip_CategoryChoiceInit, CampMainPrc 3's 2): none on their member choice (Part 3 395.5 s)
-    if (!main && !(c.page == App::Camp::Items && c.phase != App::Camp::List) && c.phase != App::Camp::Member) {
-        static const int kTitle[5] = {0, 58070, 58059, 58087, 58077};
-        const float pa = ease;
-        m.picture(15, 0 - 140 * (1 - ease), 56, pa);
-        m.textCentred(sysText(app, kTitle[c.page]), 12 - 140 * (1 - ease), 47, false, pa, 15);
-        std::string section;
-        if (c.page == App::Camp::Items) section = sysText(app, kCategoryLabel[c.category]);
-        // __menuu_CampMainPrc's window 0x10 (font slot 2): the Equip lists' ">Weapons" / ">Armor" / ">Jewel"
-        // (cases 0xb / 0xf / 0x13: 0x49..0x4b) and a gene slot's ">Genes" (0x17: 0x4c), a plate's entries'
-        // ">Gene Details" (0x1c, and the Genes page's 4: 0x4e); none on the member choice and the slot list
-        // (__MuEquip_CategoryChoiceInit: the title and the name only) nor while the Genes page browses (its
-        // 2: the title alone). Part 3 403 / 406 s: "Equip >Genes", "Equip >Gene Details"
-        else if (c.page == App::Camp::Equip || c.page == App::Camp::Genes) {
-            if (c.phase == App::Camp::Entries) section = sysText(app, 58078);
-            else if (c.page == App::Camp::Equip && c.phase != App::Camp::Member && c.phase != App::Camp::Slot)
-                section = sysText(app, c.slot < 3 ? 58073 + c.slot : 58076);
-        } else if (c.phase == App::Camp::Slot && c.statusView) section = sysText(app, 58099 + c.statusView); // (windows 0x10 / 0xf: 0x64, 0x65)
-        if (!section.empty() && section[0] != '>') section = ">" + section;
-        if (!section.empty()) { // (the Status page's only on its lists)
-            m.picture(16, 24 - 140 * (1 - ease), 72, pa);
-            m.textCentred(section, 40 - 140 * (1 - ease), 65, false, pa, 15);
-        }
-        // (No arrows beside the Items section: CampMainPut 0 draws windows 0x10 / 0x11 - the category's
-        // line and the one it changes from - and the page turns on the Back bar's arrows; Part 13 1172.5 s)
-    }
     const int ch = campCharacter(app, c.member);
     const int item = c.list.empty() ? 0 : c.list[size_t(c.listCursor)];
     auto memberPlates = [&](bool lit) {
@@ -9475,6 +9447,38 @@ void drawCamp(App& app) {
         }
         break;
     default: break;
+    }
+    // The title and section lines over everything else of the page: the section's line runs over the HELP
+    // window's foot and its ">" over the state board's face (Part 13 1174 s, Part 10 202 s), both in the
+    // menu font (MuComFontDisp of slots 0 / 2: "Equip", ">Jewel" a size under the port's old 15)
+    left();
+    // The Items page's title and section (windows 9, 0x10 / 0x11) are its list's: off from the member
+    // choice to the list again (CampMainPrc 0's 2 -> 3 .. 10 -> 1). Equip's and Status's come with the member
+    // (__MuEquip_CategoryChoiceInit, CampMainPrc 3's 2): none on their member choice (Part 3 395.5 s)
+    if (!main && !(c.page == App::Camp::Items && c.phase != App::Camp::List) && c.phase != App::Camp::Member) {
+        static const int kTitle[5] = {0, 58070, 58059, 58087, 58077};
+        const float pa = ease;
+        m.picture(15, 0 - 140 * (1 - ease), 56, pa);
+        m.textCentred(sysText(app, kTitle[c.page]), 12 - 140 * (1 - ease), 47, false, pa, 14);
+        std::string section;
+        if (c.page == App::Camp::Items) section = sysText(app, kCategoryLabel[c.category]);
+        // __menuu_CampMainPrc's window 0x10 (font slot 2): the Equip lists' ">Weapons" / ">Armor" / ">Jewel"
+        // (cases 0xb / 0xf / 0x13: 0x49..0x4b) and a gene slot's ">Genes" (0x17: 0x4c), a plate's entries'
+        // ">Gene Details" (0x1c, and the Genes page's 4: 0x4e); none on the member choice and the slot list
+        // (__MuEquip_CategoryChoiceInit: the title and the name only) nor while the Genes page browses (its
+        // 2: the title alone). Part 3 403 / 406 s: "Equip >Genes", "Equip >Gene Details"
+        else if (c.page == App::Camp::Equip || c.page == App::Camp::Genes) {
+            if (c.phase == App::Camp::Entries) section = sysText(app, 58078);
+            else if (c.page == App::Camp::Equip && c.phase != App::Camp::Member && c.phase != App::Camp::Slot)
+                section = sysText(app, c.slot < 3 ? 58073 + c.slot : 58076);
+        } else if (c.phase == App::Camp::Slot && c.statusView) section = sysText(app, 58099 + c.statusView); // (windows 0x10 / 0xf: 0x64, 0x65)
+        if (!section.empty() && section[0] != '>') section = ">" + section;
+        if (!section.empty()) { // (the Status page's only on its lists)
+            m.picture(16, 24 - 140 * (1 - ease), 72, pa);
+            m.textCentred(section, 40 - 140 * (1 - ease), 65, false, pa, 14);
+        }
+        // (No arrows beside the Items section: CampMainPut 0 draws windows 0x10 / 0x11 - the category's
+        // line and the one it changes from - and the page turns on the Back bar's arrows; Part 13 1172.5 s)
     }
     // Window 1 (BattryAndRealTimeAndOzDraw) is the main page's: CampMain's 6 takes it off for any page and
     // its 9 puts it back with the main page (Part 3 395.5-396 s: no clock on Equip's member choice or lists)
