@@ -751,6 +751,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             const int was = e.action;
             Entry fresh = e;
             fresh.rechoose = false;
+            fresh.paid = false; // (btlai_prc clears the entry's announced flag, +1000: named again)
             enemyChoice(e.actors[0], e.actors[1] >= 0, fresh, actions, was);
             fresh.repeats = 1;
             if (fresh.kind == kCmdNone) continue;

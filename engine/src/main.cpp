@@ -16093,8 +16093,10 @@ void startTurn(App& app) {
     }
     const cr::BattleActionDef* a = app.battleActions.get(t.action);
     // btlque_make_que: a counter (+0x608, taken from +0x564) is announced as action 0xdc's name, "Counter",
-    // whatever blow it is (font_set_utf16(11, 3, 0xdb, 40); Part 5 131.5 s: "Counter" over Huotou's Chomp)
-    setBanner(app, sysText(app, 54000 + (t.counter ? 0xdb : t.action - 1)));
+    // whatever blow it is (font_set_utf16(11, 3, 0xdb, 40); Part 5 131.5 s: "Counter" over Huotou's Chomp). An
+    // entry is announced once (its +1000): a repeated go of the same action - Asura Lotus's strikes, 234 / 239 /
+    // 243 - leaves the banner alone (Part 12 193.5-200 s: "Asura Lotus" over the first strike only)
+    if (!t.repeat || t.counter) setBanner(app, sysText(app, 54000 + (t.counter ? 0xdb : t.action - 1)));
     for (int k : t.actors) // the gene's MP leaves as it's cast
         if (k >= 0) b.shownMp[k] = b.rules.f[size_t(k)].mp;
     b.stageAction = 0;
@@ -26899,7 +26901,8 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         const int reflectAt = reflect && v.find('@') != std::string::npos ? SDL_atoi(v.c_str() + v.find('@') + 1) : 60;
         if (reflect)
             for (int i = 2; i < 5; ++i) b.rules.f[size_t(i)].status[cr::kStatusBarrier] = 5;
-        if (v == "genes" || v == "genehit" || reflect) battleChooseTop(app, 0), battleChooseCommand(app, 1);
+        const bool geneHit = v == "genehit" || v.rfind("genehit@", 0) == 0; // (genehit@n: n battle frames on instead of the hit)
+        if (v == "genes" || geneHit || reflect) battleChooseTop(app, 0), battleChooseCommand(app, 1);
         if (v == "genes")
             for (int f = 0; f < 10 && b.active; ++f) stepBattle(app);
         if (reflect) {
@@ -26916,7 +26919,8 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                         b.turnFrame, int(b.turn.reflected), b.bounceAt, b.hitFrame, int(b.hitsShown), b.rules.f[0].hp,
                         b.rules.f[0].hpMax, b.rules.f[2].hp, b.rules.f[2].hpMax);
         }
-        if (v == "genehit") {
+        if (geneHit) {
+            const int geneFrames = v.size() > 8 ? SDL_atoi(v.c_str() + 8) : -1;
             for (size_t i = 0; i < b.picks.size(); ++i)
                 if (b.picks[i] == 94) b.pick = int(i);
             if (const char* g = SDL_getenv("CR_BATTLE_GENE")) { // (that gene instead, its MP given)
@@ -26927,8 +26931,8 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                 battleChooseGene(app, b.picks[size_t(b.pick)]);
             if (b.menu == App::Battle::Targets) battleChooseTarget(app, b.picks[0]);
             if (b.menu == App::Battle::Commands) battleChooseCommand(app, 3); // Musiea defends
-            for (int f = 0; f < 2000 && b.active; ++f) {
-                if (b.turnOn && b.turn.kind == cr::kCmdGene && b.hitsShown && b.turnFrame >= b.hitFrame + 6) break;
+            for (int f = 0; f < (geneFrames >= 0 ? geneFrames : 2000) && b.active; ++f) {
+                if (geneFrames < 0 && b.turnOn && b.turn.kind == cr::kCmdGene && b.hitsShown && b.turnFrame >= b.hitFrame + 6) break;
                 stepBattle(app);
             }
             std::printf("battle view genehit: escher mp %d, enemy hp %d/%d\n", b.rules.f[0].mp, b.rules.f[2].hp, b.rules.f[2].hpMax);
