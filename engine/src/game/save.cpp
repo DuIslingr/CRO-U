@@ -62,8 +62,11 @@ bool writeSave(const std::string& path, const SaveData& s) {
     for (bool b : s.game.noEncounters) o << ' ' << int(b);
     o << "\nwalkexp";
     for (int e : s.game.walkExp) o << ' ' << e;
-    o << "\nboxes";
-    for (int b : s.game.openedBoxes) o << ' ' << b;
+    o << "\nboxes"; // (each box once: older saves may list one many times)
+    std::vector<int> boxes = s.game.openedBoxes;
+    std::sort(boxes.begin(), boxes.end());
+    boxes.erase(std::unique(boxes.begin(), boxes.end()), boxes.end());
+    for (int b : boxes) o << ' ' << b;
     for (int sc = 0; sc < kScenarios; ++sc) {
         o << "\ntreasure " << sc;
         for (const auto& e : s.game.treasure[size_t(sc)]) o << ' ' << e[0] << ' ' << e[1];
@@ -184,6 +187,9 @@ bool readSave(const std::string& path, SaveData& s, std::string* error) {
         } else if (key == "boxes") {
             int b;
             while (l >> b) out.game.openedBoxes.push_back(b);
+            std::vector<int>& boxes = out.game.openedBoxes; // (each once: older saves may repeat them)
+            std::sort(boxes.begin(), boxes.end());
+            boxes.erase(std::unique(boxes.begin(), boxes.end()), boxes.end());
         } else if (key == "treasure") {
             int sc = -1, id, item;
             if (l >> sc && sc >= 0 && sc < kScenarios)

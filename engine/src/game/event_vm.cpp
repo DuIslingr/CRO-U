@@ -373,7 +373,9 @@ bool EventRunner::step(EventHost* host) {
                 vm.result = n > 0;
             }
             else if (id == 2032) { // SetOpenedTresureBox (setOpened: the world's pick marks it taken)
-                state.openedBoxes.push_back(currentArea * 1000 + a0);
+                const int opened = currentArea * 1000 + a0; // (once: a box opened again would grow the save each time)
+                if (std::find(state.openedBoxes.begin(), state.openedBoxes.end(), opened) == state.openedBoxes.end())
+                    state.openedBoxes.push_back(opened);
                 for (auto& e : state.treasure[size_t(std::clamp(state.scenario, 0, kScenarios - 1))])
                     if (e[0] == a0) e[1] = -1;
             }
