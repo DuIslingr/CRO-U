@@ -464,7 +464,7 @@ c101/c102/c104/m207a, 2026-10-12).
       page starts sliding in (its offset printed), `break@<n>` the Break effect's n-th frame, and `CR_BATTLE_CAMLOG=1` prints
       the shown camera every battle frame. `CR_BATTLE_STRIKE=1|2` starts the captured battle as a
       first strike / an ambush; `CR_BATTLE_BANNERLOG=1` prints the top banner's text and the phase
-      each time they change, by battle frame.
+      each time they change, by battle frame; `CR_BATTLE_FORCE=<action>` makes the first enemy use that action (with `results@n` / `hit<n>`); `label<type>[@n]` puts a hit's label of that __dmg_set type over each member, n frames in.
 - [x] Every action calc (`btlcalcTbl`, 0..36): fixed and split damage, % of HP, down to 1 HP,
       MP damage, Sacrifice, drains (Steal HP / Humor Siphon), Oz theft (won back with the thief),
       monsters running, MP / % heals, full restores, revives, poison (10% a round) and its cure,

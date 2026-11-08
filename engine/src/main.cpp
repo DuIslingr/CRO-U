@@ -15997,11 +15997,11 @@ void stepBossDown(App& app) {
     const WhiteOut* w = nullptr;
     for (const WhiteOut& x : kWhite)
         if (x.models[0] == m || x.models[1] == m) w = &x;
-    if (!w) { // 0x3de, then 999's 40 frames and 1000's 10
+    if (!w) { // 0x3de, then 999 (+0xae8 40, on while above 1: 39 frames) and 1000 - the Won phase's own 10
         if (b.bossWait > 0) {
             if (boss && b.bossKey != 0 && int(boss->time) == b.bossKey) app.sound.play(0xc6);
             if (--b.bossWait < 2) {
-                b.bossWait = -(40 + 10);
+                b.bossWait = -40; // (Part 6 955.44 -> 957.88 s: the fade's effect to the victory, 49 frames)
                 if (boss) boss->fading = true;
                 // effect 7: models 0x6b .. 0x6f 10 up and 0x5e .. 0x61 5 up from where they stand, at
                 // 300%; any other on its own (eff3d_set_btl)
@@ -16035,7 +16035,7 @@ void stepBossDown(App& app) {
                 playSlot(app, a, btlui::kSlotWin); // (btl_win_anm)
             }
     }
-    if (f == w->back + 10) battleWon(app); // (1000's 10 frames)
+    if (f == w->back) battleWon(app); // (0x3df / 0x3e0 ..: straight to 1000, whose 10 frames are the Won phase's)
 }
 
 // chk_cpl657_mapchange: group 0x291 in the first scenario, the boss (fighter 2) at 80% / 60% / 20%
@@ -25867,6 +25867,22 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             for (int f = 0; f < frames; ++f) stepBattle(app);
             std::printf("battle view %s: %zu effects playing\n", v.c_str(), b.effects.size());
         }
+        if (v.rfind("label", 0) == 0) { // label<type>[@n]: a hit's label (and number) of that type over each member, n frames in
+            const int type = SDL_atoi(v.c_str() + 5);
+            const size_t at = v.find('@');
+            const int frames = at == std::string::npos ? 20 : SDL_atoi(v.c_str() + at + 1);
+            setBattleCamera(app, b.formation + 12);
+            for (int k = 0; k < 2; ++k)
+                if (App::Battle::Actor* a = battleActor(app, k)) {
+                    App::Battle::Popup& p = b.popups[k];
+                    p = App::Battle::Popup();
+                    const bool number = type == cr::kHitNormal || type == cr::kHitCritical || type == cr::kHitWeak || type == cr::kHitResist;
+                    p.on = true, p.at = actorHead(app, *a), p.amount = number ? 123 : 0;
+                    p.type = type, p.target = k, p.timer = btlui::kPopupTime;
+                }
+            for (int f = 0; f < frames; ++f) stepBattle(app);
+            std::printf("battle view %s: popup timers %d %d\n", v.c_str(), b.popups[0].timer, b.popups[1].timer);
+        }
         if (v.rfind("break@", 0) == 0) { // break@n: the Break effect (btlbreak_effect_prc), its n-th frame
             startBreakFx(app);
             for (int f = 0, n = SDL_atoi(v.c_str() + 6); f < n; ++f) stepBreakFx(app);
@@ -25958,6 +25974,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             if (const size_t at = v.find('@'); at != std::string::npos) resultFrames = SDL_atoi(v.c_str() + at + 1);
             if (const size_t c = v.find(':'); c != std::string::npos) resultTaps = SDL_atoi(v.c_str() + c + 1);
         }
+        if (const char* fa = SDL_getenv("CR_BATTLE_FORCE")) b.rules.forceAction = SDL_atoi(fa); // (the first enemy acts so)
         if (hitWanted || results) {
             // pair attacks on the first enemy standing until the first hit lands (or the battle's won)
             for (int f = 0; f < 6000 && b.active; ++f) {
