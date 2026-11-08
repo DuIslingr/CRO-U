@@ -82,7 +82,9 @@ a 720-tall screen of its aspect; the largest strip stretched above 1366) 1:1 fro
 the screen's left edge, its (0, 0, w, h - y) at y 2 y + 20 (`FUN_00094a70`), and over it the
 parchment's name streak, `window`'s (512, 120, 196, 40) at (x, y + 16) (`FUN_00094b50`). The
 pictures `MuComPictTexNoDrawFull2` fits to the screen (min(w / 480, h / 320) / 2) keep the
-iPhone's place.
+iPhone's place. The battle's command pages slide 480 there, 120 a frame (`_menub_mainPrc` on a
+Retina or 720 x 480 screen; 320 at 80 below, and in iOS 3.1.0), so they start off the wider
+phone's screen rather than in the bar beside the centred one.
 
 The separate parchment follows the loaded Android atlas in the iPhone and Vita layouts too,
 including Android artwork used over iOS data. Omega's iPad layout keeps its own `window_cutin`

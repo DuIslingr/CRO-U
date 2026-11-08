@@ -8,8 +8,10 @@ Reference: the user's Omega playlist (YouTube PLS0s-p_HBqrsXpoFNEqmwz4UIkDdo29aU
 FULL GAMEPLAY"), the Android release at 1280 x 720. It has its own 16:9 layout, so compare content,
 sequence and timing, and layout only within a screen - never absolute positions against the iPad
 or Vita builds. Method: the built-in browser, the video paused, frames drawn onto a canvas at chosen
-times, brightness / frame differences measured in the page (20 game frames a second; the video runs
-at 30).
+times, brightness / frame differences measured in the page; or, frame-exact, ffmpeg on the local
+copies (Archive/refvideos/omega, named by part and video id). The game draws 20 frames a second;
+Part 1 runs at 30 fps and Parts 2-4 at 50, so a game frame spans 1.5 or 2.5 video frames. A playing
+video moves under a seek: pause it first, and label each grab with the frame callback's media time.
 
 ## Checked 2026-11-08
 
@@ -23,10 +25,13 @@ at 30).
 | Field HUD cut, no fade (37a73cf) | Part 3 2079.557 -> 2079.594 s: the corner button fully drawn, then gone on the next frame; 1098.445 -> 1098.514 s: absent, then fully drawn | Confirmed both ways |
 | Battle fade-in over 20 frames (pass 2 / 54a299d) | Part 3 1110.79-1111.75 s: linear from white over about 0.96 s | Confirmed |
 | Solid white before the fade (54a299d: about 5 frames) | Part 3 1110.30-1110.75 s: about 9 frames | Longer in the video; the original holds white while the battle loads, so the length depends on the device - the port's is the minimum |
-| The intro camera: the formation's camera cut on frame 1 of the fade, a 20° turn over 15 frames eased 1/5 a frame, then the command camera (54a299d, 9a4731b) | Part 3 1110.82-1112.34 s, measured by phase correlation of the far background, each video frame one game frame: the turn's speed profile (peak at frame 15, settled under 5% by frame 29) matches the port's captures frame for frame; the cut to the command camera comes at frame 32 | Confirmed after a correction: the port cut to the command camera at frame 30, now 32 (9a4731b). (A first look at this clip misread it as contradicting the port - its frame differences were washed out by the fade, and the port's behaviour was taken from a commit message instead of its own frames.) |
+| The intro camera: the formation's camera cut on frame 1 of the fade, a 20° turn over 15 frames eased 1/5 a frame, then the command camera (54a299d, 9a4731b) | Part 3 1110.82-1112.34 s, measured by phase correlation of the far background, per game frame (a new image every 2-3 video frames at 50 fps; the cut re-checked with ffmpeg at 1112.34 s): the turn's speed profile (peak at frame 15, settled under 5% by frame 29) matches the port's captures frame for frame; the cut to the command camera comes at frame 32 | Confirmed after a correction: the port cut to the command camera at frame 30, now 32 (9a4731b). (A first look at this clip misread it as contradicting the port - its frame differences were washed out by the fade, and the port's behaviour was taken from a commit message instead of its own frames.) |
 | The ambush and formation-2 intros (9a4731b) | - | Code reading only |
 | The party's HP / MP roll toward the new value (f2ead07) | Part 3 1116.0-1118.5 s: 1320 -> 1213 -> 1113 -> 1099 and 1570 -> 1460 -> 1358 -> 1344 over about a second | Confirmed |
 | Slanted HP / MP bars (34d96cb) | Part 3 battle HUD frames | Consistent |
+| Ark arrival plays the return scene at once (event scripts) | Part 2 (bMgJjj3q8GQ) 1696 s: the warp's white; 1697-1698 s the Ark hall; 1699 s the scene, with no walking first | Confirmed |
+| Battle pages slide in and out over 4 frames (893363e) | Part 2 1248.72-1248.82 s (Solo / Pair in), 1249.24-1249.32 s (out after Pair), 1249.54-1249.78 s (Attack in and out): each way, frames with no plate, one frame with the plates 240 px right (cut by the screen's edge), then settled / gone. Rows 96 px apart for the port's 48: the game's 2x screen | Timing confirmed. The distance differs by platform: iOS 3.1.0 moves 320 at 80 a frame (the port's iPhone and iPad layouts); Android 1.1.6's _menub_mainPrc moves 480 at 120 on a Retina or 720 x 480 screen (its iPhone screen is centred on a wider phone). The port's Android layout now does that; `--battle-view top@n` captures there show nothing at 360 and 240, the plates cut at 120, settled at 0 - as the video |
+| The battle's cursor plate lit as a page arrives (port) | Part 2 1248.82-1249.20 s: Solo and Pair both dark until Pair is tapped (1249.22 s lit) | Differs: 3.1.0 lights the touched plate only (+0x92 reset to -1 every frame in state 2); the port lights the cursor's, which pad and keyboard play need. Open: hide it after touch input |
 
 Everything else from the 3.1.0 audit rounds rests on code reading; check it here before claiming it
 is what players saw.

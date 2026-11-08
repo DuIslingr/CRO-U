@@ -456,7 +456,8 @@ c101/c102/c104/m207a, 2026-10-12).
       target and back; the fallen fade out. `--capture … --battle <group> <stage> --battle-view
       top|commands|targets|items|escape|hit<n>|results[@frames][:taps]` renders a screen of it
       (the results that many frames in, after that many taps); `intro@<n>` the opening n battle
-      frames in (btl_main 200 at frame 4, the commands at 36), and `CR_BATTLE_CAMLOG=1` prints
+      frames in (btl_main 200 at frame 4, the commands at 36), `top@<n>` n frames after the first
+      page starts sliding in (its offset printed), and `CR_BATTLE_CAMLOG=1` prints
       the shown camera every battle frame.
 - [x] Every action calc (`btlcalcTbl`, 0..36): fixed and split damage, % of HP, down to 1 HP,
       MP damage, Sacrifice, drains (Steal HP / Humor Siphon), Oz theft (won back with the thief),

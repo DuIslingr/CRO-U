@@ -710,7 +710,8 @@ struct App {
         int pick = 0, pickTop = 0;
         int confirm = 0;                   // EscapeAsk: 0 Yes
         // The pages as drawn (menub_mainPrc's slides, +0x38): each page comes in from the right
-        // (320 -> 0, 80 a frame) and goes out again before the next comes in; it takes taps only
+        // (320 -> 0, 80 a frame; 480, 120 in the Android layout: battleSlideDistance) and goes out
+        // again before the next comes in; it takes taps only
         // once in (states 2, 101, 901, 801). The page the logic is on is `page`; the view follows it
         struct MenuView {
             int page = -1;                 // the page shown (-1 none)
@@ -13968,6 +13969,7 @@ int monsterNameRow(const App& app, const cr::MonsterDef& m) {
     return m.model == 0xa5 && olgarIsDante(app) ? 0x106 : m.id - 1;
 }
 
+int battleSlideDistance(const App& app);
 void startBattle(App& app, const cr::BattleStart& start, int flags) {
     app.renderer.resetHistory(); // a cut: the upscaler starts over
     App::Battle& b = app.battle;
@@ -14001,7 +14003,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     b.cursor = 0;
     b.member = 0;
     b.view = {};
-    b.viewState = 0, b.slide = 320, b.slideHold = 0, b.menuGone = 100, b.roundWait = false, b.hudSlide = 0;
+    b.viewState = 0, b.slide = battleSlideDistance(app), b.slideHold = 0, b.menuGone = 100, b.roundWait = false, b.hudSlide = 0;
     b.analyze = {};
     b.turnOn = false;
     for (App::Battle::Popup& p : b.popups) p = App::Battle::Popup();
@@ -16006,6 +16008,12 @@ void rollPartyNumbers(App::Battle& b) {
     for (int k = 0; k < 2; ++k) roll(b.rollHp[k], b.shownHp[k]), roll(b.rollMp[k], b.shownMp[k]);
 }
 
+// How far a page slides: 320 in iOS 3.1.0 (80 a frame); Android 1.1.6's _menub_mainPrc takes 480 on
+// a Retina or 720 x 480 screen (320 below) and moves a quarter of it a frame - its iPhone screen is
+// centred on a wider phone, where 320 would leave the plates in sight at the side. The Android
+// layout is a 720-tall phone's (Retina): 480, 120 a frame (Part 2 1248.76 s: the plate 240 px right)
+int battleSlideDistance(const App& app) { return app.renderer.androidScreen() ? 480 : 320; }
+
 // menub_mainPrc's slides: the page shown follows the logic's - it goes out (+80 a frame to 320),
 // is held out a while (Defend's 20 frames), and the next comes in (-80 a frame to 0: state 1's
 // sound 0x22 for the first page); with none to show (a talk, the round, Options) it stays out.
@@ -16024,7 +16032,7 @@ void stepMenuView(App& app) {
     switch (b.viewState) {
     case 1: // coming in
         live();
-        b.slide = std::max(0, b.slide - 80);
+        b.slide = std::max(0, b.slide - battleSlideDistance(app) / 4);
         if (b.slide == 0) {
             b.viewState = 2;
             if (v.menu == App::Battle::Top) app.sound.play(0x22); // (__menub_mainPrc 1 -> 2: the top menu in place)
@@ -16032,8 +16040,8 @@ void stepMenuView(App& app) {
         return;
     case 2: live(); return;
     case 3: // going out
-        b.slide = std::min(320, b.slide + 80);
-        if (b.slide < 320) return;
+        b.slide = std::min(battleSlideDistance(app), b.slide + battleSlideDistance(app) / 4);
+        if (b.slide < battleSlideDistance(app)) return;
         b.viewState = b.slideHold > 0 ? 4 : 0;
         if (b.viewState == 4) return;
         break;
@@ -16050,7 +16058,7 @@ void stepMenuView(App& app) {
         break;
     }
     // out: the next page (or none)
-    b.slide = 320;
+    b.slide = battleSlideDistance(app);
     b.slideHold = 0;
     b.menuGone = 0;
     v.page = want;
@@ -16899,7 +16907,7 @@ void drawBattleHud(App& app, float W, float H) {
     // Right: the menus - the page as shown (b.view), slid right by b.slide (menub_mainPut: x + +0x38)
     r.setOrigin(wideRight(app));
     const App::Battle::MenuView& v = b.view;
-    if (v.page >= 0 && b.slide < 320) {
+    if (v.page >= 0 && b.slide < battleSlideDistance(app)) {
         const int keepMember = b.member; // (the lists' helpers read the member choosing)
         const bool keepPair = b.rules.pair;
         b.member = v.member, b.rules.pair = v.pair;
@@ -25520,8 +25528,15 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         const std::string& v = app.captureBattleView;
         App::Battle& b = app.battle;
         const int introAt = v.rfind("intro@", 0) == 0 ? SDL_atoi(v.c_str() + 6) : -1;
-        for (int f = 0; f < (introAt >= 0 ? introAt : 30) && app.battle.active; ++f) stepBattle(app);
-        for (int f = 0; introAt < 0 && f < 10 && b.active && b.phase != App::Battle::Command; ++f) stepBattle(app);
+        // top@n: n frames after the first page starts in (0: set at its distance, not drawn yet)
+        const int topAt = v.rfind("top@", 0) == 0 ? SDL_atoi(v.c_str() + 4) : -1;
+        if (topAt >= 0) {
+            for (int f = 0; f < 600 && b.active && b.viewState != 1; ++f) stepBattle(app);
+            for (int f = 0; f < topAt && b.active; ++f) stepBattle(app);
+            std::printf("battle view %s: slide %d of %d, state %d\n", v.c_str(), b.slide, battleSlideDistance(app), b.viewState);
+        }
+        for (int f = 0; topAt < 0 && f < (introAt >= 0 ? introAt : 30) && app.battle.active; ++f) stepBattle(app);
+        for (int f = 0; introAt < 0 && topAt < 0 && f < 10 && b.active && b.phase != App::Battle::Command; ++f) stepBattle(app);
         if (v == "items") app.game.items[21] = 3, app.game.items[22] = 1, app.game.items[24] = 2;
         if (v == "commands" || v == "targets" || v == "items") battleChooseTop(app, 0);
         if (v == "targets") battleChooseCommand(app, 0);
