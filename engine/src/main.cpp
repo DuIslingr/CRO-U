@@ -26178,7 +26178,12 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         if (v == "genehit") {
             for (size_t i = 0; i < b.picks.size(); ++i)
                 if (b.picks[i] == 94) b.pick = int(i);
-            battleChooseGene(app, b.picks[size_t(b.pick)]);
+            if (const char* g = SDL_getenv("CR_BATTLE_GENE")) { // (that gene instead, its MP given)
+                b.rules.f[0].mp = b.rules.f[0].mpMax = 999;
+                battleChooseGene(app, SDL_atoi(g));
+                std::printf("battle view genehit: gene %d '%s'\n", SDL_atoi(g), itemName(app, SDL_atoi(g)).c_str());
+            } else
+                battleChooseGene(app, b.picks[size_t(b.pick)]);
             if (b.menu == App::Battle::Targets) battleChooseTarget(app, b.picks[0]);
             if (b.menu == App::Battle::Commands) battleChooseCommand(app, 3); // Musiea defends
             for (int f = 0; f < 2000 && b.active; ++f) {
@@ -26204,8 +26209,18 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         if (const char* fa = SDL_getenv("CR_BATTLE_FORCE")) b.rules.forceAction = SDL_atoi(fa); // (the first enemy acts so)
         if (hitWanted || results) {
             // pair attacks on the first enemy standing until the first hit lands (or the battle's won)
+            const char* useItem = SDL_getenv("CR_BATTLE_ITEM"); // (the first member uses that item on the second, who defends)
             for (int f = 0; f < 6000 && b.active; ++f) {
-                if (b.phase == App::Battle::Command && b.menu == App::Battle::Top) {
+                if (useItem && b.phase == App::Battle::Command && b.menu == App::Battle::Top) {
+                    const int item = SDL_atoi(useItem);
+                    app.game.items[item] = std::max(3, app.game.items[item]);
+                    battleChooseTop(app, 0);
+                    battleChooseCommand(app, 2);
+                    battleChooseItem(app, item);
+                    if (b.menu == App::Battle::Targets) battleChooseTarget(app, b.picks.size() > 1 ? b.picks[1] : b.picks[0]);
+                    if (b.menu == App::Battle::Commands) battleChooseCommand(app, 3);
+                    useItem = nullptr;
+                } else if (b.phase == App::Battle::Command && b.menu == App::Battle::Top) {
                     battleChooseTop(app, b.rules.f[0].alive() && b.rules.f[1].alive() ? 1 : 0);
                     battleChooseCommand(app, 0);
                     if (b.menu == App::Battle::Targets) battleChooseTarget(app, b.picks[0]);
