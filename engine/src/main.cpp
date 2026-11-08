@@ -692,6 +692,7 @@ struct App {
         cr::BattleRules rules;
         enum Phase { Intro, Command, Acting, WinTalk, BossDown, SetPiece, Won, Results, Lost, Fled, StoryEnd, RoundEnd } phase = Intro;
         int phaseFrames = 0;
+        int introStep = 300;     // the opening's btl_main state past 200: 300 (the counter), 400 (after it), 499 (the menu's flag set)
         bool wonTap = false; // a tap in the victory's hold (state 1099: 140 frames or pad_chk_trg_up)
         bool lostTap = false;    // a tap on the defeat (0x513: at once, or after 40 frames of an event battle's game over picture)
         bool ending = false;     // btl_main 9000 -> 0x238b: the black mask over 10 frames, the music fading, 12 frames, then the way out
@@ -13995,6 +13996,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     b.actors.clear();
     b.phase = App::Battle::Intro;
     b.phaseFrames = 0;
+    b.introStep = 300;
     b.menu = App::Battle::Top;
     b.cursor = 0;
     b.member = 0;
@@ -16182,14 +16184,26 @@ void stepBattle(App& app) {
             if (b.start.strike == 1 || b.start.strike == 2) setBanner(app, sysText(app, 57053 + b.start.strike), 60);
         }
         // 300's first frame (7348-7358): the counter at 29 sets the formation's camera again with actor 0 -
-        // cameras 0..0xd turn (raw[14] -20 over raw[15] 15); formation 2's at 59 camera 0x21b instead
+        // cameras 0..0xd turn (raw[14] -20 over raw[15] 15); formation 2's at 59 camera 0x21b (-25 over 30)
+        // instead. The turn's first frame cuts to it (count 1: _Clr_evcv), the rest ease in by a fifth a
+        // frame - the move is made under the fade and settles before the commands
         if (b.phaseFrames == kIntroWhite + 1) setBattleCamera(app, b.formation == 2 ? 0x21b : std::max(0, b.formation - 2), 0);
-        if (b.phaseFrames >= kIntroWhite + (b.formation == 2 ? 60 : 30)) {
+        if (b.introStep == 300 && b.phaseFrames >= kIntroWhite + (b.formation == 2 ? 60 : 30)) {
+            // the counter below 1 (and the fade done): 400 next; _chk_karaok_frist - a story battle's talk
+            // (flag 0xfff) holds 400 till it ends
+            b.introStep = 400;
+            battletalk::first(app);
+        } else if (b.introStep == 400) {
+            // 400 (7366-7400): ambushed (+0x8a910 2) - 500, the enemies' round, no menu and no camera of
+            // its own (the turned one stays until the first action's); else 0x364 |= 0x200 and 499
+            if (b.start.strike == 2) battleStartRound(app);
+            else b.introStep = 499;
+        } else if (b.introStep == 499) {
+            // __menub_mainPrc 0 the frame after (PrcMenu runs before btl_prc): the top menu, sliding in from
+            // 320, and its camera (formation + 0xc: a still one, cut to)
             b.phase = App::Battle::Command;
             b.phaseFrames = 0;
             battleMenu(app, App::Battle::Top);
-            if (b.start.strike == 2) battleStartRound(app); // ambushed: the enemies' round first
-            battletalk::first(app); // btl_main 300 -> 400
         }
         break;
     case App::Battle::WinTalk: // btl_main 8000: the last word said, the victory
@@ -16371,6 +16385,10 @@ void stepBattle(App& app) {
     stepBattleCamera(app); // (btl_main's end: btlcamera_prc; btl_prc: the eye, the easing)
     stepQuake(app); // gameapp_prc: UpdateQuake and PutMask after the battle's frame
     stepFlash(app);
+    if (SDL_getenv("CR_BATTLE_CAMLOG")) // debugging: the shown camera each battle frame
+        std::printf("camlog %d phase %d/%d cam %#x actor %d count %d/%d ease %.0f fade %d/%d eye %.3f %.3f %.3f target %.3f %.3f %.3f\n", b.frames,
+                    int(b.phase), b.phaseFrames, b.cam, b.camActor, b.camFrame, b.camDur, b.camEase, app.fadeT, app.fadeFrames, b.camEye.x,
+                    b.camEye.y, b.camEye.z, b.camTarget.x, b.camTarget.y, b.camTarget.z);
 }
 
 // btl_prc (8040-8042): _mceCamera_setPerspectiveFov_op(cam, aspect, fov / 360, 1.0, 3500.0)
@@ -23366,7 +23384,8 @@ int runSelfTest(App& app) {
         app.pendingEntry = App::Entry::None;
         app.runner.stop();
         bool openOk = false, soundOk = false, idleOk = false, shadowOk = false, castOk = false, turnOk = false, projOk = false, nameOk = false;
-        int shadowsDrawn = 0, castFrames = 0, phases = 0;
+        int shadowsDrawn = 0, castFrames = 0, phases = 0, formation2 = 0;
+        std::vector<float> introSteps;
         // _btl_in_eff's table
         soundOk = battleInSound(1) == 0xa8 && battleInSound(9) == 0xa9 && battleInSound(0x2b) == 0xa9 && battleInSound(0xae) == 0xa8 &&
                   battleInSound(0x105) == 0xaa && battleInSound(0x107) == 0xa8 && battleInSound(0x11b) == 0xaa && battleInSound(0x15f) == 0xa9 &&
@@ -23401,7 +23420,10 @@ int runSelfTest(App& app) {
                 }
             idleOk = phases >= 2 && seen.size() >= 2 && inRange;
             check(idleOk, "idle-phases");
-            // the white held, 200's fade and still camera, 300's turning one, the commands 30 frames on
+            // the white held, 200's fade and still camera, 300's turning one - cut to on its first frame,
+            // eased in under the fade (the steps growing to the turn's 15th frame, then shrinking by about a
+            // fifth a frame), settled before the commands; the commands 32 frames on (300's counter 30,
+            // then 400, then __menub_mainPrc 0) with their camera (formation + 0xc) cut to, nothing set between
             const int fm = std::max(0, b.formation - 2);
             bool white = true;
             for (int f = 1; f < kIntroWhite; ++f) {
@@ -23413,13 +23435,61 @@ int runSelfTest(App& app) {
             check(app.fadeFrom == 1 && app.fadeTo == 0 && app.fadeT == 0 && app.fadeFrames == 20 && b.cam == fm && b.camActor == -1, "state-200");
             stepBattle(app); // 300's first
             const cr::BattleCamera* c = app.battleData.camera(fm);
-            check(b.cam == fm && b.camActor == 0 && c && (c->raw[14] == 0 || (b.camDur == c->raw[15] && b.camFrame >= 1)), "state-300-turn");
-            if (c) check(fm > 0xd || (c->raw[14] == -20 && c->raw[15] == 15), "formation-camera-turns");
+            check(b.cam == fm && b.camActor == 0 && c && b.camDur == c->raw[15] && b.camFrame == 1 && b.camSnapped, "state-300-turn");
+            if (c) check(fm <= 0xd && c->raw[14] == -20 && c->raw[15] == 15, "formation-camera-turns");
+            std::vector<float> steps; // the shown eye's move each frame, 300's second frame on
+            cr::Vec3 last = b.camEye;
+            const int sets = b.camSets;
             int toCommand = kIntroWhite + 1;
-            for (; toCommand < 100 && b.phase == App::Battle::Intro; ++toCommand) stepBattle(app);
-            check(toCommand == kIntroWhite + 30, "intro-30");
+            for (; toCommand < 100 && b.phase == App::Battle::Intro; ++toCommand) {
+                stepBattle(app);
+                if (b.phase != App::Battle::Intro) break;
+                const cr::Vec3 d = b.camEye - last;
+                steps.push_back(std::sqrt(cr::dot(d, d)));
+                last = b.camEye;
+            }
+            ++toCommand;
+            check(toCommand == kIntroWhite + 32, "intro-32");
+            check(b.camSets == sets + 1 && b.cam == b.formation + 12 && b.camSnapped, "command-camera");
+            bool rising = steps.size() >= 27, falling = rising;
+            for (size_t i = 1; i < 14 && rising; ++i) rising = steps[i] > steps[i - 1]; // 300's frames 2..15
+            for (size_t i = 15; i < 27 && falling; ++i) falling = steps[i] < steps[i - 1] && steps[i] > steps[i - 1] * 0.7f;
+            const float peak = steps.empty() ? 0.0f : *std::max_element(steps.begin(), steps.end());
+            check(rising && falling && peak > 0.5f && steps[13] == peak && steps.back() < peak * 0.05f, "intro-move");
+            introSteps = steps;
+            // ambushed: 400 goes to 500 - the enemies' round, no menu, the turned camera kept
+            endBattle(app, false);
+            app.rng.seed(5);
+            startBattle(app, {group, 0, -1, 2}, 0);
+            int ambushAt = 0;
+            for (; ambushAt < 100 && b.phase == App::Battle::Intro; ++ambushAt) stepBattle(app);
+            check(ambushAt == kIntroWhite + 31 && b.phase == App::Battle::Acting && b.cam == fm && b.camActor == 0, "ambush-400");
+            // formation 2 (a boss's): 300's first frame camera 0x21b (-25 over 30), the commands 62 on
+            const cr::BattleCamera* c2 = app.battleData.camera(0x21b);
+            check(c2 && c2->raw[14] == -25 && c2->raw[15] == 30, "camera-0x21b");
+            for (int g = 1; g <= app.battleData.groupCount(); ++g)
+                if (app.battleData.formation(app.battleData.group(g)) == 2) {
+                    endBattle(app, false);
+                    startBattle(app, {g, 0, -1, 0}, 0);
+                    if (!b.active || b.formation != 2) break;
+                    for (int f = 0; f < kIntroWhite; ++f) stepBattle(app);
+                    check(b.cam == 0 && b.camActor == -1, "formation-2-200");
+                    stepBattle(app);
+                    check(b.cam == 0x21b && b.camActor == 0 && b.camDur == 30 && b.camFrame == 1, "formation-2-0x21b");
+                    int at = kIntroWhite + 1;
+                    for (; at < 150 && b.phase == App::Battle::Intro; ++at) stepBattle(app);
+                    check(at == kIntroWhite + 62 && b.cam == 0xe, "formation-2-62");
+                    formation2 = g;
+                    break;
+                }
+            check(formation2 > 0, "formation-2-group");
+            endBattle(app, false);
+            app.rng.seed(5);
+            startBattle(app, {group, 0, -1, 0}, 0);
+            for (int f = 0; f < 100 && b.phase == App::Battle::Intro; ++f) stepBattle(app);
             openOk = why.find("white") == std::string::npos && why.find("state-") == std::string::npos && why.find("intro") == std::string::npos &&
-                     why.find("formation-") == std::string::npos;
+                     why.find("formation-") == std::string::npos && why.find("command-") == std::string::npos &&
+                     why.find("ambush") == std::string::npos && why.find("0x21b") == std::string::npos;
             // the shadows: one fan per fighter, the pair at 204, a monster's fading with it
             App::Battle::Actor* m0 = battleActor(app, 0);
             App::Battle::Actor* e2 = battleActor(app, 2);
@@ -23518,10 +23588,13 @@ int runSelfTest(App& app) {
             check(nameOk, "name-0x106");
         }
         problems += app.renderer.takeErrors();
-        std::printf("battle scene: the opening (white %d steps, 200's fade and still camera, 300's turning one, 30 to the commands) %s, "
+        std::printf("battle scene: the opening (white %d steps, 200's fade and still camera, 300's turning one eased in under the fade - "
+                    "eye steps %.2f / %.2f (peak, 300's 15th) / %.3f (the last) -, 32 to the commands and their camera, an ambush's 31 to the "
+                    "enemies' round, formation 2's 0x21b and 62 (group %d)) %s, "
                     "start sound %s, idle phases (%d monsters) %s, shadows (%d fans, 204 / 80%% of the fade, hidden none) %s, cast loop "
                     "(%d frames) %s, turning 15/frame %s, near 1 far 3500 %s, m010's name row %s; %d problems%s\n",
-                    kIntroWhite, openOk ? "yes" : "NO", soundOk ? "yes" : "NO", phases, idleOk ? "yes" : "NO", shadowsDrawn, shadowOk ? "yes" : "NO",
+                    kIntroWhite, introSteps.empty() ? 0.0f : introSteps[0], introSteps.size() > 13 ? introSteps[13] : 0.0f,
+                    introSteps.empty() ? 0.0f : introSteps.back(), formation2, openOk ? "yes" : "NO", soundOk ? "yes" : "NO", phases, idleOk ? "yes" : "NO", shadowsDrawn, shadowOk ? "yes" : "NO",
                     castFrames, castOk ? "yes" : "NO", turnOk ? "yes" : "NO", projOk ? "yes" : "NO", nameOk ? "yes" : "NO", problems, why.c_str());
         mapErrors += problems;
         app.runner.stop();
@@ -24471,7 +24544,8 @@ int runSelfTest(App& app) {
                 pagesSeen = std::max(pagesSeen, int(app.dialogue.size()));
                 if (!app.dialogue.empty() && ++pageFrames == 12) look("CR_TALK_SHOT_A"); // the first page and its picture
                 if (pageFrames >= 12) readOn(f);
-            } else if (talkFrames > 0) {
+            } else if (talkFrames > 0) { // (the talk's end: btl_main 400, then the menu a frame on)
+                for (int k = 0; k < 2 && b.phase == App::Battle::Intro; ++k) stepBattle(app);
                 tutorialSeen = app.game.flag(0xff1) && !app.runner.running() && b.phase == App::Battle::Command;
                 break;
             }
@@ -25441,11 +25515,13 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         if (!SDL_getenv("CR_CAPTURE_TUTORIALS")) // the battles' tutorials seen (else the first one holds the view)
             for (int f : {0xff1, 0xff2, 0xff3, 0xff4, 0xff5, 0xfa8, 0xfa9}) app.game.setFlag(f, true);
         startBattle(app, {app.captureBattle[0], app.captureBattle[1], -1, 0}, 0);
-        for (int f = 0; f < 30 && app.battle.active; ++f) stepBattle(app);
-        // --battle-view top|commands|targets|items|escape|hit|results: a screen of it
+        // --battle-view top|commands|targets|items|escape|hit|results: a screen of it; intro@n: the
+        // opening n battle frames in (btl_main 200 at kIntroWhite)
         const std::string& v = app.captureBattleView;
         App::Battle& b = app.battle;
-        for (int f = 0; f < 10 && b.active && b.phase != App::Battle::Command; ++f) stepBattle(app);
+        const int introAt = v.rfind("intro@", 0) == 0 ? SDL_atoi(v.c_str() + 6) : -1;
+        for (int f = 0; f < (introAt >= 0 ? introAt : 30) && app.battle.active; ++f) stepBattle(app);
+        for (int f = 0; introAt < 0 && f < 10 && b.active && b.phase != App::Battle::Command; ++f) stepBattle(app);
         if (v == "items") app.game.items[21] = 3, app.game.items[22] = 1, app.game.items[24] = 2;
         if (v == "commands" || v == "targets" || v == "items") battleChooseTop(app, 0);
         if (v == "targets") battleChooseCommand(app, 0);

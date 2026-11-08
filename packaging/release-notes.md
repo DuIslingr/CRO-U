@@ -4,6 +4,10 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
 
 ## What's new
 
+- **A battle's opening timed as the original's:** the formation camera's 20-degree turn plays under
+  the fade from white and has settled when the commands come; the commands and their camera now
+  arrive two frames later, as in the original (checked against a recording of the Android release),
+  and an ambush goes straight to the enemies' round without cutting to the command camera first.
 - **The field drawn as 3.1.0 draws it:** the leader and the objects and people the game marks for
   it cast the original's soft black ellipse shadows (the same shadow code as the battle's), which
   stay when a scene hides the field. People and objects are coloured as the original's loader sets
