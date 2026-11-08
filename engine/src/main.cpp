@@ -224,6 +224,9 @@ struct App {
     bool titleOpen = false;                // Util 0
     int titleCursor = 0;
     int titleAnim = 0;
+    int titleStage = 0;                    // __menuu_TitlePrc: 0 the title alone, a tap away (state 1); 1 the plates (7 / 8)
+    int resumeIn = 0;                      // the Progress Tracker's Yes: frames of black left before the load (TitlePrc 0x1d)
+    int titleReturnIn = 0;                 // Options' Return to Title: frames of black left before the title (OptionPrc 0x18)
     bool optionsFromTitle = false;         // ModeOptionMenu(1): Reset Data instead of Return to Title
     int resetAsk = 0, resetConfirm = 1;    // Reset Data's two questions (OptionPrc 9 / 10: 1, 2), No under the cursor
     bool captureTitle = false;             // --capture ... --title
@@ -751,6 +754,7 @@ struct App {
     struct Puzzle {
         int stage = -1;                    // -1: not in a puzzle room
         int esp = -1;                      // uses left (-1 no limit)
+        int pyroCool = 0;                  // Pyrokinesis::update: frames left before another tap counts (20 after one)
         struct Obj {
             int npc = -1;                  // index in npcs
             int type = 0, layer = 1, row = 0, col = 0;
@@ -987,7 +991,7 @@ constexpr uint32_t kCampOpen = kMenuBase + 8, kCampClose = kMenuBase + 9; // men
 constexpr uint32_t kSaved = kMenuBase + 11;  // SaveLoadPrc, after SaveData_Save
 constexpr uint32_t kLoaded = kMenuBase + 12; // SaveLoadPrc: Yes to Load / New
 constexpr uint32_t kPaid = kMenuBase + 22;   // ShopPrc
-constexpr uint32_t kVolume = kMenuBase + 40; // MuOptionSetInfo: the SE gauge let go (the BGM gauge is silent)
+constexpr uint32_t kVolume = 0x131; // MuOptionSetInfo: __effgo(0x131) as the SE gauge is let go (the BGM gauge is silent)
 constexpr uint32_t kSlide = 0x12d;           // StartPrc: Select Scenario's page dragged over
 // The original is touch-only, so it has no cursor sound; keyboard cursor moves are the port's own
 constexpr uint32_t kCursor = kBuzzer;
@@ -1617,6 +1621,7 @@ cr::FieldNpc* findNpc(App& app, int id);
 std::string itemName(const App& app, int item);
 void startNewGame(App& app, int scenario = 0);
 void bootTitle(App& app);
+void titleStart(App& app);
 void padButton(App& app, int b);
 void padStep(App& app, float dt);
 bool padLive(App& app);
@@ -3528,11 +3533,11 @@ struct ViewerHost : cr::EventHost {
         app.battle.requestFlags = flags;
     }
     bool menu(int n) override {
-        if (n == 0) { // the title menu, and the Progress Tracker's offer when there's a resume point
+        if (n == 0) { // the title menu: the title alone until a tap, then the plates (the Progress Tracker's offer follows Start)
             app.titleOpen = true;
             app.titleCursor = 0;
             app.titleAnim = 0;
-            offerResume(app);
+            app.titleStage = 0;
             return true;
         }
         if (n == 1) { openWorldSelect(app); return true; }
@@ -4154,7 +4159,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
         } else {
             title.label = sysLabel(app, 58123, "Return to Title");
             title.enabled = app.mode == Mode::Maps && !app.booting;
-            title.act = [&app](int) { bootTitle(app); };
+            title.act = [&app](int) { app.resetAsk = 3, app.resetConfirm = 1; }; // OptionPrc 0xc: "return to the title?" (57060)
         }
         rows.push_back(title);
         break;
@@ -4500,7 +4505,7 @@ void drawOptions(App& app, float, float) {
     }
     if (app.resetAsk) { // OptionPrc 9 / 10: the message board (57078, then 57079), Yes / No at (336, 104 / 160)
         std::vector<std::vector<std::string>> pages;
-        app.systemText.message(app.resetAsk == 1 ? 57078 : 57079, app.language, nullptr, pages, nullptr);
+        app.systemText.message(app.resetAsk == 1 ? 57078 : app.resetAsk == 2 ? 57079 : 57060, app.language, nullptr, pages, nullptr);
         r.setOrigin(0); // (the rows' window goes while it asks: WinDispOff(5))
         r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 0.75f);
         r.setOrigin(r.uiX());
@@ -4532,6 +4537,16 @@ void resetAnswer(App& app, bool yes) {
     if (yes && app.resetAsk == 1) {
         app.resetAsk = 2, app.resetConfirm = 1;
         menuSound(app, se::kChoose);
+        return;
+    }
+    if (app.resetAsk == 3) { // Return to Title (OptionPrc 0xd / 0x18 / 0x19): Yes - black over 500 ms, the music off,
+        // twelve frames, then MuCom_ReturnTitle (stepEvents); No - the page again
+        app.resetAsk = 0;
+        menuSound(app, se::kChoose);
+        if (!yes) return;
+        playBgm(app, 1u << 27);
+        app.fadeGrey = 0, app.fadeFrom = 0, app.fadeTo = 1, app.fadeFrames = 10, app.fadeT = 0;
+        app.titleReturnIn = 12;
         return;
     }
     app.resetAsk = 0;
@@ -5003,7 +5018,7 @@ void stepSaveScreen(App& app) {
     App::SaveScreen& ss = app.saveScreen;
     if (!ss.open) return;
     ++ss.anim;
-    if (ss.phase == 2 && ++ss.timer >= (ss.toTitle ? 20 : 40)) { // (SaveLoadPrc 10: "Save complete." 20 frames on the way to the title)
+    if (ss.phase == 2 && ++ss.timer >= (ss.toTitle || ss.load ? 20 : 40)) { // (SaveLoadPrc 5 / 10: "Load / Save complete." 20 frames at the title)
         ss.open = false;
         if (ss.load && ss.message > 0) app.titleOpen = false; // loaded: on with the game
         if (ss.toTitle) saveScreenToTitle(app);
@@ -5038,7 +5053,10 @@ void saveScreenKey(App& app, SDL_Keycode key) {
     else if (key == SDLK_DOWN || key == SDLK_S) { ss.cursor = (ss.cursor + 1) % n; menuSound(app, se::kCursor); }
     else if (enter) saveScreenChoose(app, ss.cursor);
     else if (back) {
-        if (ss.load && app.booting) app.game.vars[1] = 0; // back to Character Select
+        if (ss.load && app.booting) {
+            app.game.vars[1] = 0; // back to Character Select
+            if (app.game.vars[0] == 2) playBgm(app, 0x1d); // (SaveLoadClr: the second scenario's screen gives its page back its tune)
+        }
         closeSaveScreen(app);
         menuSound(app, se::kBack);
     }
@@ -6638,7 +6656,7 @@ void drawLastBattle(App& app) {
     // right, the question centred
     r.setOrigin(wideLeft(app));
     auto ease = [](float t) { return 1 - (1 - t) * (1 - t); };
-    if (lb.win[0] > 0) m.picture(109, 8, 6, lb.win[0]);
+    if (lb.win[0] > 0) m.picture(110, 8, 6, lb.win[0]); // (_stMuPictInfo_LastBt: picture 110 at (8, 6))
     if (lb.win[1] > 0) {
         const float dx = -140 * (1 - ease(lb.win[1]));
         m.picture(15, dx, 56, lb.win[1]);
@@ -8104,8 +8122,12 @@ void offerResume(App& app) {
 void answerResume(App& app, bool yes) {
     app.resumePrompt = 0;
     SDL_RemovePath(savePath(app, "resume.dat").c_str()); // used up either way, as the original's
-    const bool failed = yes && !applySave(app, app.resumeData);
-    menuSound(app, failed ? se::kBuzzer : se::kChoose); // Yes and No alike (TitlePrc's ComUty_YesNoChoicePosProc)
+    menuSound(app, se::kChoose); // Yes and No alike (TitlePrc's ComUty_YesNoChoicePosProc)
+    if (!yes) { titleStart(app); return; } // No: on with Start
+    // Yes (TitlePrc 0x1d): the music off, black over 10 frames, ten frames, then the load (stepEvents)
+    playBgm(app, 1u << 27);
+    app.fadeGrey = 0, app.fadeFrom = 0, app.fadeTo = 1, app.fadeFrames = 10, app.fadeT = 0;
+    app.resumeIn = 10;
 }
 
 void drawResumePrompt(App& app) {
@@ -9199,36 +9221,38 @@ void drawTitleMenu(App& app) {
         }
     m.begin(app.renderer, app.windowTex, &app.font);
     const PhoneMenu phoneMenu(app, m); // the iPhone layout: its screen's menu coordinates
+    // TitlePrc: the title's art alone (windows 0 / 1: the logo and the name, the strip below) until
+    // a tap (state 1); then the logo and the name go (windows 0 and 2 off), the strip stays, and
+    // the plates with the store's pictures slide in from x +240 (window 3, state 7)
     const float t = std::min(1.0f, app.titleAnim / 10.0f), ease = 1 - (1 - t) * (1 - t);
+    const bool plates = app.titleStage == 1;
+    const float logo = plates ? std::max(0.0f, 1 - app.titleAnim / 10.0f) : t; // (the logo fading out as the plates come)
     if (app.renderer.phoneLayout()) {
-        outPicture(m, app.titleArt[0], 7, 184, 220, t);
-        outPicture(m, app.titleArt[1], 6, 0, 0, t);
-        outPicture(m, app.titleArt[0], 8, 0, 280, t);
+        outPicture(m, app.titleArt[0], 7, 184, 220, logo);
+        outPicture(m, app.titleArt[1], 6, 0, 0, logo);
+        outPicture(m, app.titleArt[0], 8, 0, 280, plates ? 1.0f : t);
     } else {
-        outPicture(m, app.titleArt[0], 9, 184, 252, t);
-        outPicture(m, app.titleArt[1], 6, 0, -32, t);
-        outPicture(m, app.titleArt[0], 10, 0, 312, t);
+        outPicture(m, app.titleArt[0], 9, 184, 252, logo);
+        outPicture(m, app.titleArt[1], 6, 0, -32, logo);
+        outPicture(m, app.titleArt[0], 10, 0, 312, plates ? 1.0f : t);
     }
-    app.renderer.setOrigin(wideRight(app)); // (widescreen: the plates to the screen's right)
-    for (int i = 0; i < 3; ++i)
-        m.plate(328 + 240 * (1 - ease), 114 + 56.0f * float(i), kTitleIcons[i], kTitleWords[i], app.titleCursor == i, t,
-                !titleChoiceReady(i));
-    app.renderer.setOrigin(wideLeft(app)); // (... and the pictures down the left to its left)
-    m.picture(125, 8, 16, t);
-    m.picture(126, 8, 96, t);
+    if (plates) {
+        app.renderer.setOrigin(wideRight(app)); // (widescreen: the plates to the screen's right)
+        for (int i = 0; i < 3; ++i)
+            m.plate(328 + 240 * (1 - ease), 114 + 56.0f * float(i), kTitleIcons[i], kTitleWords[i], app.titleCursor == i, t,
+                    !titleChoiceReady(i));
+        app.renderer.setOrigin(wideLeft(app)); // (... and the pictures down the left to its left)
+        m.picture(125, 8, 16, t);
+        m.picture(126, 8, 96, t);
+    }
     if (keyHints(app)) // (our key hints)
         m.text("Up/Down  Enter  V: Options  Esc: quit", 20, 360, false, t * 0.8f, 9);
     app.renderer.setOrigin(app.renderer.uiX());
 }
 
-void titleChoose(App& app, int i) {
-    app.titleCursor = i;
-    if (!titleChoiceReady(i)) { menuSound(app, se::kBuzzer); return; }
-    menuSound(app, se::kChoose);
-    if (i == 2) { openOptions(app, 0); return; } // SetOptionMenu + ModeOptionMenu(1)
-    if (i == 1) { openScenarios(app, 0); return; }  // ModeSccnariosMenu(0), SetSccnariosMenu
-    // Start: the boot script goes on (flag 0 clear) to Character Select (Util 4), then the pair's
-    // save / load screen (Util 5)
+// Start: the boot script goes on (flag 0 clear) to Character Select (Util 4), then the pair's save /
+// load screen (Util 5)
+void titleStart(App& app) {
     if (app.booting && app.runner.running()) {
         app.game.setFlag(0, false);
         app.titleOpen = false;
@@ -9237,8 +9261,29 @@ void titleChoose(App& app, int i) {
     }
 }
 
+// TitlePrc state 1: a tap anywhere - SE 0x91, the logo off, the plates in
+void titleTap(App& app) {
+    if (app.titleStage != 0) return;
+    app.sound.play(0x91);
+    app.titleStage = 1;
+    app.titleAnim = 0;
+}
+
+void titleChoose(App& app, int i) {
+    app.titleCursor = i;
+    if (!titleChoiceReady(i)) { menuSound(app, se::kBuzzer); return; }
+    menuSound(app, se::kChoose);
+    if (i == 2) { openOptions(app, 0); return; } // SetOptionMenu + ModeOptionMenu(1)
+    if (i == 1) { openScenarios(app, 0); return; }  // ModeSccnariosMenu(0), SetSccnariosMenu
+    // Start (TitlePrc 8 -> 0x16): the Progress Tracker's offer first, when there is a resume point
+    offerResume(app);
+    if (app.resumePrompt) return;
+    titleStart(app);
+}
+
 // Keys on the title; false = quit
 bool titleKey(App& app, SDL_Keycode key) {
+    if (app.titleStage == 0 && key != SDLK_ESCAPE && key != SDLK_AC_BACK) { titleTap(app); return true; }
     switch (key) {
     case SDLK_UP: case SDLK_W: app.titleCursor = (app.titleCursor + 2) % 3; menuSound(app, se::kCursor); break;
     case SDLK_DOWN: case SDLK_S: app.titleCursor = (app.titleCursor + 1) % 3; menuSound(app, se::kCursor); break;
@@ -9252,10 +9297,14 @@ bool titleKey(App& app, SDL_Keycode key) {
 void titleClick(App& app, float px, float py) {
     float lx, ly;
     app.renderer.toLogical(px, py, lx, ly);
+    if (app.titleStage == 0) { titleTap(app); return; } // (a tap anywhere)
     float mx, my;
     menuPointAt(app, lx, ly, wideRight(app), mx, my); // (widescreen: the plates on the right)
     for (int i = 0; i < 3; ++i)
         if (mx >= 328 && mx < 464 && my >= 114 + 56 * i && my < 154 + 56 * i) titleChoose(app, i);
+    float sx, sy;
+    menuPointAt(app, lx, ly, wideLeft(app), sx, sy); // the store's pictures (8, 16) / (8, 96) 80 x 72: their sound, no store here
+    if (sx >= 8 && sx < 88 && ((sy >= 16 && sy < 88) || (sy >= 96 && sy < 168))) menuSound(app, se::kChoose);
 }
 
 float screenFadeAlpha(const App& app) {
@@ -9491,8 +9540,7 @@ void stepBlock(App& app, App::Puzzle::Obj& o) { // NormalBlockTP / NormalGem (th
             const cr::Vec3 c = centre(app, o.row, o.col);
             const cr::Vec3 p = app.walker.pos;
             if (std::fabs(p.x - c.x) < cr::kPuzzleCell * 0.5f && std::fabs(p.z - c.z) < cr::kPuzzleCell * 0.5f) {
-                npcEffect(app, 0x88, o.npc);
-                npcEffect(app, 0x89, o.npc);
+                npcEffect(app, 0x88, o.npc); // (NormalGem::onIdle: 0x88 alone as it is picked up)
                 show(app, o, false);
                 app.sound.play(0x130);
                 if (int* slot = cellSlot(app, o.layer, o.row, o.col); slot && *slot >= 0 && &app.puzzle.objs[size_t(*slot)] == &o)
@@ -9503,7 +9551,7 @@ void stepBlock(App& app, App::Puzzle::Obj& o) { // NormalBlockTP / NormalGem (th
             }
         }
         if (o.pending == 8) {
-            if (o.type == cr::kTypeNormal) npcEffect(app, 0x89, o.npc); // NormalBlockTP::onIdle
+            npcEffect(app, 0x89, o.npc); // NormalBlockTP::onIdle / NormalGem::onIdle: the going-away effect
             fade(app, o.npc, 1, 0, o.outFrames);
             if (o.onSwitch) press(app, o.row, o.col, false);
             o.state = 2;
@@ -9677,7 +9725,7 @@ void stepPkBlock(App& app, App::Puzzle::Obj& o) {
     switch (o.pk) {
     case 0: // onIdle: taken hold of
         if (o.pkMsg != 1) break;
-        app.sound.play(0x30);
+        app.sound.play(0x12b); // (NormalBlockPK::onIdle: __effgo(299))
         if (o.onSwitch) press(app, o.row, o.col, false);
         o.onSwitch = false;
         o.pkTimer = 2;
@@ -9735,7 +9783,7 @@ void stepPkBlock(App& app, App::Puzzle::Obj& o) {
             if (o.pk == 5) {
                 o.onSwitch = true;
                 press(app, o.row, o.col, true);
-            } else app.sound.play(0x30);
+            } else app.sound.play(0x12c); // (NormalBlockPK::onDown: __effgo(300) as it meets the floor)
             o.pk = 0;
             pkLanded(app);
         } else setY(y);
@@ -9902,7 +9950,7 @@ void stepTough(App& app) {
 void sendCandle(App& app, App::Puzzle::Obj& sw) { // (anonymous)::SendMessage
     App::Puzzle& pz = app.puzzle;
     const cr::FieldNpc& n = app.npcs[size_t(sw.npc)];
-    if (pz.stage < 56) {
+    if (pz.stage < 12) { // (Omega's SendMessage: `stage < 0xc` the candle blocks (CR1's 48..55) - its own 12..15 all link switches)
         for (App::Puzzle::Obj& b : pz.objs)
             if (b.type == cr::kTypeCandle && app.npcs[size_t(b.npc)].link[1] == n.id) b.hit = true;
         return;
@@ -9981,7 +10029,9 @@ void pyroTap(App& app, int t) {
     App::Puzzle::Obj& o = pz.objs[size_t(t)];
     int pr, pc;
     if (o.type != cr::kTypeCandleSwitch || !cellOf(app, app.walker.pos, pr, pc)) return;
+    if (pz.pyroCool > 0) return; // (Pyrokinesis::update: no tap looked at for 20 frames after one taken)
     if (pz.esp == 0) { punish(app, t); return; } // no ESP left - only the mark
+    pz.pyroCool = 20;
     ++app.game.vars[13]; // decESPCount
     if (pz.esp > 0) --pz.esp;
     o.csMsg = 10;
@@ -10001,7 +10051,7 @@ void reset(App& app) {
     App::Puzzle& pz = app.puzzle;
     if (pz.stage < 0 || pz.scene != 4) return;
     app.sound.play(0x14d);
-    app.fadeGrey = 0, app.fadeFrom = 0, app.fadeTo = 1, app.fadeFrames = 8, app.fadeT = 0;
+    app.fadeGrey = 0, app.fadeFrom = 0, app.fadeTo = 1, app.fadeFrames = 10, app.fadeT = 0; // (PuzzleScene::reset: _SetMask(0), 500 ms)
     pz.scene = 2;
 }
 
@@ -10009,6 +10059,7 @@ void reset(App& app) {
 void step(App& app) {
     App::Puzzle& pz = app.puzzle;
     if (pz.stage < 0) return;
+    if (pz.pyroCool > 0) --pz.pyroCool;
     if (pz.scene == 2) { // fading out to the reset
         if (app.fadeT < app.fadeFrames) return;
         const cr::Vec3 start = app.puzzleStart;
@@ -10016,7 +10067,7 @@ void step(App& app) {
         app.npcs = app.events.npcs(app.mapNumber); // every object back where the room has it
         enter(app);
         if (app.puzzle.stage == stageNo) setActor(app, 0, start, nullptr, false);
-        app.fadeFrom = 1, app.fadeTo = 0, app.fadeFrames = 8, app.fadeT = 0;
+        app.fadeFrom = 1, app.fadeTo = 0, app.fadeFrames = 10, app.fadeT = 0; // (onFadeOut: _SetMask(1), 500 ms)
         app.puzzle.scene = 3;
         return;
     }
@@ -10293,6 +10344,10 @@ void stepEvents(App& app) {
     if (app.skipScene && app.runner.running() && !app.dialogue.empty()) advanceDialogue(app);
     stepTyping(app);
     if (app.titleOpen) ++app.titleAnim; // the title menu fades in
+    if (app.resumeIn > 0 && --app.resumeIn == 0) { // the Progress Tracker's load, after its black
+        if (!applySave(app, app.resumeData)) { menuSound(app, se::kBuzzer); titleStart(app); }
+    }
+    if (app.titleReturnIn > 0 && --app.titleReturnIn == 0) { app.optionsOpen = false; bootTitle(app); } // Options' Return to Title, after its black
     if (app.choiceFlag >= 0 && app.choiceAnim < 4) ++app.choiceAnim;
     updateVoices(app);
     if (!app.battle.active) stepEffects(app, app.fieldEffects), stepQuake(app.fieldQuake); // eff3d_prc, UpdateQuake
@@ -17830,7 +17885,7 @@ int runSelfTest(App& app) {
         const int effects = app.mix.effects;
         optionsKey(app, SDLK_LEFT);
         problems += app.mix.effects != std::max(0, effects - 5);
-        problems += expectSounds("options gauges", {4, 4, 40}); // the BGM's is silent
+        problems += expectSounds("options gauges", {4, 4, 0x131 - se::kMenuBase}); // the BGM's is silent; the SE gauge's test is __effgo(0x131)
         openOptions(app, 0);         // Game: Language
         optionsKey(app, SDLK_LEFT);  // Japanese
         problems += app.language != 0;
@@ -17986,6 +18041,9 @@ int runSelfTest(App& app) {
         std::vector<OptRow> gamePage = optionRows(app, 0);
         problems += gamePage.size() != 13 || gamePage.back().label != sysLabel(app, 58123, "Return to Title") || !gamePage.back().enabled;
         if (gamePage.size() == 13 && gamePage.back().act) gamePage.back().act(0);
+        problems += app.resetAsk != 3; // "return to the title?"
+        resetAnswer(app, true);
+        for (int f = 0; f < 14 && app.titleReturnIn > 0; ++f) stepEvents(app); // (twelve frames of black)
         problems += !app.booting;
         app.runner.stop();
         std::printf("options: %d pages, %d rows; FSR 3.1 modes drawn: %d; title menu after %d frames; %d problems\n",
@@ -18068,13 +18126,17 @@ int runSelfTest(App& app) {
         app.persist = true;
         bootTitle(app);
         for (int f = 0; f < 1000 && !app.titleOpen; ++f) stepEvents(app);
+        app.titleStage = 1;
+        titleChoose(app, 0); // Start: the Progress Tracker's offer follows it (TitlePrc 8 -> 0x16)
         const bool offered = app.resumePrompt == 1;
         problems += !offered;
         app.menuSoundLog.clear();
         answerResume(app, true);
+        for (int f = 0; f < 12 && app.resumeIn > 0; ++f) stepEvents(app); // (ten frames of black, then the load)
         problems += expectSounds("resume", {2});
         problems += app.titleOpen || app.mapNumber != before.map || SDL_GetPathInfo(savePath(app, "resume.dat").c_str(), nullptr);
         // ... and saved as you go (the Vita's): a scene's end after the load arms it, the next writes it
+        app.trackerArmed = false; // (the room's entry script may have ended during the load's frames above: that armed it)
         trackerSceneEnd(app);
         const bool armedOnly = !SDL_GetPathInfo(savePath(app, "resume.dat").c_str(), nullptr);
         trackerSceneEnd(app);
@@ -18761,13 +18823,42 @@ int runSelfTest(App& app) {
         drawFrame(app, false); // the flames (and any beam) drawn
         const int fxErrs = app.renderer.takeErrors();
         int taps = 1;
-        for (int round = 0; round < 40 && !puzzle::allCandlesLit(app); ++round)
-            for (size_t i = 0; i < pz.objs.size() && !puzzle::allCandlesLit(app); ++i)
-                if (pz.objs[i].type == cr::kTypeCandleSwitch && pz.objs[i].cs == 0) {
-                    puzzle::pyroTap(app, int(i));
-                    ++taps;
-                    steps(45);
+        { // Omega's pyrokinesis stages link their switches (NPC table +22..+28): a tap toggles the switch
+          // and, five frames on, each it links to - a lights-out puzzle. The taps that light them all,
+          // found by a search over the switches' states; 45 frames between taps let every chain settle
+            std::vector<int> sws;
+            for (size_t i = 0; i < pz.objs.size(); ++i)
+                if (pz.objs[i].type == cr::kTypeCandleSwitch) sws.push_back(int(i));
+            const int n = int(sws.size());
+            auto toggleOf = [&](int k) { // the state bits a tap on switch k flips
+                unsigned m = 1u << k;
+                const cr::FieldNpc& row = app.npcs[size_t(pz.objs[size_t(sws[size_t(k)])].npc)];
+                for (int l = 0; l < 4 && row.link[l] != 0; ++l)
+                    for (int j = 0; j < n; ++j)
+                        if (app.npcs[size_t(pz.objs[size_t(sws[size_t(j)])].npc)].id == row.link[l]) m |= 1u << j;
+                return m;
+            };
+            unsigned start = 0;
+            for (int k = 0; k < n; ++k) start |= (pz.objs[size_t(sws[size_t(k)])].cs == 3 ? 1u : 0u) << k;
+            const unsigned goal = n >= 32 ? 0xffffffffu : (1u << n) - 1;
+            std::vector<int> from(size_t(1) << std::min(n, 20), -1), via(from.size(), -1);
+            std::vector<unsigned> queue{start};
+            from[start] = int(start);
+            for (size_t q = 0; q < queue.size() && from[goal] < 0; ++q)
+                for (int k = 0; k < n; ++k) {
+                    const unsigned next = queue[q] ^ toggleOf(k);
+                    if (from[next] >= 0) continue;
+                    from[next] = int(queue[q]), via[next] = k;
+                    queue.push_back(next);
                 }
+            std::vector<int> seq;
+            for (unsigned s = goal; from[goal] >= 0 && s != start; s = unsigned(from[s])) seq.push_back(via[s]);
+            for (auto it = seq.rbegin(); it != seq.rend(); ++it) {
+                puzzle::pyroTap(app, sws[size_t(*it)]);
+                ++taps;
+                steps(45);
+            }
+        }
         const bool allLit = puzzle::allCandlesLit(app);
         settle(3000);
         steps(3);
@@ -19357,6 +19448,7 @@ int runSelfTest(App& app) {
         errs += r.takeErrors();
         app.saveScreen.open = false;
         app.titleOpen = true;
+        app.titleStage = 1; // (past the title's tap-to-start)
         app.titleCursor = 2;
         tap(wideRight(app), 328 + 60, 114 + 20, px, py); // Start's plate
         const int before = app.titleCursor;

@@ -50,6 +50,20 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   Omega's Down and Ward status icons use their own sprites; "Critical!" and its kind slide in
   sideways; the Camp's item and equip sounds are the original's, and a No to using an item goes
   back to the list.
+- **Puzzle rooms:** the pyrokinesis stages (12..15) pass a lit switch's light on to the switches it
+  links to, with the beam and the five-frame chain, as the original - the port took them for the
+  first game's candle-block stages, so each switch had to be tapped on its own; a tap counts only
+  twenty frames after the last; a lifted block's sounds are the original's (299 as it is taken,
+  300 as it lands); a gem's effects are the original's; a Retry's fades last 500 ms.
+- **Options:** Return to Title asks first and leaves through the original's black fade with the
+  music stopping; the sound-effects gauge plays the original's test sound; the last battle's header
+  is the original's picture.
+- **The title:** the title's art stands alone until a tap or key (its sound), then the logo goes and
+  the plates slide in, as the original's title does; the "resume from last saved point?" offer
+  comes after Start, not before the plates, and its Yes stops the music and fades to black before
+  the load; "Load complete." holds the original's 20 frames; backing out of the second scenario's
+  Load / New screen gives Select Scenario its tune back; the store's pictures answer a tap with
+  their sound (there is no store).
 - **Scripts' natives:** `NpcFade 0` fades the player (the second scenario's materialisation under
   effect 143); the first dungeon's two fire walls burn (their NPC rows' own native, which the
   original runs as the room is set up); `Uty_Btl_ParamUp` doubles the fighter's stats for the
