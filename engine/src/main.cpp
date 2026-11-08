@@ -390,6 +390,7 @@ struct App {
         int gT = 0, gFrames = 0;
         bool dying = false;                // low bit 2 (+0xbd0c = -1): goes once its fade and slide end
         uint16_t flags = 0;                // the slot's flag word (+0x4): Tex2d flags OR'd in
+        bool ipadCard = false;             // a full-screen card from the _ipad sheet (the Android layout)
         float scale = 1;                   // 0x40: centre images zoom from 200% to 100% over 4 frames
         int zoomT = 0, zoomFrames = 0;
     };
@@ -3687,6 +3688,14 @@ struct ViewerHost : cr::EventHost {
                     name.insert(dot, std::string("_") + kLangSuffix[app.language - 2]);
                     loaded = loadImage(app, name, img);
                 }
+            }
+            // (Android 1.1.6 draws a full-screen card (0x8000) from the iPad's sheet - its 1024 x 768
+            // picture fitted to the phone's width, centred: Part 1 11 s, the title)
+            if (!loaded && (f & 0x8000) && app.renderer.androidScreen()) {
+                std::string name = cr::kTex2dImage[image];
+                const size_t dot = name.rfind('.');
+                if (dot != std::string::npos) name.insert(dot, "_ipad");
+                p.ipadCard = loaded = loadImage(app, name, img) && img.width >= 1024;
             }
             if (loaded || loadImage(app, cr::kTex2dImage[image], img)) p.tex = app.renderer.upload(img);
             p.image = image;
@@ -10821,18 +10830,39 @@ void closeCharSelect(App& app, int scenario) { // __menuu_StartClr: var 0 = 0 (B
 
 // The page's art, picture 24 (iPhone 22) - or with `banner` the banner over it, 27 (26) (Omega's
 // StartPut); `grey` darkens it. Drawn in menu units under PhoneMenu
+// Android 1.1.6 (StartPut, SaveLoadPut on a Retina phone): the art through MuComPictTexNoDrawFull2 -
+// the iPhone's 480 x 320 picture over the whole phone, its middle kept (Part 1 18 s, Part 8 4901.5 /
+// 4904.5 s: chara1 / 2 / 3 at 4 / 3 on the 1280 x 720 phone, (0, -67)); the banner at - oy
+// (StartPut's floor(-oy / scale)). 1 and no shift elsewhere
+float charArtScale(const App& app) {
+    if (!app.renderer.androidScreen()) return 1;
+    return std::max((480 + 2 * androidEdgeX(app)) / 480, (320 + 2 * androidEdgeY(app)) / 320);
+}
+
+// The picture `pict` of `tex` (kOutReadPicture, the menu units' size) at (x, y), fitted as
+// MuComPictTexNoDrawFull2 fits it in the Android layout (about the screen's middle, `dy` moving it)
+void drawFullPicture(App& app, const cr::Texture& tex, int pict, float x, float y, float alpha, float grey = 1) {
+    if (!tex.id) return;
+    const short* p = cr::kOutReadPicture[pict];
+    const float k = tex.width >= 1024 ? 2.0f : 1.0f, s = charArtScale(app);
+    app.menu.imagePieceTo(tex, 240 - (240 - x) * s, 160 - (160 - y) * s, p[2] * s, p[3] * s, p[0] * k, p[1] * k, p[2] * k,
+                          p[3] * k, alpha, grey, grey, grey);
+}
+
 void drawCharArt(App& app, float alpha, bool banner, float grey) {
     const cr::Texture& tex = app.charSelectPage && app.charSelectArt2.id ? app.charSelectArt2 : app.charSelectArt;
     if (!tex.id) return;
     cr::MenuPainter& m = app.menu;
     const bool phone = app.renderer.phoneLayout();
     const float x = phone ? 0.0f : -32.0f, y = phone ? 0.0f : -64.0f;
-    const auto draw = [&](int pict) {
+    const auto draw = [&](int pict, float dy) {
         const short* p = cr::kOutReadPicture[pict];
         const float k = tex.width >= 1024 ? 2.0f : 1.0f;
-        m.imagePieceTo(tex, x, y, p[2], p[3], p[0] * k, p[1] * k, p[2] * k, p[3] * k, alpha, grey, grey, grey);
+        m.imagePieceTo(tex, x, y + dy, p[2], p[3], p[0] * k, p[1] * k, p[2] * k, p[3] * k, alpha, grey, grey, grey);
     };
-    draw(banner ? (phone ? 26 : 27) : (phone ? 22 : 24));
+    if (banner) draw(phone ? 26 : 27, -androidEdgeY(app));
+    else if (app.renderer.androidScreen()) drawFullPicture(app, tex, 22, 0, 0, alpha, grey);
+    else draw(phone ? 22 : 24, 0);
 }
 
 void drawCharSelect(App& app) {
@@ -10853,7 +10883,10 @@ void drawCharSelect(App& app) {
         app.charSelectPage = page;
     }
     if (later && sp.shown) { // window 1: the second page's, falling (chara3 24 and 32 under it; iPhone 22 / 31)
-        if (phone) {
+        if (r.androidScreen()) { // (22 fitted as the first page's; 31, its foot, + oy: _PictTexNoDrawFull2W)
+            drawFullPicture(app, app.charSelectArt2, 22, 0, sp.y, t);
+            outPicture(m, app.charSelectArt2, 31, 0, sp.y + 320 + androidEdgeY(app), t);
+        } else if (phone) {
             outPicture(m, app.charSelectArt2, 22, 0, sp.y, t);
             outPicture(m, app.charSelectArt2, 31, 0, sp.y + 320, t);
         } else {
@@ -10867,10 +10900,12 @@ void drawCharSelect(App& app) {
     if (later && sp.serect.id) { // window 2: the cord (serect 29, tex2d_add at (260, pull - 205), turned), the arrow while held, 28
         const short* q = cr::kOutReadPicture[29];
         const float k = sp.serect.width >= 1024 ? 2.0f : 1.0f;
-        r.drawQuadUVRotated(sp.serect, 2 * (16 + 260 + q[2] / 2.0f), 2 * (32 + std::max(sp.pull, 0.0f) - 205 + q[3] / 2.0f),
+        // (Android 1.1.6: the cord - oy, the card - ox: StartPut's floor(-oy / scale), floor(-ox / scale))
+        const float ex = androidEdgeX(app), ey = androidEdgeY(app);
+        r.drawQuadUVRotated(sp.serect, 2 * (16 + 260 + q[2] / 2.0f), 2 * (32 - ey + std::max(sp.pull, 0.0f) - 205 + q[3] / 2.0f),
                             2.0f * q[2], 2.0f * q[3], q[0] * k, q[1] * k, q[2] * k, q[3] * k, sp.sway * 6.2831853f, t);
-        if (sp.holding) outPicture(m, sp.serect, 30, 406, 178 - float(sp.bob), t);
-        outPicture(m, sp.serect, 28, sp.card, 24, t);
+        if (sp.holding) outPicture(m, sp.serect, 30, 406, 178 - ey - float(sp.bob), t);
+        outPicture(m, sp.serect, 28, sp.card - ex, 24, t);
     }
     { // window 3: the banner over it all (z -4) - chara3's once the second page is open
         const int page = app.charSelectPage;
@@ -17906,6 +17941,19 @@ void drawFrame(App& app, bool present = true) {
                         continue;
                     }
                     const float pw = small ? 960.0f : 1024.0f, ph = small ? 640.0f : 768.0f;
+                    if (p.ipadCard) {
+                        // Android 1.1.6 (tex2d_img_prc, mode 2: tex2d_add_sca of the 1024 x 768 at the
+                        // screen's width / 1024): the iPad sheet's picture over the whole phone, centred -
+                        // Part 1 11 s, the title: 1.25 at (0, -120) on the 1280 x 720 phone (correlation
+                        // 0.95; the _hd picture in the iPhone's screen left bars and lost its edges)
+                        // (logical: the iPhone screen's (32, 64) is the phone's (2 ox, 2 oy))
+                        const float ox = 2 * androidEdgeX(app), oy = 2 * androidEdgeY(app);
+                        const float pW = 960 + 2 * ox, pH = 640 + 2 * oy, s = pW / 1024;
+                        r.drawQuadUV(p.tex, 32 - ox + p.x, 64 - oy + pH / 2 - 384 * s + p.y, 1024 * s, 768 * s, 0, 0, 1024, 768,
+                                     p.shade, p.shade, p.shade, p.alpha);
+                        app.order2d.portrait = ++app.order2d.seq;
+                        continue;
+                    }
                     const float vw = phone ? 960.0f : SW, vh = phone ? 640.0f : float(H), top = phone ? 64.0f : 0.0f;
                     const float k = phone ? vh / ph : std::max(vw / pw, vh / ph); // (the iPhone's: its height)
                     r.drawQuadUV(p.tex, 512 - pw * k / 2 + p.x, top + (vh - ph * k) / 2 + p.y, pw * k, ph * k, 0, 0, pw, ph,

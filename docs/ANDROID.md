@@ -81,8 +81,14 @@ has a strip (`read_window_flag`): `window_cutin_<w>` (the first width at least t
 a 720-tall screen of its aspect; the largest strip stretched above 1366) 1:1 from
 the screen's left edge, its (0, 0, w, h - y) at y 2 y + 20 (`FUN_00094a70`), and over it the
 parchment's name streak, `window`'s (512, 120, 196, 40) at (x, y + 16) (`FUN_00094b50`). The
-pictures `MuComPictTexNoDrawFull2` fits to the screen (min(w / 480, h / 320) / 2) keep the
-iPhone's place. The battle's command pages slide 480 there, 120 a frame (`_menub_mainPrc` on a
+pictures `MuComPictTexNoDrawFull2` draws (Character Select's and the save screen's art) cover the
+phone about its middle: 4 / 3 on a 1280 x 720 phone, the 960 x 640 picture at (0, -67) (Part 1
+18 s, Part 8 4901.5 / 4904.5 s; correlation 0.90 / 0.91) - the port's `drawFullPicture`. A
+script's full-screen card (Tex2d 0x8000: the title) comes from the `_ipad` sheet, its 1024 x 768
+picture fitted to the phone's width and centred (`tex2d_img_prc`'s mode 2: 1.25 at (0, -120);
+Part 1 11 s, correlation 0.95 - the `_hd` picture in the iPhone's screen left black bars and lost
+its edges). Character Select's banner, cord and its arrow sit at - oy, the mode card at - ox, the
+second page's foot (picture 31, `_PictTexNoDrawFull2W`) at + oy. The battle's command pages slide 480 there, 120 a frame (`_menub_mainPrc` on a
 Retina or 720 x 480 screen; 320 at 80 below, and in iOS 3.1.0), so they start off the wider
 phone's screen rather than in the bar beside the centred one.
 
@@ -131,8 +137,6 @@ Not done in the port yet (code reading only):
   masks, and the History menu's masks.
 - `ScnEffect*`: the scene effects' rect is the whole phone, and effect 10's fog band sits at
   64 + oy.
-- Character Select (`__menuu_StartPut`, symbol `_PictTexNoDrawFull2W`): the cord and banner at
-  - oy, the card at - ox, the second page at + oy.
 - The staff roll's picture (- oy) and its lines' range (320 + oy .. -20 - oy, over a taller
   screen).
 - `gameapp_prc`'s Android progress spinner.
