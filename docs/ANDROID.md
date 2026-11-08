@@ -147,6 +147,11 @@ panel. The strip is fitted to the selected layout's visible width and bottom edg
 
 ## Other differences
 
+- The title's fourth plate, File (word 39), runs the release's data check: `CallFileCheckDialog` in
+  `ChaosRingsOmegaActivity` asks to verify the downloaded data and the Google Play expansion
+  downloader re-downloads broken files (`NDKGetFileCheckDialogState`, `NDKIsGetFileCheckAllSuccess`;
+  title states 0x24..0x26). The port has no downloaded data to check and leaves the plate out.
+
 - `gameapp_prc` sets flags 0x65..0x6a (the present packs, as iOS 3.1.0 and the Vita do) and
   0xfa6 every frame.
 - Battle voices (`btl_voice_*`, `voicebtl.bin` / `voiceevnt.bin`), languages
