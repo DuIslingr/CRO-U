@@ -590,6 +590,11 @@ struct App {
     bool resumeYes = false;                // DAT_ecb6c: Yes chosen (the music off and the black, then the load)
     float resumeWin = 0;                   // windows 4..7 (ComUty_WinDispOn / Off): 0 out .. 1 in
     int resumeMark = 0;                    // the board's tap mark (ComUty_PictAnim of picture 13: 1 tick a frame, out and back)
+    // Prompts seen outside a save (the title's: About Option 0x43, the Progress Tracker 0x44, the
+    // version-up boards' marks 0x6f..0x7b, 0x75): 3.1.0 sets them in the flags in memory, which only a
+    // later save keeps - so with no save written they came back each launch. Kept in settings.ini
+    // (seen_flags=) and read as the save's (allPairsFlags, titleAnnounce)
+    std::vector<int> seenFlags;
     bool interruptShown = false;           // _gbTutoFlg (MuTitle_GetInInterruptFlg): the message shown this launch (TitleSet keeps it)
     int titleOut = 0;                      // frames since the title's plates began going for the offer (window 3 off)
     cr::SaveData resumeData;
@@ -4133,6 +4138,14 @@ void loadMix(App& app) {
         if (const char* at = SDL_strstr(text, "language=")) app.language = std::clamp(SDL_atoi(at + 9), 0, cr::kLanguages - 1);
         // the system config flags (system.dat's +0x87604 on Android): the achievements earned
         if (const char* at = SDL_strstr(text, "achievements=")) app.ach.flags.fromHex(std::string(at + 13, SDL_strnlen(at + 13, 32)));
+        app.seenFlags.clear();
+        if (const char* at = SDL_strstr(text, "seen_flags="))
+            for (const char* q = at + 11; *q && *q != '\n' && *q != '\r';) {
+                const int f = SDL_atoi(q);
+                if (f > 0) app.seenFlags.push_back(f);
+                while (*q && *q != ',' && *q != '\n') ++q;
+                if (*q == ',') ++q;
+            }
         applyLanguage(app);
         loadVideo(app, text);
         app.voiceEntries.clear();
@@ -4150,6 +4163,14 @@ void loadMix(App& app) {
             app.mix.effects, app.mix.voice, app.voiceEntries.size(), settingsPath().c_str());
     app.sound.setVoiceEntries(app.voiceEntries);
     applyMix(app);
+}
+
+bool seenFlag(const App& app, int f) { return std::find(app.seenFlags.begin(), app.seenFlags.end(), f) != app.seenFlags.end(); }
+void saveMix(const App& app);
+void markSeen(App& app, int f) {
+    if (seenFlag(app, f)) return;
+    app.seenFlags.push_back(f);
+    saveMix(app);
 }
 
 void saveMix(const App& app) {
@@ -4176,7 +4197,9 @@ void saveMix(const App& app) {
                               std::to_string(int(app.lockLandscapeFlipped)) + "\n" + "vita=" + app.vitaPath + "\n" + "android=" + app.androidPath + "\n" + "pad_confirm=" +
                               (app.padConfirmEast ? "east" : "south") + "\n" + "field_speed=" + std::to_string(app.fieldSpeed) +
                               "\nbattle_speed=" + std::to_string(app.battleSpeed) + "\n";
-    const std::string all = t + "language=" + std::to_string(app.language) + "\nvoice_entries=" + list + "\n" + video +
+    std::string seen;
+    for (int f : app.seenFlags) seen += (seen.empty() ? "" : ",") + std::to_string(f);
+    const std::string all = t + "language=" + std::to_string(app.language) + "\nvoice_entries=" + list + "\nseen_flags=" + seen + "\n" + video +
                             "achievements=" + app.ach.flags.hex() + "\n";
     std::string error;
     if (!crstorage::replaceFile(settingsPath(), all, &error)) SDL_Log("settings: %s", error.c_str());
@@ -4984,8 +5007,9 @@ void openOptions(App& app, int page) {
     // Option" in the manual's message window (no picture: _mwin[5]) - alone: no menu mask, the page
     // held back until the window has shut (then MuCom_MenuSetMask(1) and OptionPrc 3's slide-in).
     // (The title's flags are the save's, as the Progress Tracker's 0x44: allPairsFlags)
-    if (first && !app.game.flag(0x43) && !(app.titleOpen && allPairsFlags(app).flag(0x43))) {
+    if (first && !app.game.flag(0x43) && !seenFlag(app, 0x43) && !(app.titleOpen && allPairsFlags(app).flag(0x43))) {
         app.game.setFlag(0x43, true);
+        markSeen(app, 0x43);
         openManual(app, 56040);
     }
 }
@@ -9675,6 +9699,7 @@ void offerResume(App& app) {
     if (!cr::readSave(savePath(app, "resume.dat"), app.resumeData)) return;
     if (!allPairsFlags(app).flag(0x44) && !app.game.flag(0x44) && !app.interruptShown) { // 0x16
         app.game.setFlag(0x44, true);
+        markSeen(app, 0x44);
         app.interruptShown = true;
         // 0x17: flag 3 (MsgUty's pictures - 0x29 has none: MsgUty_SetMsg's table at 0xd5200 holds
         // 12, 13, 18, 10, 19), MsgUty_WinOpen(0x29): not in that table, so the window's sixth rect
@@ -9898,6 +9923,7 @@ cr::GameState allPairsFlags(const App& app) {
     if (readData(app, d)) g.flags = d.game.flags;
     if (!app.booting)
         for (size_t i = 0; i < g.flags.size() && i < app.game.flags.size(); ++i) g.flags[i] |= app.game.flags[i];
+    for (int f : app.seenFlags) g.setFlag(f, true); // (the prompts seen outside a save)
     return g;
 }
 
@@ -11241,6 +11267,8 @@ bool titleAnnounce(App& app) {
     cr::SaveData d;
     const bool haveData = readData(app, d);
     cr::GameState& g = haveData ? d.game : app.game;
+    if (!haveData) // (no save to keep the boards' marks: the ones seen before)
+        for (int f : app.seenFlags) g.setFlag(f, true);
     const std::vector<uint32_t> before = g.flags;
     for (int f = 101; f <= 106; ++f) g.setFlag(f, true); // (3.1.0's _gameapp_prc)
     int first = -1, count = 0;
@@ -11265,6 +11293,10 @@ bool titleAnnounce(App& app) {
     bool voices = false;
     if (g.flag(0x6b) && !g.flag(0x75)) g.setFlag(0x75, true), voices = true;
     if (haveData && g.flags != before) cr::writeSave(dataPath(app), d); // (the marks go with the save)
+    else if (!haveData && g.flags != before) { // (or with the settings, until there is one)
+        for (int f = 0x6f; f <= 0x7b; ++f)
+            if (g.flag(f)) markSeen(app, f);
+    }
     if (!count && !voices) return false;
     app.verUpShown = true;
     App::TitleBoard& b = app.titleBoard;
@@ -21437,6 +21469,7 @@ int walkCollisionSelfTest(App& app, int& spawned, int& walked, int& mapErrors) {
 int runSelfTest(App& app) {
     app.persist = false;
     app.ach.live = false; // (no achievements earned by the other checks - achievementsSelfTest turns them on for its own)
+    app.seenFlags.clear(); // (the prompts seen: none - the tests expect each first showing)
     app.typeOn = false; // pages whole (the typing has its own test)
     app.video.layout = 1; // the iPad layout the tests measure (the iPhone one has its own)
     applyVideo(app);
@@ -22330,6 +22363,7 @@ int runSelfTest(App& app) {
         int rbad = 0;
         rbad += pictAnimFrame(1, 1, 4) != 1 || pictAnimFrame(4, 1, 4) != 4 || pictAnimFrame(7, 1, 4) != 1 ||
                 pictAnimFrame(8, 1, 4) != 0 || pictAnimFrame(17, 4, 4) != 3;
+        app.seenFlags.clear();
         app.persist = true;
         app.interruptShown = false;
         bootTitle(app);
@@ -22406,8 +22440,12 @@ int runSelfTest(App& app) {
         rbad += app.resumePrompt || app.resumeNotice || app.resumeIn;
         std::printf("title resume: the message %zu pages once a launch (flag 0x44), the windows in and out, Yes loads, No starts: %d problems\n",
                     noticePages, rbad);
+        // seen once, the message stays seen across launches (settings.ini's seen_flags), the save's flag or not
+        rbad += !seenFlag(app, 0x44);
         problems += rbad;
         SDL_RemovePath(savePath(app, "resume.dat").c_str());
+        app.seenFlags.clear();
+        saveMix(app); // (the test's settings file without them)
         app.persist = false;
         // The title's New (pair 1, no save): New alone, at 232; Yes hands var 1 = 2 to the boot
         // script, which goes to the opening (map 88) - var 1 = 1 would be the last battle (map 82)
@@ -22562,6 +22600,8 @@ int runSelfTest(App& app) {
             for (int item = 419; item <= 473; ++item) app.game.items.erase(item);
             for (int item : {419, 420, 421, 428, 431, 459}) app.game.items[item] = 1;
             app.game.setFlag(0x43, false);
+            const std::vector<int> keepSeen = app.seenFlags;
+            app.seenFlags.clear();
             const bool keepTitle = app.titleOpen;
             app.titleOpen = false;
             App::ManualMsg& mm = app.manualMsg;
@@ -22589,6 +22629,12 @@ int runSelfTest(App& app) {
             problems += app.manualOpen;
             app.optionsOpen = false;
             app.game.setFlag(0x43, false);
+            // seen once, it stays seen: a game without the flag (a new launch, another save) opens on the page
+            problems += !seenFlag(app, 0x43);
+            openOptions(app, 0);
+            problems += app.manualOpen;
+            app.optionsOpen = false;
+            app.seenFlags.clear(); // (a fresh install's title)
             app.titleOpen = true;
             openOptions(app, 0);
             aboutHeld += app.manualOpen && app.manualIntro == 56040 && mm.state == 2;
@@ -22599,6 +22645,7 @@ int runSelfTest(App& app) {
             aboutHeld += !app.manualOpen && app.game.flag(0x43);
             app.optionsOpen = false;
             app.titleOpen = false;
+            app.seenFlags = keepSeen;
             problems += aboutHeld != 5;
             std::printf("options: \"About Option\" (56040) alone in the message window, the page after it, from the field and "
                         "the title: %d/5\n", aboutHeld);
