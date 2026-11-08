@@ -649,6 +649,29 @@ struct App {
         std::vector<int> picks;            // Targets: fighters; Items: item numbers
         int pick = 0, pickTop = 0;
         int confirm = 0;                   // EscapeAsk: 0 Yes
+        // The pages as drawn (menub_mainPrc's slides, +0x38): each page comes in from the right
+        // (320 -> 0, 80 a frame) and goes out again before the next comes in; it takes taps only
+        // once in (states 2, 101, 901, 801). The page the logic is on is `page`; the view follows it
+        struct MenuView {
+            int page = -1;                 // the page shown (-1 none)
+            Menu menu = Top;
+            int cursor = 0, member = 0, pick = 0, pickTop = 0, confirm = 0, targetAction = 0;
+            bool pair = false;
+            std::vector<int> picks;
+        } view;
+        int page = 0;                      // bumped at each page change
+        int viewState = 0;                 // 0 out, 1 coming in, 2 in, 3 going out, 4 held out
+        int slide = 320;                   // the view's offset to the right
+        int slideHold = 0;                 // frames held out before the next page (Defend's 20: state 199)
+        int menuGone = 100;                // frames since the view went out with no page to show (0x270e, then 500 / 600)
+        bool roundWait = false;            // the round's first action waits for the menu to go
+        int hudSlide = 0;                  // the left HUD's offset to the left while a talk runs (+0x3c, 120 a frame to 480)
+        struct Analyze {                   // btlact_gene 0xc1c..0xc9e: Analyze's lines, each held until a tap
+            std::vector<std::string> pages;
+            size_t at = 0;
+            bool on = false;
+            int endAt = -1;                // the turn's frame it ends at (state 2000: 40 frames after the last tap)
+        } analyze;
         bool turnOn = false;               // an action is playing
         cr::BattleTurn turn;
         int turnFrame = 0, hitFrame = 0;
@@ -11868,6 +11891,7 @@ namespace btlui {
 constexpr float kButtonX = 344, kButtonY = 128, kButtonStep = 48; // cmd_bottom at tex2d (328, 96 + 48k)
 constexpr float kPlateX = 224, kPlateBottom = 312;                 // cmd_bottom_teki: y = 312 - 48 (n - i)
 constexpr float kBackX = 208, kBackY = 320;                        // cmd_back at tex2d (192, 288)
+constexpr float kYesNoX = 352, kYesY = 136, kNoY = 192;              // ComUty_YesNoChoiceDraw: window 6 + (336, 104) / (336, 160)
 // The first menu: Solo, Pair, Escape, Options; then Attack, Genes, Items, Defend (icon, word)
 constexpr int kTopIcon[4] = {15, 14, 16, 3}, kTopWord[4] = {21, 20, 22, 3};
 constexpr int kCmdIcon[4] = {18, 10, 8, 19}, kCmdWord[4] = {24, 10, 8, 25};
@@ -12584,6 +12608,9 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     b.menu = App::Battle::Top;
     b.cursor = 0;
     b.member = 0;
+    b.view = {};
+    b.viewState = 0, b.slide = 320, b.slideHold = 0, b.menuGone = 100, b.roundWait = false, b.hudSlide = 0;
+    b.analyze = {};
     b.turnOn = false;
     for (App::Battle::Popup& p : b.popups) p = App::Battle::Popup();
     b.banner.clear();
@@ -12802,11 +12829,11 @@ namespace btlvoice { void command(App& app, int member); }
 void battleMenu(App& app, App::Battle::Menu menu) {
     App::Battle& b = app.battle;
     b.menu = menu;
+    ++b.page;
     b.cursor = 0;
     b.pick = b.pickTop = 0;
     if (menu != App::Battle::Targets) setBanner(app, "");
     // the camera: the field of battle for the first menu, the member (or the pair) choosing
-    if (menu == App::Battle::Top) app.sound.play(0x22); // (__menub_mainPrc 1 -> 2: the top menu in place)
     if (menu == App::Battle::Top || menu == App::Battle::EscapeAsk) setBattleCamera(app, b.formation + 12);
     else if (menu == App::Battle::Commands) {
         setBattleCamera(app, b.rules.pair ? 30 : 28 + b.member);
@@ -12824,11 +12851,11 @@ void battleOpenTargets(App& app, int action) {
     if (b.rules.isGroupScope(*a)) { // the whole side: no choosing (the plates show who)
     }
     b.menu = App::Battle::Targets;
+    ++b.page;
     b.pick = 0;
     b.targetAction = action;
     cameraForTarget(app, b.picks[0], b.rules.isGroupScope(*a));
-    setBanner(app, sysText(app, 57066 + a->scope), 1 << 20); // "Target: ..." while choosing
-    menuSound(app, se::kChoose);
+    menuSound(app, se::kChoose); // ("Target: ..." on the banner as the page comes: stepMenuView)
 }
 
 void battleStartRound(App& app) {
@@ -12841,6 +12868,7 @@ void battleStartRound(App& app) {
     b.phase = App::Battle::Acting;
     b.phaseFrames = 0;
     b.turnOn = false;
+    b.roundWait = true; // (the menu goes first: menub_mainPrc 0x270e, then btl_main 500 / 600)
     setBanner(app, "");
 }
 
@@ -12960,6 +12988,7 @@ void battleChooseCommand(App& app, int i) {
         if (b.picks.empty() || battleGenesSilenced(app)) { menuSound(app, se::kBuzzer); break; }
         menuSound(app, se::kChoose);
         b.menu = App::Battle::Genes;
+        ++b.page;
         b.pick = b.pickTop = 0;
         battletalk::tutorial(app, 0xfa8); // the first time: what genes cost
         break;
@@ -12975,12 +13004,15 @@ void battleChooseCommand(App& app, int i) {
         }
         menuSound(app, se::kChoose);
         b.menu = App::Battle::Items;
+        ++b.page;
         b.pick = b.pickTop = 0;
         break;
     }
-    case 3: // Defend: the guard pose at once (__menub_mainPrc: the loop motion starts as it is chosen)
+    case 3: // Defend: the guard pose at once (__menub_mainPrc: the loop motion starts as it is chosen);
+        // the page goes, then 20 frames before the next (0x66 -> 199)
         c.kind = cr::kCmdDefend;
         if (App::Battle::Actor* a = battleActor(app, b.member)) playSlot(app, *a, btlui::kSlotGuard);
+        if (b.viewState == 1 || b.viewState == 2) b.slideHold = 20;
         battletalk::tutorial(app, 0xfa9); // the first time: what it does
         battleCommandDone(app);
         break;
@@ -13028,6 +13060,7 @@ void battleBack(App& app) {
     case App::Battle::Commands:
         if (!b.rules.pair && b.member == 1 && b.rules.f[0].alive()) {
             b.member = 0;
+            ++b.page;
             setBattleCamera(app, 28);
         } else
             battleMenu(app, App::Battle::Top);
@@ -13054,14 +13087,14 @@ void battleBack(App& app) {
 
 void battleEscapeAnswer(App& app, bool yes) {
     App::Battle& b = app.battle;
-    if (!yes) {
-        battleBack(app);
+    menuSound(app, se::kChoose); // (ComUty_YesNoChoiceProc: 0x93 for either)
+    if (!yes) { // 0x322: the page goes, then the first page comes in again (state 1)
+        battleMenu(app, App::Battle::Top);
         return;
     }
     b.rules.pair = false;
     b.cmds[0] = b.cmds[1] = cr::BattleCommand();
     b.cmds[0].kind = cr::kCmdEscape;
-    menuSound(app, se::kChoose);
     // the escape is the pair's one action this round (both members' commands become it)
     b.rules.pair = true;
     battleStartRound(app);
@@ -13904,13 +13937,65 @@ bool attackSpot(const App& app, int user, int k, int target, cr::Vec3& out) {
     return true;
 }
 
+// Analyze (btlact_gene 0xc1c..0xc9e): for each target (the first, then a second), its name
+// (font_set_utf16(11, 2, +0xaa)), 57031 "Remaining HP" (var 0 its HP), 57032 "Enemy weakness"
+// for each element it's weak to and 57033 "Enemy characteristic" for each it stands up to
+// (_SetVar(0, the element's name, 57040 + k); 57045 "No results" for an empty list) - each held
+// on the banner until a tap (_pad_chk_trg_up); 40 frames after the last the action ends (2000)
+void startAnalyze(App& app) {
+    App::Battle& b = app.battle;
+    auto line = [&](int id, int value, const std::string& text) {
+        std::vector<std::vector<std::string>> pages;
+        if (!app.systemText.message(id, app.language, [&](int) { return value; }, pages, nullptr,
+                                    [&](int) { return text; }) || pages.empty() || pages[0].empty())
+            return std::string();
+        std::string s = pages[0][0];
+        for (size_t i = 1; i < pages[0].size(); ++i) s += " " + pages[0][i];
+        return s;
+    };
+    App::Battle::Analyze& an = b.analyze;
+    an = {};
+    std::vector<int> targets;
+    for (const cr::BattleHit& h : b.turn.hits)
+        if (h.target >= 0 && targets.size() < 2 && std::find(targets.begin(), targets.end(), h.target) == targets.end())
+            targets.push_back(h.target);
+    for (int t : targets) {
+        const cr::Fighter& f = b.rules.f[size_t(t)];
+        const App::Battle::Actor* u = battleActor(app, t);
+        an.pages.push_back(u ? u->name : std::string());
+        an.pages.push_back(line(57031, f.hp, std::string()));
+        for (const bool weak : {true, false}) {
+            const std::vector<int> list = cr::analyzeElements(f, weak);
+            if (list.empty()) an.pages.push_back(line(weak ? 57032 : 57033, 0, sysText(app, 57045)));
+            for (int k : list) an.pages.push_back(line(weak ? 57032 : 57033, 0, sysText(app, 57040 + k)));
+        }
+    }
+    if (an.pages.empty()) return;
+    an.on = true;
+    setBanner(app, an.pages[0], 1 << 20);
+}
+
+// A tap on Analyze's line: the next, or (after the last) the line stays its 40 frames and so
+// does the action
+void analyzeTap(App& app) {
+    App::Battle& b = app.battle;
+    App::Battle::Analyze& an = b.analyze;
+    if (!an.on) return;
+    if (++an.at < an.pages.size()) {
+        setBanner(app, an.pages[an.at], 1 << 20);
+        return;
+    }
+    an.on = false;
+    an.endAt = b.turnFrame + 40;
+    b.bannerFrames = std::min(b.bannerFrames, 40); // (2000 ms left on it)
+}
+
 // The hits land: the numbers, the targets' reactions, the HP the HUD shows
 void showHits(App& app) {
     App::Battle& b = app.battle;
     b.hitsShown = true;
-    if (b.turn.message > 0) { // stolen Oz, a monster running, Analyze, the barrier, the Apples
-        std::string name = b.turn.message == 57032 ? sysText(app, b.turn.messageValue)
-                           : b.turn.message == 57005 || b.turn.message == 57049 || b.turn.message == 57050
+    if (b.turn.message > 0) { // stolen Oz, a monster running, the barrier, the Apples
+        std::string name = b.turn.message == 57005 || b.turn.message == 57049 || b.turn.message == 57050
                                ? itemName(app, b.turn.messageValue)
                                : std::string();
         if (b.turn.message == 57000 || b.turn.message == 57001)
@@ -13922,6 +14007,7 @@ void showHits(App& app) {
             !pages.empty() && !pages[0].empty())
             setBanner(app, pages[0][0], btlui::kMessageFrames);
     }
+    if (b.turn.kind == cr::kCmdGene && b.turn.action == 0xe9) startAnalyze(app); // btlact_gene 2000: 0xe9 -> 0xc1c
     for (const cr::BattleNotice& n : b.turn.notices) // btl_add_msgque: one waiting per fighter
         if (std::none_of(b.notices.begin(), b.notices.end(), [&](const cr::BattleNotice& q) { return q.fighter == n.fighter; }) &&
             b.notices.size() < 5)
@@ -14491,6 +14577,68 @@ void rollPartyNumbers(App::Battle& b) {
     for (int k = 0; k < 2; ++k) roll(b.rollHp[k], b.shownHp[k]), roll(b.rollMp[k], b.shownMp[k]);
 }
 
+// menub_mainPrc's slides: the page shown follows the logic's - it goes out (+80 a frame to 320),
+// is held out a while (Defend's 20 frames), and the next comes in (-80 a frame to 0: state 1's
+// sound 0x22 for the first page); with none to show (a talk, the round, Options) it stays out.
+// The left HUD (+0x3c) goes 480 to the left, 120 a frame, while a talk runs and comes back after
+void stepMenuView(App& app) {
+    App::Battle& b = app.battle;
+    App::Battle::MenuView& v = b.view;
+    const bool talk = battletalk::on(app);
+    b.hudSlide = talk ? std::min(480, b.hudSlide + 120) : std::max(0, b.hudSlide - 120);
+    const int want = b.phase == App::Battle::Command && !talk && !app.optionsOpen ? b.page : -1;
+    auto live = [&]() { // the page as the logic has it
+        v.menu = b.menu, v.cursor = b.cursor, v.member = b.member, v.pick = b.pick, v.pickTop = b.pickTop;
+        v.confirm = b.confirm, v.targetAction = b.targetAction, v.pair = b.rules.pair, v.picks = b.picks;
+    };
+    if ((b.viewState == 1 || b.viewState == 2) && v.page != want) b.viewState = 3;
+    switch (b.viewState) {
+    case 1: // coming in
+        live();
+        b.slide = std::max(0, b.slide - 80);
+        if (b.slide == 0) {
+            b.viewState = 2;
+            if (v.menu == App::Battle::Top) app.sound.play(0x22); // (__menub_mainPrc 1 -> 2: the top menu in place)
+        }
+        return;
+    case 2: live(); return;
+    case 3: // going out
+        b.slide = std::min(320, b.slide + 80);
+        if (b.slide < 320) return;
+        b.viewState = b.slideHold > 0 ? 4 : 0;
+        if (b.viewState == 4) return;
+        break;
+    case 4: // held out
+        if (--b.slideHold > 0) return;
+        b.viewState = 0;
+        break;
+    default:
+        if (v.page == want || want < 0) { // nothing new: out
+            v.page = -1;
+            ++b.menuGone;
+            return;
+        }
+        break;
+    }
+    // out: the next page (or none)
+    b.slide = 320;
+    b.slideHold = 0;
+    b.menuGone = 0;
+    v.page = want;
+    if (want < 0) return;
+    live();
+    b.viewState = 1;
+    if (v.menu == App::Battle::EscapeAsk) setBanner(app, sysText(app, 57015), 1 << 20); // 800: font_set_utf16(11, 6, 15), kept (801)
+    if (v.menu == App::Battle::Targets) // 900: btlord_make_select's font_set_utf16(11, 6, 0x42 + scope), kept (901)
+        if (const cr::BattleActionDef* a = app.battleActions.get(v.targetAction)) setBanner(app, sysText(app, 57066 + a->scope), 1 << 20);
+}
+
+// Taps are taken once the page is in (and the logic's page is the one shown)
+bool battleMenuReady(const App& app) {
+    const App::Battle& b = app.battle;
+    return b.viewState == 2 && b.view.page == b.page;
+}
+
 void stepBattle(App& app) {
     rollPartyNumbers(app.battle);
     App::Battle& b = app.battle;
@@ -14555,6 +14703,7 @@ void stepBattle(App& app) {
     for (App::Battle::Popup& p : b.popups)
         if (p.on && (p.timer -= 16) < 0) p.on = false;
 
+    stepMenuView(app);
     battletalk::rules(app);
     if (app.game.flag(battletalk::kFlag)) { // a talk: the script runs (its fades with it), the battle waits
         battletalk::step(app);
@@ -14597,6 +14746,8 @@ void stepBattle(App& app) {
         if (!b.turnOn) {
             // btl_main: no next action while a message is up or waiting
             if (!b.notices.empty() || (b.bannerFrames > 0 && b.bannerFrames <= btlui::kMessageFrames)) break;
+            if (b.roundWait && (b.viewState != 0 || b.menuGone < 2)) break; // the menu goes first
+            b.roundWait = false;
             if (b.rules.nextTurn(app.battleActions, b.turn)) {
                 b.turnOn = true;
                 startTurn(app);
@@ -14660,16 +14811,20 @@ void stepBattle(App& app) {
                 if (const App::Battle::Actor* u = b.turn.actors[k] >= 0 ? battleActor(app, b.turn.actors[k]) : nullptr)
                     busy |= u->then >= 0 && u->slot != btlui::kSlotHit;
             // (the tail after the action: an attack's ten frames once its actors are back (btlact_attack
-            // 1999), a gene's or item's forty after its hit (btlact_gene / item 2000))
+            // 1999), a gene's or item's forty after its hit (btlact_gene / item 2000); Analyze's forty
+            // after its last line's tap)
             if (!busy && b.turnFrame >= b.hitFrame && b.idleSince < 0) b.idleSince = b.turnFrame;
             const bool attackLike = b.turn.kind == cr::kCmdAttack || b.turn.cancelled;
-            const bool over = b.turn.kind == cr::kCmdEscape ? b.turnFrame >= (b.turn.escaped ? 10 + 40 : 40) // (btlact_escape: 0x3f2 ten frames, then the 40)
+            const bool over = b.analyze.on ? false
+                              : b.analyze.endAt >= 0 ? b.turnFrame >= b.analyze.endAt
+                              : b.turn.kind == cr::kCmdEscape ? b.turnFrame >= (b.turn.escaped ? 10 + 40 : 40) // (btlact_escape: 0x3f2 ten frames, then the 40)
                               : b.stageAction && b.stageEnd ? b.turnFrame >= std::max(b.stageEnd, b.hitFrame + 1)
                               : b.stageAction ? b.turnFrame >= b.hitFrame + b.stageWait // the staged ones' wait
                               : b.turn.cancelled ? b.turnFrame >= 60
                               : attackLike ? (b.idleSince >= 0 && b.turnFrame >= b.idleSince + 10) || b.turnFrame > 400
                                            : (!busy && b.turnFrame >= b.hitFrame + 40) || b.turnFrame > 400;
             if (over) {
+                b.analyze = {};
                 b.stageAction = 0;
                 b.stageSkip = 0;
                 b.fov = 28.5f;
@@ -14938,7 +15093,8 @@ void drawBattlePlate(App& app, cr::MenuPainter& m, float x, float y, int fighter
     std::string name;
     for (const App::Battle::Actor& ac : b.actors)
         if (ac.fighter == fighter) name = ac.name;
-    m.textCentred(name, x + 146 - m.textWidth(name, 13) / 2, y + 15, selected, a, 13);
+    // menub_mainPut: _drawfont_center(i, x + 0x92, y + 10) - the 16-pixel name btlord_make_select set, white
+    m.text(name, x + 146 - m.textWidth(name, 16) / 2, y + 10, false, a, 16);
     drawBattleStatus(m, f, x + 56, y - 8, a);
 }
 
@@ -15091,9 +15247,11 @@ void drawBattleHud(App& app, float W, float H) {
     App::Battle& b = app.battle;
     cr::Renderer& r = app.renderer;
     cr::MenuPainter& m = app.menu;
-    if (battletalk::on(app)) return; // a talk: the portraits and the message box instead
+    // a talk: the portraits and the message box instead - the left HUD going out (+0x3c) first
+    const bool talk = battletalk::on(app);
+    if (talk && b.hudSlide >= 480) return;
     m.begin(r, app.windowTex, &app.font);
-    if (b.phase == App::Battle::Results) {
+    if (b.phase == App::Battle::Results && !talk) {
         drawBattleResults(app, m, std::min(1.0f, float(b.phaseFrames + 1) / 8.0f));
         r.setOrigin(r.uiX());
         return;
@@ -15120,6 +15278,7 @@ void drawBattleHud(App& app, float W, float H) {
     const int shown = int(std::count_if(std::begin(b.popups), std::end(b.popups), [](const App::Battle::Popup& p) { return p.on; }));
     for (int slot = 0; slot < 5; ++slot) {
         App::Battle::Popup& p = b.popups[slot];
+        if (talk) break;
         if (!p.on) continue;
         const float* v = b.vp.m;
         const float cx = v[0] * p.at.x + v[4] * p.at.y + v[8] * p.at.z + v[12];
@@ -15158,8 +15317,9 @@ void drawBattleHud(App& app, float W, float H) {
 
     // Top left: the Break badge - the ring, a piece per point, the holder's name
     const int g = b.gaugeShown;
+    const float hud = -float(b.hudSlide); // (menub_mainPut: the badge and the rows at x - +0x3c)
     r.setOrigin(edge);
-    m.setOffset(phone ? 16.0f : 0.0f, phone ? 32.0f : 0.0f);
+    m.setOffset((phone ? 16.0f : 0.0f) + hud, phone ? 32.0f : 0.0f);
     m.piece(0, 0, 0, 120, 64, 64, a);
     for (int i = 0; i < std::min(8, std::abs(g)); ++i) {
         const short* t = kBreakTick[i];
@@ -15174,12 +15334,28 @@ void drawBattleHud(App& app, float W, float H) {
     m.setOffset(0, 0);
 
     r.setOrigin(r.uiX());
-    drawBreakFx(app, m); // btl_main 0x5dc
+    if (!talk) drawBreakFx(app, m); // btl_main 0x5dc
     r.setOrigin(edge);
-    // Bottom left: the pair's rows (the one not choosing dimmed)
+    // Bottom left: the rows' backing (tex2d_add4 on slot 47): a 0x98 black box, solid for 44 then
+    // fading over 120, from 262 to 320 (the iPad's 32 down), a 2-pixel 0x98 white rule over it
+    m.setOffset(hud, 0);
+    {
+        const float bx = phone ? 16.0f : 0.0f, by = phone ? 294.0f : 326.0f, k = 0x98 / 255.0f;
+        const float black[4] = {0, 0, 0, k * a}, clear[4] = {0, 0, 0, 0}, white[4] = {1, 1, 1, k * a}, gone[4] = {1, 1, 1, 0};
+        m.quad(bx, by, 44, 58, black, black);
+        m.quad(bx + 44, by, 120, 58, black, clear);
+        m.quad(bx, by - 2, 44, 2, white, white);
+        m.quad(bx + 44, by - 2, 120, 2, white, gone);
+    }
+    // the pair's rows (the one not choosing dimmed)
     const bool choosing = b.phase == App::Battle::Command && b.menu != App::Battle::Top && b.menu != App::Battle::EscapeAsk;
     for (int k = 1; k >= 0; --k)
         drawBattleRow(app, m, k, choosing && !b.rules.pair && b.member != k, a);
+    m.setOffset(0, 0);
+    if (talk) {
+        r.setOrigin(r.uiX());
+        return;
+    }
 
     // The banner: the action's name, the target prompt, the messages
     r.setOrigin(r.uiX());
@@ -15192,9 +15368,14 @@ void drawBattleHud(App& app, float W, float H) {
         m.textCentred(b.banner, 287 - m.textWidth(b.banner, 14) / 2, 16 + by, false, 1, 14);
     }
 
-    // Right: the menus
+    // Right: the menus - the page as shown (b.view), slid right by b.slide (menub_mainPut: x + +0x38)
     r.setOrigin(wideRight(app));
-    if (b.phase == App::Battle::Command && !app.optionsOpen) { // (Options covers them while it's up)
+    const App::Battle::MenuView& v = b.view;
+    if (v.page >= 0 && b.slide < 320) {
+        const int keepMember = b.member; // (the lists' helpers read the member choosing)
+        const bool keepPair = b.rules.pair;
+        b.member = v.member, b.rules.pair = v.pair;
+        m.setOffset(float(b.slide), 0);
         // the HELP board across the top (ComUty_HelpWindowDraw): the item's or gene's target and effect
         auto helpBoard = [&](int item) {
             const float hx = 152;
@@ -15209,68 +15390,66 @@ void drawBattleHud(App& app, float W, float H) {
                 }
             }
         };
-        switch (b.menu) {
+        switch (v.menu) {
         case App::Battle::Top:
             for (int i = 0; i < 4; ++i) {
                 const bool dim = (i == 1 && (!(b.rules.f[0].alive() && b.rules.f[1].alive()) || b.rules.allyAuto)) ||
                                  (i == 2 && b.rules.escapeBlocked);
-                drawBattleButton(m, kButtonX, kButtonY + kButtonStep * float(i), kTopIcon[i], kTopWord[i], b.cursor == i, dim, a);
+                drawBattleButton(m, kButtonX, kButtonY + kButtonStep * float(i), kTopIcon[i], kTopWord[i], v.cursor == i, dim, a);
             }
             break;
         case App::Battle::Commands:
             for (int i = 0; i < 4; ++i) {
                 const bool dim = i == 1 && (battleGeneList(app).empty() || battleGenesSilenced(app));
-                drawBattleButton(m, kButtonX, kButtonY + kButtonStep * float(i), kCmdIcon[i], kCmdWord[i], b.cursor == i, dim, a);
+                drawBattleButton(m, kButtonX, kButtonY + kButtonStep * float(i), kCmdIcon[i], kCmdWord[i], v.cursor == i, dim, a);
             }
             m.backBar(kBackX, kBackY, false, a);
             break;
         case App::Battle::Targets: {
-            const int n = int(b.picks.size());
-            const cr::BattleActionDef* act = app.battleActions.get(b.targetAction);
+            const int n = int(v.picks.size());
+            const cr::BattleActionDef* act = app.battleActions.get(v.targetAction);
             const bool all = act && b.rules.isGroupScope(*act);
             for (int i = 0; i < n; ++i)
-                drawBattlePlate(app, m, kPlateX, kPlateBottom - 48.0f * float(n - i), b.picks[size_t(i)], all || b.pick == i, a);
+                drawBattlePlate(app, m, kPlateX, kPlateBottom - 48.0f * float(n - i), v.picks[size_t(i)], all || v.pick == i, a);
             m.backBar(kBackX, kBackY, false, a);
             break;
         }
         case App::Battle::Items: { // MuScrList: the battle items in the bag, how many of each
-            const int n = int(b.picks.size());
-            for (int k = 0; k < kItemRows && b.pickTop + k < n; ++k) {
-                const int index = b.pickTop + k, item = b.picks[size_t(index)];
+            const int n = int(v.picks.size());
+            for (int k = 0; k < kItemRows && v.pickTop + k < n; ++k) {
+                const int index = v.pickTop + k, item = v.picks[size_t(index)];
                 const float y = 112 + btlui::kItemPitch * float(k);
                 // ComUty_ComPlate_Item: the plate (8 / 9 picked), icon, name, how many at (222, 30)
                 const auto it = app.game.items.find(item);
-                drawCampRow(app, m, 232, y, item, it == app.game.items.end() ? 0 : it->second, index == b.pick, a);
+                drawCampRow(app, m, 232, y, item, it == app.game.items.end() ? 0 : it->second, index == v.pick, a);
             }
             m.backBar(kBackX, kBackY, false, a);
-            if (b.pick >= 0 && b.pick < n) helpBoard(b.picks[size_t(b.pick)]); // (MuScrList_SetIdInfo's help: the items' too)
+            if (v.pick >= 0 && v.pick < n) helpBoard(v.picks[size_t(v.pick)]); // (MuScrList_SetIdInfo's help: the items' too)
             break;
         }
         case App::Battle::Genes: { // the gene list: name, MP / cost (dim when the MP won't pay)
-            const int n = int(b.picks.size()), have = battleGeneMp(app);
-            for (int k = 0; k < kItemRows && b.pickTop + k < n; ++k) {
-                const int index = b.pickTop + k, g = b.picks[size_t(index)], cost = geneMpCost(app, g);
+            const int n = int(v.picks.size()), have = battleGeneMp(app);
+            for (int k = 0; k < kItemRows && v.pickTop + k < n; ++k) {
+                const int index = v.pickTop + k, g = v.picks[size_t(index)], cost = geneMpCost(app, g);
                 const float y = 112 + btlui::kItemPitch * float(k), ra = cost <= have ? a : a * 0.5f;
                 // ComUty_ComPlate_Gene: the plate, icon, name, "MP/" (picture 27 at (188, 34)) and the cost
                 // (three digits to (218, 30)), dim when the MP won't pay
-                drawCampRow(app, m, 232, y, g, 0, index == b.pick, ra);
+                drawCampRow(app, m, 232, y, g, 0, index == v.pick, ra);
                 m.picture(27, 232 + 188, y + 34, ra);
                 drawShopNumber(m, cost, 232 + 218 - 20, y + 30, 3, 10, ra, 2);
             }
             m.backBar(kBackX, kBackY, false, a);
-            if (b.pick >= 0 && b.pick < n) helpBoard(b.picks[size_t(b.pick)]); // the gene's target and effect
+            if (v.pick >= 0 && v.pick < n) helpBoard(v.picks[size_t(v.pick)]); // the gene's target and effect
             break;
         }
-        case App::Battle::EscapeAsk: { // 57015 on the board, Yes / No beneath
-            const float mx = 96, my = 200;
-            r.setOrigin(r.uiX());
-            drawWinPiece(app, kWinSmallPanel, mx * 2, my * 2, 320 * 2, 48 * 2);
-            m.textCentred(sysText(app, 57015), mx + 20, my + 24, false, a, 15);
-            m.button(128, 264, 0, "", b.confirm == 0, a, b.confirm == 0); // Yes
-            m.button(272, 264, 1, "", b.confirm == 1, a, b.confirm == 1); // No
+        case App::Battle::EscapeAsk: // 800: "Run from battle?" on the banner; ComUty_YesNoChoiceDraw's
+            // plates in window 6 (its x the page's slide): Yes at (336, 104), No at (336, 160)
+            drawBattleButton(m, kYesNoX, kYesY, 0, 0, v.confirm == 0, false, a);
+            drawBattleButton(m, kYesNoX, kNoY, 1, 1, v.confirm == 1, false, a);
             break;
         }
-        }
+        m.setOffset(0, 0);
+        b.member = keepMember, b.rules.pair = keepPair;
     }
     r.setOrigin(r.uiX());
     const char* help = b.phase != App::Battle::Command ? ""
@@ -15307,7 +15486,11 @@ void battleKey(App& app, SDL_Keycode key) {
         if (enter || back) b.lostTap = true;
         return;
     }
-    if (b.phase != App::Battle::Command) return;
+    if (b.analyze.on) { // Analyze's lines: the next
+        if (enter || back) analyzeTap(app);
+        return;
+    }
+    if (b.phase != App::Battle::Command || !battleMenuReady(app)) return;
     switch (b.menu) {
     case App::Battle::Top:
     case App::Battle::Commands:
@@ -15350,7 +15533,7 @@ void battleClick(App& app, float px, float py) {
     float lx, ly;
     app.renderer.toLogical(px, py, lx, ly);
     const float uiX = app.renderer.uiX(), rightX = app.renderer.phoneLayout() ? uiX : 2 * uiX;
-    const float cx = (lx - uiX) / 2, rx = (lx - rightX) / 2, my = ly / 2;
+    const float rx = (lx - rightX) / 2, my = ly / 2;
     if (battletalk::on(app)) { // a talk: the skip corner, else the next page
         if (skipCorner(app, lx, ly)) holdSkip(app, kSkipPointer, true);
         else if (!app.dialogue.empty()) tapDialogue(app);
@@ -15369,7 +15552,11 @@ void battleClick(App& app, float px, float py) {
         b.lostTap = true;
         return;
     }
-    if (b.phase != App::Battle::Command) return;
+    if (b.analyze.on) { // _pad_chk_trg_up: anywhere turns Analyze's line
+        analyzeTap(app);
+        return;
+    }
+    if (b.phase != App::Battle::Command || !battleMenuReady(app)) return;
     const bool onBack = my >= kBackY && my < kBackY + 24 && rx >= kBackX && rx < kBackX + 232;
     auto buttonAt = [&]() {
         for (int i = 0; i < 4; ++i)
@@ -15409,9 +15596,9 @@ void battleClick(App& app, float px, float py) {
         } else if (onBack)
             battleBack(app);
         break;
-    case App::Battle::EscapeAsk:
-        if (my >= 264 && my < 304 && cx >= 128 && cx < 240) battleEscapeAnswer(app, true);
-        else if (my >= 264 && my < 304 && cx >= 272 && cx < 384) battleEscapeAnswer(app, false);
+    case App::Battle::EscapeAsk: // ComUty_YesNoChoiceProc: Yes (336, 104), No (336, 160), 136 x 40
+        if (rx >= kYesNoX && rx < kYesNoX + 136 && my >= kYesY && my < kYesY + 40) battleEscapeAnswer(app, true);
+        else if (rx >= kYesNoX && rx < kYesNoX + 136 && my >= kNoY && my < kNoY + 40) battleEscapeAnswer(app, false);
         break;
     }
 }
@@ -21018,6 +21205,128 @@ int runSelfTest(App& app) {
         app.runner.stop();
         app.game = keepGame;
     }
+    { // The battle's menus (menub_mainPrc / Put, 3.1.0): each page slides in from the right over 4
+      // frames (320 -> 0) and takes taps only once in; Escape asks with "Run from battle?" on the
+      // banner (kept up) and Yes / No plates; the round's first action 6 frames after the last
+      // command (the page's 4 out, then 0x270e / 500 / 600); the left HUD slides 480 out in 4 frames
+      // while a talk runs; Analyze (btlact_gene 0xc1c..): the name, the HP, the weak and the strong
+      // elements, a line a tap, the action over 40 frames after the last
+        int problems = 0;
+        const cr::GameState keepGame = app.game;
+        app.game = cr::GameState();
+        cr::giveStartingItems(app.game, app.itemTable);
+        for (int fl : {0xff1, 0xff2, 0xff3, 0xff4, 0xff5, 0xfa8, 0xfa9}) app.game.setFlag(fl, true); // (the tutorials seen)
+        showMap(app, 0, 0, 2);
+        app.pendingEntry = App::Entry::None;
+        app.runner.stop();
+        startBattle(app, {1, 0, -1, 0}, 0);
+        App::Battle& b = app.battle;
+        bool gated = false, slides = false, askBanner = false, askHeld = false, noBack = false, hudOut = false, hudIn = false;
+        int inFrames = -1, firstAt = -1, analyzePages = 0, analyzeHeld = 0, analyzeEnd = -1;
+        std::string slideSeq, firstLine, hpLine;
+        bool analyzeOk = false;
+        if (b.active) {
+            for (int f = 0; f < 60 && b.phase != App::Battle::Command; ++f) stepBattle(app);
+            // the first page comes in: 240, 160, 80, 0 - a key before it's in does nothing
+            const int page = b.page;
+            battleKey(app, SDLK_RETURN);
+            gated = b.menu == App::Battle::Top && b.page == page;
+            for (int f = 1; f <= 8 && inFrames < 0; ++f) {
+                stepBattle(app);
+                slideSeq += (slideSeq.empty() ? "" : " ") + std::to_string(b.slide);
+                if (battleMenuReady(app)) inFrames = f;
+            }
+            slides = slideSeq == "320 240 160 80 0"; // (state 0 -> 1 puts it at 320, then 4 frames in)
+            // Escape: Top goes (4), the ask comes (4) with its line on the banner, held
+            b.cursor = 2;
+            battleKey(app, SDLK_RETURN);
+            int f = 0;
+            for (; f < 20 && !battleMenuReady(app); ++f) stepBattle(app);
+            askBanner = b.menu == App::Battle::EscapeAsk && f == 8 && b.banner == sysText(app, 57015) && b.bannerFrames > 0;
+            for (int g = 0; g < 100; ++g) stepBattle(app);
+            askHeld = b.banner == sysText(app, 57015) && b.bannerFrames > 0 && b.phase == App::Battle::Command;
+            b.confirm = 1; // No: the ask goes, the first page again, the banner cleared
+            battleKey(app, SDLK_RETURN);
+            for (f = 0; f < 20 && !battleMenuReady(app); ++f) stepBattle(app);
+            noBack = b.menu == App::Battle::Top && f == 8 && b.bannerFrames == 0;
+            // the left HUD while a talk runs (its frames as stepBattle's first steps take them)
+            app.game.setFlag(battletalk::kFlag, true);
+            std::string hudSeq;
+            for (int g = 0; g < 4; ++g) stepMenuView(app), hudSeq += std::to_string(b.hudSlide) + " ";
+            hudOut = hudSeq == "120 240 360 480 " && b.view.page < 0;
+            app.game.setFlag(battletalk::kFlag, false);
+            for (int g = 0; g < 4; ++g) stepMenuView(app);
+            hudIn = b.hudSlide == 0;
+            for (f = 0; f < 20 && !battleMenuReady(app); ++f) stepBattle(app);
+            // Yes: the round's first action (the escape) 6 frames on
+            b.cursor = 2;
+            battleKey(app, SDLK_RETURN);
+            for (f = 0; f < 20 && !battleMenuReady(app); ++f) stepBattle(app);
+            b.confirm = 0;
+            battleKey(app, SDLK_RETURN);
+            for (f = 1; f <= 30 && firstAt < 0; ++f) {
+                stepBattle(app);
+                if (b.turnOn) firstAt = f;
+            }
+            endBattle(app, false);
+        }
+        // Analyze on the first enemy: its lines, a tap each
+        startBattle(app, {1, 0, -1, 0}, 0);
+        if (b.active) {
+            for (int f = 0; f < 60 && b.phase != App::Battle::Command; ++f) stepBattle(app);
+            const int target = 2;
+            const cr::Fighter& tf = b.rules.f[size_t(target)];
+            const size_t want = 2 + std::max<size_t>(1, cr::analyzeElements(tf, true).size()) +
+                                std::max<size_t>(1, cr::analyzeElements(tf, false).size());
+            cr::BattleTurn t;
+            t.kind = cr::kCmdGene;
+            t.action = 0xe9;
+            t.actors[0] = 0;
+            cr::BattleHit h;
+            h.target = target;
+            h.type = cr::kHitQuiet;
+            t.hits.push_back(h);
+            b.phase = App::Battle::Acting;
+            b.turn = t;
+            b.turnOn = true;
+            b.turnFrame = 0, b.hitFrame = 1, b.hitsShown = false, b.bounceAt = -1, b.stageAction = 0;
+            b.analyze = {};
+            stepBattle(app);
+            stepBattle(app);
+            firstLine = b.banner;
+            const App::Battle::Actor* u = battleActor(app, target);
+            bool each = b.analyze.on && u && firstLine == u->name;
+            while (b.analyze.on && analyzePages < 20) {
+                ++analyzePages;
+                const std::string line = b.banner;
+                if (analyzePages == 2) hpLine = line;
+                bool held = true;
+                for (int g = 0; g < 50; ++g) {
+                    stepBattle(app);
+                    held &= b.banner == line && b.bannerFrames > 0 && b.turnOn;
+                }
+                analyzeHeld += held;
+                battleKey(app, SDLK_RETURN);
+            }
+            each &= hpLine.find(std::to_string(tf.hp)) != std::string::npos;
+            for (int g = 1; g <= 60 && analyzeEnd < 0; ++g) {
+                stepBattle(app);
+                if (!b.turnOn) analyzeEnd = g;
+            }
+            analyzeOk = each && size_t(analyzePages) == want && analyzeHeld == analyzePages && analyzeEnd == 40;
+            endBattle(app, false);
+        }
+        problems += !gated + !slides + (inFrames != 5) + !askBanner + !askHeld + !noBack + !hudOut + !hudIn + (firstAt != 6) + !analyzeOk;
+        std::printf("battle menus: a page in over %d frames (%s), keys before %s; Escape's ask on the banner %s, held %s, No "
+                    "back %s; the left HUD out for a talk %s, back %s; the first action %d frames after the last command; "
+                    "Analyze %d lines (\"%s\", \"%s\"), each held %d, over %d frames after %s; %d problems\n",
+                    inFrames, slideSeq.c_str(), gated ? "ignored" : "TAKEN", askBanner ? "yes" : "NO", askHeld ? "yes" : "NO",
+                    noBack ? "yes" : "NO", hudOut ? "yes" : "NO", hudIn ? "yes" : "NO", firstAt, analyzePages, firstLine.c_str(),
+                    hpLine.c_str(), analyzeHeld, analyzeEnd, analyzeOk ? "yes" : "NO", problems);
+        mapErrors += problems;
+        app.runner.stop();
+        app.game = keepGame;
+    }
     { // The World Select (Util 1): the gates the pair has reached in its order, the level bands,
       // "Skip the first half?" where its flag is set, Back, and the sixth gate without bands
         int problems = 0;
@@ -22159,6 +22468,8 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         if (v == "items") battleChooseCommand(app, 2);
         if (v == "escape") battleChooseTop(app, 2);
         if (v == "options") battleChooseTop(app, 3), app.optionsAnim = 100;
+        if (v == "top" || v == "commands" || v == "targets" || v == "items" || v == "escape") // (the page slid in)
+            for (int f = 0; f < 10 && b.active; ++f) stepBattle(app);
         if (v.rfind("effect", 0) == 0) { // effect<id>[@frame]: that effect on the first enemy, some frames in
             const int id = SDL_atoi(v.c_str() + 6);
             const size_t at = v.find('@');
@@ -22212,6 +22523,8 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         if (reflect)
             for (int i = 2; i < 5; ++i) b.rules.f[size_t(i)].status[cr::kStatusBarrier] = 5;
         if (v == "genes" || v == "genehit" || reflect) battleChooseTop(app, 0), battleChooseCommand(app, 1);
+        if (v == "genes")
+            for (int f = 0; f < 10 && b.active; ++f) stepBattle(app);
         if (reflect) {
             for (size_t i = 0; i < b.picks.size(); ++i)
                 if (b.picks[i] == 94) b.pick = int(i);

@@ -158,6 +158,10 @@ struct Fighter {
     bool alive() const { return present && hp > 0 && !gone; }
 };
 
+// Analyze's lists (btlact_gene's FUN_00045284 / FUN_00045428 in 3.1.0): the elements (0 Physical ..
+// 4 Gale: the monster's +0x10..+0x18) it's weak to (3 or 4), else those it stands up to (1 or 2)
+std::vector<int> analyzeElements(const Fighter& f, bool weak);
+
 // What one target took: amount > 0 damage, < 0 healing. The types are __dmg_set's (its labels, by
 // __dmg_prc's sheet index - type - 1 for 1..3, the type itself from 4: 1 Blowout!, 2 Critical!,
 // 3 Weak!, 4 No Effect!, 5 Guard!, 6 Miss!, 7 Block!; numbers with 0, 2, 3, 8);

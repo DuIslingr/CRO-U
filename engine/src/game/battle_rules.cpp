@@ -24,6 +24,13 @@ int monsterField(const Fighter& f, int offset) { return f.def ? s16(&f.def->raw[
 
 } // namespace
 
+std::vector<int> analyzeElements(const Fighter& f, bool weak) {
+    std::vector<int> out;
+    for (int k = 0; k < 5; ++k)
+        if (const int v = monsterField(f, 0x10 + 2 * k); weak ? v == 3 || v == 4 : v == 1 || v == 2) out.push_back(k);
+    return out;
+}
+
 bool BattleActionTable::load(const std::string& dataDir) {
     actions_.clear();
     std::vector<uint8_t> f;
@@ -968,12 +975,8 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                 h.type = kHitQuiet;
                 out.hits.push_back(h);
                 continue;
-            case 24: { // Analyze (0428 itself does nothing): the target's weak spot, from its resistances
-                out.message = 57045;
-                if (tx.def)
-                    for (int k = 0; k < 5; ++k)
-                        if (monsterField(tx, 0x10 + 2 * k) == 3) { out.message = 57032; out.messageValue = 57040 + k; break; }
-                h.type = kHitQuiet;
+            case 24: { // Analyze (0428 itself does nothing): the scene's lines tell what the target is
+                h.type = kHitQuiet;      // (btlact_gene 0xc1c..: analyzeElements)
                 out.hits.push_back(h);
                 continue;
             }

@@ -120,6 +120,13 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   do when several land, and are drawn at full strength. The HP and MP bars are the original's
   slanted bars with their offset shadow (the enemy's 96 wide), and the Break label pops from the
   badge's corner at full strength.
+- **Battle menus:** each menu page slides in from the right and back out, taking taps only once
+  it's in, and the round starts as the last page leaves; the party's portraits and bars slide away
+  while the characters talk. Escape asks "Run from battle?" on the top banner with Yes and No
+  buttons on the right, the party rows sit on the original's dark backing, and the target names
+  are drawn at the original's size and place.
+- **Analyze** now tells everything the original does, a line per tap: the monster's name, its
+  remaining HP, each weakness and each resistance (or "No results").
 - **Checked against the newest release (3.1.0):** the game logic of the passes above was re-read in
   the 3.1.0 code; two rules changed there and the port now follows them - the Counter skill (154)
   answers every physical hit it survives (1.0.0 rolled 10 / 20 %), and a pair attack whose partner
