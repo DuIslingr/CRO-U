@@ -348,7 +348,8 @@ c101/c102/c104/m207a, 2026-10-12).
       ends a `--frames` run n frames (60) after message id comes up (p of its pages turned first, 45
       frames apart), with no other taps meanwhile - with
       `CR_CAPTURE_EVENTS=frame:script,...` touching the room's triggers it reaches a scene's page;
-      `CR_CAPTURE_ITEM=item[:n]` shows Uty_GetItem's band for that item n frames in (2: settled))
+      `CR_CAPTURE_ITEM=item[:n]` shows Uty_GetItem's band for that item n frames in (2: settled);
+      `CR_CAPTURE_STAFF=mode:n[:fast]` the staff roll n frames in)
 - [x] New game: the opening plays as the original's script stages it (a 3D room filmed by the
       script camera: cuts and moves between shots, framed as `setCamera3D` does - the stage view
       doubled and centred, so the screen shows its middle), then the hall's characters can be talked

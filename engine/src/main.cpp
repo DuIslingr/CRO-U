@@ -7648,12 +7648,14 @@ void drawPuzzleBanner(App& app) {
 // screen fades to black over 120 and 130 frames on the windows go and the script goes on - no tap
 namespace staffroll {
 constexpr int kShown = 17, kLines = 316;
-float lineStart(bool phone) { return phone ? 320.0f : 352.0f; }
-float lineEnd(bool phone) { return phone ? -20.0f : -52.0f; }
-float screenH(bool phone) { return phone ? 320.0f : 384.0f; }
+// (Android 1.1.6's InitStaffRollMenu / Prc: the phone's screen - the lines from 320 + oy to -20 - oy,
+// the picture's height 320 + 2 oy and drawn oy higher - so it ends on the phone's bottom edge)
+float lineStart(const App::StaffRoll& st) { return st.phone ? 320.0f + st.edgeY : 352.0f; }
+float lineEnd(const App::StaffRoll& st) { return st.phone ? -20.0f - st.edgeY : -52.0f; }
+float screenH(const App::StaffRoll& st) { return st.phone ? 320.0f + 2 * st.edgeY : 384.0f; }
 }
 int staffLines(const App&) { return staffroll::kLines; }
-float staffPicEnd(const App::StaffRoll& st) { return -(1024 - staffroll::screenH(st.phone)); }
+float staffPicEnd(const App::StaffRoll& st) { return -(1024 - staffroll::screenH(st)); }
 
 void staffWin(App& app, int w, bool on) { app.staffRoll.winTo[w] = on ? 1.0f : 0.0f; }
 void staffFade(App::StaffRoll& st, bool white, float from, float to, int ms) { // SetFade(colour, from, to, ms): 50 ms a frame
@@ -7675,7 +7677,7 @@ void openStaffRoll(App& app, int mode) {
     st.edgeX = androidEdgeX(app), st.edgeY = androidEdgeY(app);
     staffFade(st, app.game.scenario == 0, 1, 1, 1); // SetFade(colour, 0, 255, 1): covered
     for (int i = 0; i < kShown; ++i)
-        st.lines[i] = App::StaffRoll::Line{staffLine(app, i).size() >= 3, lineStart(st.phone) + 20.0f * float(i), i};
+        st.lines[i] = App::StaffRoll::Line{staffLine(app, i).size() >= 3, lineStart(st) + 20.0f * float(i), i};
     st.next = kShown;
     cr::Image img;
     static const char* const kBack[3] = {"EndBack01.mct", "EndBack02.mct", "EndBack01_end.mct"}; // _gkpachEndBack
@@ -7708,14 +7710,14 @@ void stepStaffRoll(App& app) {
                 for (auto& l : st.lines)
                     for (int k = 0; k < steps; ++k) {
                         l.y -= speed;
-                        if (l.y > lineEnd(st.phone)) continue;
+                        if (l.y > lineEnd(st)) continue;
                         const int e = st.next++;
-                        l.y = lineStart(st.phone);
+                        l.y = lineStart(st);
                         l.on = e < kLines && staffLine(app, e).size() >= 3;
                         l.entry = e;
                     }
             }
-            const float step = first ? 0.2f : (1024 - screenH(st.phone)) / 4600.0f, end = staffPicEnd(st);
+            const float step = first ? 0.2f : (1024 - screenH(st)) / 4600.0f, end = staffPicEnd(st);
             st.picY = std::max(end, st.fast ? st.picY + step * -10 : st.picY - step);
             if (st.next > kLines && st.picY == end) st.countdown = 100;
         } else {
@@ -7756,7 +7758,7 @@ void drawStaffRoll(App& app) {
     m.begin(r, app.windowTex, &app.font);
     {
         const PhoneMenu phoneMenu(app, m);
-        if (st.win[0] > 0) outPicture(m, st.tex, 12, -16, st.picY + (st.phone ? 0 : -32), st.win[0]);
+        if (st.win[0] > 0) outPicture(m, st.tex, 12, -16, st.picY + (st.phone ? -st.edgeY : -32), st.win[0]);
         if (st.win[3] > 0)
             for (const auto& l : st.lines)
                 if (l.on) m.text(staffLine(app, l.entry), 16, float(int(l.y)), false, st.win[3], 13);
@@ -25935,6 +25937,14 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             app.tapPending = true;
             if (app.itemWindowOpen) app.game.setFlag(0, true);
         }
+    }
+    if (const char* sr = SDL_getenv("CR_CAPTURE_STAFF")) { // "mode:frames[:fast]": the staff roll, frames in
+        int mode = 0, frames = 100, fast = 0;
+        std::sscanf(sr, "%d:%d:%d", &mode, &frames, &fast);
+        openStaffRoll(app, mode);
+        app.staffRoll.fast = fast != 0;
+        for (int f = 0; f < frames && app.staffRoll.open; ++f) stepStaffRoll(app);
+        std::printf("staff roll: state %d, picture y %.1f, next line %d\n", app.staffRoll.state, app.staffRoll.picY, app.staffRoll.next);
     }
     if (const char* it = SDL_getenv("CR_CAPTURE_ITEM")) { // "item[:frames]": Uty_GetItem's band, frames (3) in
         int item = 0, frames = 3;
