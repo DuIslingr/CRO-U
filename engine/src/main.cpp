@@ -891,7 +891,25 @@ struct App {
         bool help = true;                  // +0x38 (MfMain_SetPzlHelpState): the pad's two buttons
         float tapX = -1, tapY = -1;        // the touch that asked (tex2d), < 0 from the keyboard
         int clock = 0;                     // frames the room has run (the flames' flicker)
+        // _ArrowOn / _ArrowOff (menuf_mainPut draws them): 0 left, 1 up, 2 right, 3 down around a
+        // lifted block - on (1) / off (-1), the fade's frames left and kind (2 the slide's, 1 a
+        // let-go's), the colour's alpha byte, the screen point (tex2d)
+        struct Arrow { int on = -1, timer = 0, mode = 0, alpha = 0xff; float x = 0, y = 0; } arrows[4];
+        // CheckTap (teleport / toughness / pyrokinesis): 1 a touch held, 2 a tap (released within
+        // 5 frames), 3 held too long; the touch's start (tex2d)
+        struct Tap { int state = 0, frames = 0; float x = 0, y = 0; bool released = false; } tap;
+        bool pkHeld = false;               // PsychokinesisDetector: the touch that took hold still down
+        float pkAtX = 0, pkAtY = 0;        // ... where it is now (tex2d)
+        cr::Vec3 leaderWas;                // FieldPCCtrl + 0x28: the leader moved since the last frame
+        bool leaderMoved = false;
+        int padHold = 0;                   // gac + 0x1e2004: 3 frames after the touch pad was held (taps refused)
+        // ScrollCamera: a second finger within 6 frames of the first scrolls the view to it (state
+        // 1, the ability paused) until the next single touch lets it go; phase / count its checkTouch
+        struct Scroll { int state = 0, phase = 0, count = 0; float x = 0, y = 0; } scroll;
     } puzzle;
+    int padLock = 0;                       // gac + 0x1e2006: the pad's buttons and Camp / Save refused while > 0
+    struct Fingers { int held = 0, fresh = 0; float x = 0, y = 0; } fingers; // SDL touch: down now, new since the last frame (the last one's frame pixels)
+    float puzzleStartHeading = 0;          // ... and its heading (FieldPCCtrl::reset)
     float playerAlpha = 1, playerAlphaFrom = 1, playerAlphaTo = 1; // mdl_set_alpha on the leader
     int playerFadeFrames = 0, playerFadeLeft = 0;
     cr::Vec3 puzzleStart;                  // where the leader came into the puzzle room (FieldPCCtrl::reset)
@@ -3030,6 +3048,7 @@ void scrollFieldTo(App& app, float vx, float vy, float rate) {
 // head each 20 Hz frame; onFadingIn's is 1.0 - the first follow after a map comes in snaps
 void followPlayerScroll(App& app, float rate) {
     if (!scrollingField(app) || app.cam.free || !app.havePlayer) return;
+    if (app.puzzle.stage >= 0 && app.puzzle.scroll.state == 1) return; // (ScrollCamera's: FieldCamera + 0 cleared, the view held where it was taken)
     app.scroll.scripted = false;
     if (app.scroll.snap) rate = 1.0f, app.scroll.snap = false;
     const cr::Vec3 head = shownWalker(app).pos + cr::Vec3{0, 7.0f + float(app.stageCam.lookHeight), 0};
@@ -4556,11 +4575,19 @@ void openOptions(App& app, int page) {
     app.optionsRow = 0;
     app.optionsScroll = 0;
     app.optionsAnim = 0;
-    if (first && !app.optionsFromTitle && !app.game.flag(0x43)) { // OptionSet: "About Option", once
+    // __menuu_OptionSet (3.1.0's as 1.0.0's): the first time - in any mode, the title's too - flag
+    // 0x43 set and OptionPrc 0..2: MsgUty_WinOpen / SetMsg(0x28) - block 5's 40, 56040 "About
+    // Option" in the manual's message window (no picture: _mwin[5]) - alone: no menu mask, the page
+    // held back until the window has shut (then MuCom_MenuSetMask(1) and OptionPrc 3's slide-in).
+    // (The title's flags are the save's, as the Progress Tracker's 0x44: allPairsFlags)
+    if (first && !app.game.flag(0x43) && !(app.titleOpen && allPairsFlags(app).flag(0x43))) {
         app.game.setFlag(0x43, true);
         openManual(app, 56040);
     }
 }
+
+// OptionPrc 0..2: "About Option" up (openOptions), the page and its mask not yet
+bool optionsAbout(const App& app) { return app.optionsOpen && app.manualOpen && app.manualIntro; }
 
 // The menus' coordinates are the iPhone screen's - (0, 0) its corner, not CR1's iPad 512 x 384
 // menu space - so a menu sits (+16, +32) menu units further in. Omega's iPad build is that layout
@@ -4617,6 +4644,7 @@ void menuPoint(const App& app, float lx, float ly, float& mx, float& my) {
 void drawOptions(App& app, float, float) {
     cr::Renderer& r = app.renderer;
     cr::MenuPainter& m = app.menu;
+    if (optionsAbout(app)) return; // (OptionPrc 0..2: the message window alone - drawManual)
     m.begin(r, app.windowTex, &app.font);
     const PhoneFit phoneFit(app, m); // the iPhone layout: its screen's menu coordinates
     // Behind the menu: the scene under the menu mask (drawFrame's drawMenuMask)
@@ -4721,6 +4749,7 @@ void stepOptions(App& app) {
     takeVitaFolder(app);
     takeAndroidFolder(app);
     if (!app.optionsOpen) return;
+    if (optionsAbout(app)) { app.optionsAnim = 0; return; } // (the page slides in once "About Option" has shut)
     ++app.optionsAnim;
     app.optionsBob += app.optionsBobDir;
     if (app.optionsBob >= 5 || app.optionsBob <= 0) app.optionsBobDir = -app.optionsBobDir;
@@ -6987,7 +7016,9 @@ void drawGeneBoard(App& app, cr::MenuPainter& m, float x, float y, int plate, fl
 // ((512 + 28 d, 58), 28 x 28, from x 24 - 44 for one - by 20, y 16; swelling 1.4 .. 1.1 for the 4
 // frames after a change); with the help state on, the retry button (420, 184, 44 x 30) at (8, 56)
 // - blinking (5 frames of 11) at 0 once the count was above it - and Help (984, 64, 40 x 32) at
-// (84, 14); the punishment mark (448, 120, 64 x 64) blinking over a refused touch
+// (84, 14); the third button (420, 216, 44 x 32) at (160, 14) while var 64 + stage is above 2 in a
+// room not cleared (whatever the help state); the punishment mark (448, 120, 64 x 64) blinking over
+// a refused touch and psychokinesis' arrows
 void drawPuzzleHud(App& app, float a) {
     cr::MenuPainter& m = app.menu;
     const App::Puzzle& pz = app.puzzle;
@@ -7007,11 +7038,22 @@ void drawPuzzleHud(App& app, float a) {
         for (int k = esp < 10 ? 1 : 0; k < 2; ++k, x += 20) piece(x, 16, 512 + 28.0f * float(d[k] - '0'), 58, 28, 28, scale);
         piece(4, 24, 484, 184, 30, 12);
     }
-    if (pz.help) {
-        if (pz.blink < 5) piece(8, 56, 420, 184, 44, 30);
-        piece(84, 14, 984, 64, 40, 32);
+    if (pz.help && pz.blink < 5) piece(8, 56, 420, 184, 44, 30);
+    if (pz.stage >= 0 && !app.game.flag(3000 + pz.stage)) { // the third button: var 64 + stage above 2, the room not cleared
+        const auto it = app.game.vars.find(64 + pz.stage);
+        if (it != app.game.vars.end() && it->second > 2) piece(160, 14, 420, 216, 44, 32);
     }
-    app.renderer.setOrigin(app.renderer.uiX()); // (the mark: where the field was touched)
+    if (pz.help) piece(84, 14, 984, 64, 40, 32);
+    app.renderer.setOrigin(app.renderer.uiX()); // (the mark and the arrows: where on the field)
+    // the psychokinesis arrows (0xe037c..: on, or fading - their colour's alpha byte), 24 x 24 at
+    // their point less 12: left (432, 72), up (480, 48), right (456, 72), down (480, 72)
+    static const float kArrowUV[4][2] = {{432, 72}, {480, 48}, {456, 72}, {480, 72}};
+    for (int k = 0; k < 4; ++k) {
+        const App::Puzzle::Arrow& ar = pz.arrows[k];
+        if (ar.on != 1 && ar.timer <= 0) continue;
+        const float aa = a * float(ar.alpha) / 255.0f;
+        m.pieceTo(ar.x - 12 + 16, ar.y - 12 + 32, 24, 24, kArrowUV[k][0], kArrowUV[k][1], 24, 24, aa);
+    }
     if (pz.punished > 0 && pz.punishPhase == 0) piece(pz.punishX, pz.punishY, 448, 120, 64, 64);
 }
 
@@ -7026,6 +7068,12 @@ void stepPuzzleHud(App& app) {
         pz.shownEsp = esp;
     }
     if (pz.pop > 0) --pz.pop;
+    for (App::Puzzle::Arrow& ar : pz.arrows) // _ArrowOff's fade: the alpha byte down 0x50 (wrapping) / 0x33 a frame
+        if (ar.timer > 0) {
+            if (ar.mode == 2) ar.alpha = (ar.alpha - 0x50) & 0xff;
+            else if (ar.mode == 1) ar.alpha = (ar.alpha - 0x33) & 0xff;
+            --ar.timer;
+        }
     if (esp > 0) pz.hadEsp = true;
     if (esp == 0 && pz.hadEsp) pz.blink = pz.blink + 1 < 11 ? pz.blink + 1 : 0;
     else pz.blink = 0;
@@ -8021,6 +8069,7 @@ void toggleFieldMenu(App& app) {
 // The bar's buttons (the bar open and still): 0 Camp, 1 Save, 2 Map, 3 encounters
 void pressFieldButton(App& app, int k) {
     if (!app.fieldMenu.open || app.fieldMenu.anim > 0 || !fieldButtonShown(app, k)) return;
+    if (k < 2 && app.padLock > 0) return; // (menuf_mainPrc: Camp and Save wait out the pad lock, gac + 0x1e2006)
     switch (k) {
     case 0:
         menuSound(app, se::kCampOpen);
@@ -9754,8 +9803,8 @@ void collectionClick(App& app, float mx, float my) { // BackButtonProc(1)
 // ---- The Instruction Manual (Options; MuScrList + MsgUty: the topics, then the page) ----
 // OptionPrc 0xf..0x16: the topics are the manual items the bag holds (make_item_list kind 9,
 // 419..473, given as the story goes), by name; each one's page is system message 56000 + (item -
-// 419) (MsgUty_SetMsg: block 5). OptionSet: the first time Options open (flag 0x43) 56040 "About
-// Option" comes first (OptionPrc 0..2)
+// 419) (MsgUty_SetMsg: block 5). (56040 "About Option" is OptionSet's, through the message
+// window: openOptions)
 // A manual message's title: its first non-empty line (the messages open with an empty one)
 std::string manualTitle(const App& app, int id) {
     std::vector<std::vector<std::string>> pages;
@@ -9919,7 +9968,7 @@ void drawManual(App& app) {
     const App::ManualMsg& mm = app.manualMsg;
     m.begin(r, app.windowTex, &app.font);
     r.setOrigin(0);
-    r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 0.75f);
+    if (!app.manualIntro) r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 0.75f); // ("About Option": no mask yet)
     r.setOrigin(r.uiX());
     if (!app.manualIntro) {
         const PhoneFit phoneFit(app, m); // the iPhone layout: its screen's menu coordinates
@@ -10641,11 +10690,19 @@ void enter(App& app) {
     pz.stage = cr::puzzleStage(app.area, app.mapNumber);
     const cr::PuzzleStage* st = stage(app);
     if (!st) { pz.stage = -1; return; }
+    pz.leaderWas = app.walker.pos;
+    // _MfMain_ClrPzlData: the count 0, Retry / Help shown; a cleared room (PuzzleManager::init) goes
+    // no further - MfMain_SetPzlHelpState(0), no objects: its NPCs stay as the map has them
+    pz.esp = 0;
+    if (cleared(app)) {
+        pz.help = false;
+        buildNpcDraws(app);
+        return;
+    }
     pz.esp = st->esp;
     app.game.setFlag(3300 + pz.stage, false);
     app.game.vars[13] = 0; // the uses
     pz.grid.assign(size_t(3 * st->rows * st->cols), -1);
-    const bool done = cleared(app);
     for (size_t i = 0; i < app.npcs.size(); ++i) {
         const int type = cr::puzzleType(app.npcs[i].puzzle, st->ability);
         if (!type) continue;
@@ -10657,23 +10714,23 @@ void enter(App& app) {
         const bool inGrid = cellOf(app, p, o.row, o.col);
         o.shown = npcActive(app, app.npcs[i]);
         o.baseY = app.npcs[i].pos[1];
-        if (type == cr::kTypeNormal || type == cr::kTypeGem) { // their init: in play unless cleared
-            o.shown = !done;
-            o.state = done ? 0 : 1;
-        }
-        if (type == cr::kTypeCrystal) o.shown = done;
-        if ((type == cr::kTypeFragile || type == cr::kTypeRed) && !done) o.shown = true; // npc_born
+        if ((type == cr::kTypeNormal && st->ability != cr::kAbilityPsychokinesis) || type == cr::kTypeGem) { // their init: npc_born
+            o.shown = true;
+            o.state = 1;
+        } // (NormalBlockPK's init / postInit are PuzzleObject's - empty: as the map has it, no switch pressed)
+        if (type == cr::kTypeCrystal) o.shown = false;
+        if (type == cr::kTypeFragile || type == cr::kTypeRed) o.shown = true; // npc_born
         if (type == cr::kTypeBlue) o.shown = false, o.ghost = true; // npc_kill, alpha 0x60
-        if (type == cr::kTypeCandle) { // lit at the start (+22) unless the stage is cleared
-            o.shown = !done && app.npcs[i].link[0] != 0;
+        if (type == cr::kTypeCandle) { // lit at the start (+22)
+            o.shown = app.npcs[i].link[0] != 0;
             o.ghost = !o.shown;
         }
         pz.objs.push_back(o);
         if (inGrid && type != cr::kTypeCrystal)
             if (int* slot = cellSlot(app, o.layer, o.row, o.col)) *slot = int(pz.objs.size() - 1);
     }
-    for (App::Puzzle::Obj& o : pz.objs) // InitSwitchOn: a block standing on a switch presses it
-        if (o.type == cr::kTypeNormal && o.state == 1 && switchAt(app, o.row, o.col)) {
+    for (App::Puzzle::Obj& o : pz.objs) // InitSwitchOn (NormalBlockTP's): a block standing on a switch presses it
+        if (o.type == cr::kTypeNormal && st->ability != cr::kAbilityPsychokinesis && o.state == 1 && switchAt(app, o.row, o.col)) {
             o.onSwitch = true;
             press(app, o.row, o.col, true, true);
             cr::Vec3 p = centre(app, o.row, o.col);
@@ -10681,7 +10738,7 @@ void enter(App& app) {
             place(app, o, p);
         }
     for (App::Puzzle::Obj& o : pz.objs) // WarpCrystalWS::postInit
-        if (o.type == cr::kTypeCrystal && (app.npcs[size_t(o.npc)].puzzle & cr::kPuzzleObject40) && !done)
+        if (o.type == cr::kTypeCrystal && (app.npcs[size_t(o.npc)].puzzle & cr::kPuzzleObject40))
             o.shown = allSwitchesOn(app);
     buildNpcDraws(app);
     for (const App::Puzzle::Obj& o : pz.objs)
@@ -10803,6 +10860,7 @@ void teleportTo(App& app, int t) {
     npcEffect(app, 0x8d, -1);
     npcEffect(app, 0x8e, -1);
     app.sound.play(0x134);
+    app.padLock = 12;
     pz.tpState = 1, pz.tpTimer = 6, pz.tpTarget = t;
 }
 
@@ -10850,10 +10908,11 @@ void punish(App& app, int t) {
 
 void reset(App& app);
 
-bool crushes(App& app, const App::Puzzle::Obj& o) {
-    const cr::FieldNpc& n = app.npcs[size_t(o.npc)];
+// IsHitPC: the leader inside the NPC's box (+0x1c / +0x24 its size, +0x28 / +0x30 its offset; x, z)
+bool inBox(App& app, const cr::FieldNpc& n) {
     const cr::Vec3 p = app.walker.pos;
-    return std::fabs(p.x - n.pos[0]) <= cr::kPuzzleCell * 0.5f && std::fabs(p.z - n.pos[2]) <= cr::kPuzzleCell * 0.5f;
+    return std::fabs(p.x - (n.pos[0] + n.offset[0])) <= n.box[0] * 0.5f &&
+           std::fabs(p.z - (n.pos[2] + n.offset[2])) <= n.box[2] * 0.5f;
 }
 
 void squash(App& app) {
@@ -10872,6 +10931,41 @@ void pkLanded(App& app) { // the block's message 4: Psychokinesis::onWaitMove
     pz.pkState = 0, pz.pkTarget = -1, pz.pkMoved = false;
     stopEffect(app.fieldEffects, pz.pkEffect); // eff3d_delete(5)
     pz.pkEffect = 0;
+    app.padLock = 2;
+}
+
+// _ArrowOn(k, x, y, z): the arrow at the screen point of (x, y + 5, z) moved by its table's
+// offset (0xd13a0: (-36, 0), (0, -24), (36, 0), (0, 24) iPhone points, doubled on the iPad's
+// pixels - tex2d units either way); it stays there, opaque (0xffffffff)
+void arrowOn(App& app, int k, cr::Vec3 p) {
+    static const float kOffset[4][2] = {{-36, 0}, {0, -24}, {36, 0}, {0, 24}};
+    App::Puzzle::Arrow& a = app.puzzle.arrows[k];
+    float lx, ly, tx = 240, ty = 160;
+    if (fieldToLogical(app, {p.x, p.y + 5.0f, p.z}, lx, ly)) logicalToTex2d(app, lx, ly, tx, ty);
+    a.on = 1, a.alpha = 0xff;
+    a.x = tx + kOffset[k][0], a.y = ty + kOffset[k][1];
+}
+
+// _ArrowOff(k, mode): one that's on goes - at once (0), over 5 frames (1: alpha - 0x33 a frame) or
+// 10 (2: - 0x50 a frame, the byte wrapping round - the chosen arrow flickers out)
+void arrowOff(App& app, int k, int mode) {
+    App::Puzzle::Arrow& a = app.puzzle.arrows[k];
+    if (a.on == -1) return;
+    a.on = -1, a.mode = mode;
+    a.timer = mode == 2 ? 10 : mode == 1 ? 5 : 0;
+}
+void arrowsOff(App& app, int mode) { for (int k = 0; k < 4; ++k) arrowOff(app, k, mode); } // _ArrowOffAll
+
+// NormalBlockPK::onRise's end (ShowArrows): an arrow each way the block could go - the neighbour
+// cell inside the grid and empty: 0 left (column - 1), 1 up (row - 1), 2 right, 3 down
+void showArrows(App& app, const App::Puzzle::Obj& o) {
+    const cr::FieldNpc& n = app.npcs[size_t(o.npc)];
+    const cr::Vec3 p{n.pos[0], n.pos[1], n.pos[2]};
+    static const int kStep[4][2] = {{0, -1}, {-1, 0}, {0, 1}, {1, 0}};
+    for (int k = 0; k < 4; ++k) {
+        const int r = o.row + kStep[k][0], c = o.col + kStep[k][1];
+        if (cellSlot(app, 1, r, c) && objectAt(app, 1, r, c) < 0) arrowOn(app, k, p);
+    }
 }
 
 void stepPkBlock(App& app, App::Puzzle::Obj& o) {
@@ -10887,10 +10981,11 @@ void stepPkBlock(App& app, App::Puzzle::Obj& o) {
         o.pkMsg = 0;
         o.pk = 1;
         break;
-    case 1: // onRise
+    case 1: // onRise: then the arrows, unless it was let go meanwhile
         setY(n.pos[1] + 2.0f);
         if (--o.pkTimer > 0) break;
         setY(o.baseY + 5.0f);
+        if (o.pkMsg != 2) showArrows(app, o);
         o.bob = 0;
         o.pk = 2;
         break;
@@ -10903,6 +10998,9 @@ void stepPkBlock(App& app, App::Puzzle::Obj& o) {
             o.pk = switchAt(app, o.row, o.col) ? 5 : 4;
         } else if (o.pkMsg == 3) {
             o.pkMsg = 0;
+            // the way it goes: its arrow over 10 frames, the others at once
+            const int chosen = o.toCol < o.col ? 0 : o.toRow < o.row ? 1 : o.toCol > o.col ? 2 : 3;
+            for (int k = 0; k < 4; ++k) arrowOff(app, k, k == chosen ? 2 : 0);
             app.sound.play(0x136);
             const cr::Vec3 from = centre(app, o.row, o.col), to = centre(app, o.toRow, o.toCol);
             const float dx = to.x - from.x, dz = to.z - from.z, d = std::sqrt(dx * dx + dz * dz);
@@ -10912,9 +11010,9 @@ void stepPkBlock(App& app, App::Puzzle::Obj& o) {
         }
         break;
     }
-    case 3: // onMove
+    case 3: // onMove: the leader in the block's box squashes the try
         place(app, o, {n.pos[0] + o.vx, n.pos[1], n.pos[2] + o.vz});
-        if (crushes(app, o)) { squash(app); return; }
+        if (inBox(app, n)) { squash(app); return; }
         if (--o.pkTimer > 0) break;
         {
             if (int* from = cellSlot(app, o.layer, o.row, o.col); from && *from >= 0 && &app.puzzle.objs[size_t(*from)] == &o) *from = -1;
@@ -10928,27 +11026,27 @@ void stepPkBlock(App& app, App::Puzzle::Obj& o) {
             o.pk = switchAt(app, o.row, o.col) ? 5 : 4;
         }
         break;
-    case 4: case 5: { // onDown / onDownToSwitch
+    case 4: case 5: { // onDown (the box tested every frame) / onDownToSwitch (never)
         const float floor = o.baseY + (o.pk == 5 ? cr::kPuzzleSwitchRise : 0.0f);
-        float y = n.pos[1] + o.vy;
+        const float y = n.pos[1] + o.vy;
         o.vy -= 0.8f;
-        if (crushes(app, o) && y > floor) { setY(y); squash(app); return; }
+        setY(std::max(y, floor));
+        if (o.pk == 4 && inBox(app, n)) { squash(app); return; }
         if (y <= floor) {
-            setY(floor);
             if (o.pk == 5) {
                 o.onSwitch = true;
                 press(app, o.row, o.col, true);
             } else app.sound.play(0x12c); // (NormalBlockPK::onDown: __effgo(300) as it meets the floor)
             o.pk = 0;
             pkLanded(app);
-        } else setY(y);
+        }
         break;
     }
     default: break;
     }
 }
 
-// Take hold of block `t` (onCheckTouch)
+// Take hold of block `t` (onCheckTouch); (sx, sy) the touch (tex2d), -1e9 by key
 void pkGrab(App& app, int t, float sx = -1e9f, float sy = -1e9f) {
     App::Puzzle& pz = app.puzzle;
     if (pz.busy || pz.pkState || t < 0 || t >= int(pz.objs.size())) return;
@@ -10959,16 +11057,20 @@ void pkGrab(App& app, int t, float sx = -1e9f, float sy = -1e9f) {
     pz.busy = true;
     o.pkMsg = 1;
     pz.pkState = 1, pz.pkTarget = t, pz.pkMoved = false, pz.pkFromX = sx, pz.pkFromY = sy;
+    pz.pkAtX = sx, pz.pkAtY = sy, pz.pkHeld = sx > -1e8f; // PsychokinesisDetector::init: that touch
     pz.pkPointerCancelled = false;
     pz.pkEffect = npcEffect(app, 0x8b, -1, true);
 }
 
-// The swipe's direction (1 up the grid / row - 1, 2 down, 3 left / column - 1, 4 right); 0 lets go
+// Psychokinesis::onCheckSlide's choice: the direction (1 up the grid / row - 1, 2 down, 3 left /
+// column - 1, 4 right) sends the block to the cell before the next block or wall (or the edge) -
+// the count shown one less at once (counted as it lands), the pad locked 10 frames; 0, or no room
+// that way, lets it go (every arrow over 5 frames). A block not yet taken hold of waits
 void pkSend(App& app, int dir) {
     App::Puzzle& pz = app.puzzle;
     if (pz.pkState != 1 || pz.pkTarget < 0) return;
     App::Puzzle::Obj& o = pz.objs[size_t(pz.pkTarget)];
-    if (o.pk != 2) return; // still rising
+    if (o.pk == 0 && o.pkMsg == 1) return; // (the hold's message not taken yet)
     const int dr = dir == 1 ? -1 : dir == 2 ? 1 : 0, dc = dir == 3 ? -1 : dir == 4 ? 1 : 0;
     int r = o.row, c = o.col;
     if (dir)
@@ -10982,26 +11084,28 @@ void pkSend(App& app, int dir) {
             }
             r = nr, c = nc;
         }
-    if (r == o.row && c == o.col) o.pkMsg = 2; // nowhere to go: let go
-    else {
+    if (r == o.row && c == o.col) { // nowhere to go: let go
+        arrowsOff(app, 1);
+        o.pkMsg = 2;
+    } else {
         o.toRow = r, o.toCol = c, o.pkMsg = 3; // PsychokinesisMessage
         pz.pkMoved = true;
+        app.padLock = 10;
     }
     pz.pkState = 2;
     pz.pkPointerCancelled = false;
 }
 
-// The mouse let go at (sx, sy): the drag's direction, or none inside the dead zone
-void pkRelease(App& app, float sx, float sy) {
+// PsychokinesisDetector::update, a frame while a block is held by a touch: that touch let go -
+// let go of the block; still down and out of the dead zone (-29 < dx < 29, -35 < dy < 20 in
+// tex2d units from where it took hold) - the way it went; else wait
+void pkDetect(App& app) {
     App::Puzzle& pz = app.puzzle;
-    if (pz.pkState != 1 || pz.pkFromX < -1e8f) return;
-    const float dx = (sx - pz.pkFromX) / 2.133f, dy = (sy - pz.pkFromY) / 2.4f; // to the 480 x 320 screen
-    int dir = 0;
-    if (!(dx > -29 && dx < 29 && dy > -35 && dy < 20)) {
-        if (std::fabs(dx) >= std::fabs(dy)) dir = dx < 0 ? 3 : 4;
-        else dir = dy < 0 ? 1 : 2;
-    }
-    pkSend(app, dir);
+    if (pz.pkState != 1 || pz.pkFromX < -1e8f || pz.pkPointerCancelled) return;
+    if (!pz.pkHeld) { pkSend(app, 0); return; }
+    const float dx = pz.pkAtX - pz.pkFromX, dy = pz.pkAtY - pz.pkFromY;
+    if (dx > -29 && dx < 29 && dy > -35 && dy < 20) return;
+    pkSend(app, std::fabs(dx) >= std::fabs(dy) ? (dx < 0 ? 3 : 4) : (dy < 0 ? 1 : 2));
 }
 
 // ---- Toughness (Toughness, FragileBlock, RedBlock, BlueBlock) ----
@@ -11012,14 +11116,6 @@ void pkRelease(App& app, float sx, float sy) {
 // effect 4, sound 0x2a - once a frame, NoOverlapSE), squashing the try when the leader stands in
 // its box (effect 0x19, sound 0x54, the room resets); a solid one is put away (1 to 0x60, effect
 // 3, sound 0x29). Red blocks start solid, blue ones put away.
-
-void reset(App& app);
-
-bool inBox(App& app, const cr::FieldNpc& n) { // the leader inside the NPC's box (x, z)
-    const cr::Vec3 p = app.walker.pos;
-    return std::fabs(p.x - (n.pos[0] + n.offset[0])) <= n.box[0] * 0.5f &&
-           std::fabs(p.z - (n.pos[2] + n.offset[2])) <= n.box[2] * 0.5f;
-}
 
 void toughTap(App& app, int t) {
     App::Puzzle& pz = app.puzzle;
@@ -11200,27 +11296,140 @@ void stepPyro(App& app) {
 }
 
 // PuzzleScene: a reset fades out (sound 0x44), builds the room again, puts the leader back where
-// it came in, fades in
+// it came in, fades in; the pad locked 24 frames
 void reset(App& app) {
     App::Puzzle& pz = app.puzzle;
     if (pz.stage < 0 || pz.scene != 4) return;
     app.sound.play(0x14d);
     app.fadeGrey = 0, app.fadeFrom = 0, app.fadeTo = 1, app.fadeFrames = 10, app.fadeT = 0; // (PuzzleScene::reset: _SetMask(0), 500 ms)
+    app.padLock = 24;
     pz.scene = 2;
+}
+
+// What the room's ability works on: teleport - a block or gem in play; psychokinesis - a block;
+// toughness - a fragile, red or blue block that's there (isValid); pyrokinesis - a candle switch
+bool target(const App& app, const App::Puzzle::Obj& o) {
+    const cr::PuzzleStage* st = stage(app);
+    if (!st || o.layer != 1 || !o.shown) return false;
+    switch (st->ability) {
+    case cr::kAbilityTeleport: return (o.type == cr::kTypeNormal || o.type == cr::kTypeGem) && o.state == 1;
+    case cr::kAbilityPsychokinesis: return o.type == cr::kTypeNormal && o.state == 1;
+    case cr::kAbilityToughness: return o.type == cr::kTypeFragile || o.type == cr::kTypeRed || o.type == cr::kTypeBlue;
+    case cr::kAbilityPyrokinesis: return o.type == cr::kTypeCandleSwitch;
+    default: return false;
+    }
+}
+
+// getNearestPuzzleObject (the block layer; its first best the screen's width squared - no limit
+// in effect): the object whose point - (x, y + its record's +0x20 height, z) on the screen - is
+// nearest the touch (tex2d), then the ability's window around that point (the touch less it): a
+// gem |dx| <= 17, 7 <= dy <= 33, anything else |dx| <= 20, -16 <= dy <= 21. -1 when it's out
+// of its window or isn't one the room's ability works on. Objects put away (red / blue / candle
+// blocks) are still there to be nearest; broken or taken ones are gone
+bool inWindow(int type, float dx, float dy) {
+    return type == cr::kTypeGem ? std::fabs(dx) <= 17 && dy >= 7 && dy <= 33 : std::fabs(dx) <= 20 && dy >= -16 && dy <= 21;
+}
+int pick(App& app, float tx, float ty) {
+    const App::Puzzle& pz = app.puzzle;
+    int best = -1;
+    float bestD = 1e30f, bx = 0, by = 0;
+    for (size_t i = 0; i < pz.objs.size(); ++i) {
+        const App::Puzzle::Obj& o = pz.objs[i];
+        if (o.layer != 1 || (!o.shown && !o.ghost)) continue;
+        const cr::FieldNpc& n = app.npcs[size_t(o.npc)];
+        float lx, ly, px, py;
+        if (!fieldToLogical(app, {n.pos[0], n.pos[1] + n.box[1], n.pos[2]}, lx, ly)) continue;
+        logicalToTex2d(app, lx, ly, px, py);
+        const float d = (px - tx) * (px - tx) + (py - ty) * (py - ty);
+        if (d < bestD) bestD = d, best = int(i), bx = px, by = py;
+    }
+    if (best < 0) return -1;
+    const App::Puzzle::Obj& o = pz.objs[size_t(best)];
+    return inWindow(o.type, tx - bx, ty - by) && target(app, o) ? best : -1;
+}
+
+// Teleport::onCheckTap / Toughness::update / Pyrokinesis::update: with the leader in a cell and
+// not moved this frame (FieldPCCtrl + 0x28), and pyrokinesis' 20 frames over, CheckTap - the
+// touch let go within 5 frames of going down is a tap, where it went down; then the object there
+void stepTap(App& app) {
+    App::Puzzle& pz = app.puzzle;
+    const int ability = stage(app)->ability;
+    if (ability == cr::kAbilityPyrokinesis && pz.pyroCool > 0 && --pz.pyroCool > 0) return;
+    if ((ability == cr::kAbilityTeleport && pz.tpState) || pz.leaderMoved) return;
+    int r, c;
+    if (!cellOf(app, app.walker.pos, r, c)) return;
+    App::Puzzle::Tap& tap = pz.tap;
+    if (tap.state != 1) return;
+    ++tap.frames;
+    if (!tap.released) return;
+    const bool tapped = tap.frames < 6; // (state 2; 3 held too long)
+    const float tx = tap.x, ty = tap.y;
+    tap = App::Puzzle::Tap();
+    if (!tapped || pz.padHold > 0) return;
+    const int t = pick(app, tx, ty);
+    if (t < 0) return;
+    pz.tapX = tx, pz.tapY = ty;
+    if (ability == cr::kAbilityToughness) toughTap(app, t);
+    else if (ability == cr::kAbilityPyrokinesis) pyroTap(app, t);
+    else teleportTo(app, t);
+    pz.tapX = pz.tapY = -1;
+}
+
+// A logical point -> the field view's pixels (FieldCamera::convertPos_ScreenToViewport)
+void logicalToView(const App& app, float lx, float ly, float& hx, float& hy) {
+    const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
+    float vx, vy, vw, vh; // the stage view on screen, as drawFrame lays it out
+    if (scrollingField(app)) {
+        vw = fieldViewW(app), vh = fieldViewH(app);
+        vx = (SW - vw) / 2 + app.scroll.offX, vy = (H - vh) / 2 - app.scroll.offY;
+    } else {
+        vw = vh = app.video.paintings == 2 ? std::max(SW, H) : std::min(SW, H);
+        vx = (SW - vw) / 2, vy = (H - vh) / 2;
+    }
+    hx = (lx - vx) * fieldViewW(app) / vw, hy = (ly - vy) * fieldViewH(app) / vh;
+}
+
+// ScrollCamera::update: checkTouch - 5 frames on, one finger down opens 6 frames for a second:
+// one coming down then scrolls the view to it (state 1: the camera off the leader, the ability
+// paused) - else, or once the next single touch's frames pass without one, state 0 again. While
+// scrolled, setScroll2D(the point, 0.25) every frame
+void stepScroll(App& app, int fresh) {
+    App::Puzzle::Scroll& sc = app.puzzle.scroll;
+    const App::Fingers& f = app.fingers;
+    if (sc.phase == 1) {
+        bool done = true;
+        if (++sc.count < 6) {
+            if (f.held >= 2 && fresh == 1) {
+                float lx, ly;
+                app.renderer.toLogical(f.x, f.y, lx, ly);
+                logicalToView(app, lx, ly, sc.x, sc.y);
+                sc.state = 1;
+            } else done = false;
+        } else sc.state = 0;
+        if (done) sc.phase = 0, sc.count = 0;
+    } else if (++sc.count > 4 && f.held == 1) sc.phase = 1, sc.count = 0;
+    if (sc.state == 1 && scrollingField(app)) scrollFieldTo(app, sc.x, sc.y, 0.25f);
 }
 
 // One 20 Hz frame (PuzzleManager::update, under PuzzleScene::update)
 void step(App& app) {
     App::Puzzle& pz = app.puzzle;
+    const int fresh = app.fingers.fresh;
+    app.fingers.fresh = 0;
     if (pz.stage < 0) return;
-    if (pz.pyroCool > 0) --pz.pyroCool;
-    if (pz.scene == 2) { // fading out to the reset
+    if (pz.scene == 2) { // fading out to the reset (PuzzleScene::onFadeOut)
         if (app.fadeT < app.fadeFrames) return;
         const cr::Vec3 start = app.puzzleStart;
+        const float heading = app.puzzleStartHeading;
         const int stageNo = pz.stage;
         app.npcs = app.events.npcs(app.mapNumber); // every object back where the room has it
         enter(app);
-        if (app.puzzle.stage == stageNo) setActor(app, 0, start, nullptr, false);
+        if (app.puzzle.stage == stageNo) { // FieldPCCtrl::reset: where and how it came in, standing
+            setActor(app, 0, start, &heading, false);
+            app.walker.gait = cr::Gait::Stand;
+            app.puzzle.leaderWas = start;
+            app.scroll.snap = true; // (FieldCamera::setScrollPlayer(1.0): the view on the leader at once)
+        }
         app.fadeFrom = 1, app.fadeTo = 0, app.fadeFrames = 10, app.fadeT = 0; // (onFadeOut: _SetMask(1), 500 ms)
         app.puzzle.scene = 3;
         return;
@@ -11229,6 +11438,11 @@ void step(App& app) {
         if (app.fadeT >= app.fadeFrames) pz.scene = 4;
         return;
     }
+    // FieldPCCtrl + 0x28: the leader moved this frame; gac + 0x1e2004: 3 frames after the pad was held
+    pz.leaderMoved = app.walker.gait != cr::Gait::Stand || app.walker.pos.x != pz.leaderWas.x || app.walker.pos.z != pz.leaderWas.z;
+    pz.leaderWas = app.walker.pos;
+    if (app.touchPad.down) pz.padHold = 3;
+    else if (pz.padHold > 0) --pz.padHold;
     if (cleared(app) || app.runner.running() || !app.dialogue.empty()) return;
     for (int k = 0; k < 2; ++k) // the buttons' scripts done: retry (var 0 = 1) / the other (var 1 = 666)
         if (pz.asked[k]) {
@@ -11236,7 +11450,14 @@ void step(App& app) {
             if (k == 0 && app.game.vars[0] == 1) { reset(app); return; }
         }
     ++pz.clock;
-    stepTeleport(app);
+    stepScroll(app, fresh);
+    if (pz.scroll.state != 1) { // the ability's update
+        stepTeleport(app);
+        if (stage(app)->ability == cr::kAbilityPsychokinesis) {
+            pkDetect(app); // onCheckSlide
+            if (pz.pkState == 2) app.padLock = 10; // onWaitMove
+        } else stepTap(app);
+    }
     if (stage(app)->ability == cr::kAbilityPyrokinesis) stepPyro(app);
     if (stage(app)->ability == cr::kAbilityToughness || stage(app)->ability == cr::kAbilityPyrokinesis) {
         stepTough(app); // the red / blue and candle blocks' changing over
@@ -11253,46 +11474,26 @@ void step(App& app) {
     }
 }
 
-// The pad's buttons (EvrStart 6: retry? / 7)
-void ask(App& app, int k) {
+// The pad's third button (menuf_mainPut / PuzzleManager::update): shown, and taken, while var
+// 64 + stage is above 2 in a room not cleared
+bool thirdButton(const App& app) {
+    const App::Puzzle& pz = app.puzzle;
+    if (pz.stage < 0 || cleared(app)) return false;
+    const auto it = app.game.vars.find(64 + pz.stage);
+    return it != app.game.vars.end() && it->second > 2;
+}
+
+// The pad's buttons (PuzzleManager::update: EvrStart 6 Retry, 7 Help, 8 the third), refused while
+// the pad is locked (gac + 0x1e2006); Retry and Help then wait for their script's answer
+bool ask(App& app, int k) {
     App::Puzzle& pz = app.puzzle;
-    if (pz.stage < 0 || pz.busy || app.runner.running()) return;
+    if (pz.stage < 0 || app.padLock > 0 || app.runner.running()) return false;
+    if (k == 2 ? !thirdButton(app) : !pz.help) return false;
     const uint32_t at = app.events.returnEntry(6 + k);
-    if (!at || !app.runner.startAt(app.events, at, 6 + k, app.game, app.area, app.mapNumber)) return;
-    app.runnerWhat = k == 0 ? "puzzle retry" : "puzzle button 7";
-    pz.asked[k] = true;
-}
-
-// What the room's ability works on: teleport - a block or gem in play; psychokinesis - a block;
-// toughness - a fragile, red or blue block that's there
-bool target(const App& app, const App::Puzzle::Obj& o) {
-    const cr::PuzzleStage* st = stage(app);
-    if (!st || o.layer != 1 || !o.shown) return false;
-    switch (st->ability) {
-    case cr::kAbilityTeleport: return (o.type == cr::kTypeNormal || o.type == cr::kTypeGem) && o.state == 1;
-    case cr::kAbilityPsychokinesis: return o.type == cr::kTypeNormal && o.state == 1;
-    case cr::kAbilityToughness: return o.type == cr::kTypeFragile || o.type == cr::kTypeRed || o.type == cr::kTypeBlue;
-    case cr::kAbilityPyrokinesis: return o.type == cr::kTypeCandleSwitch;
-    default: return false;
-    }
-}
-
-// A tap at screen point (sx, sy) in the field view's pixels: the nearest object whose projected
-// top is within reach (getNearestPuzzleObject + the abilities' window)
-int pick(App& app, float sx, float sy, const std::function<bool(cr::Vec3, float&, float&)>& project) {
-    int best = -1;
-    float bestD = 1e30f;
-    for (size_t i = 0; i < app.puzzle.objs.size(); ++i) {
-        const App::Puzzle::Obj& o = app.puzzle.objs[i];
-        if (o.layer != 1 || !o.shown) continue;
-        const cr::FieldNpc& n = app.npcs[size_t(o.npc)];
-        float x, y;
-        if (!project({n.pos[0], n.pos[1] + 5.0f, n.pos[2]}, x, y)) continue;
-        const float d = (x - sx) * (x - sx) + (y - sy) * (y - sy);
-        if (d < bestD) bestD = d, best = int(i);
-    }
-    // ~ the original's 20 tex2d units, in 1024 x 768 pixels; the nearest has to be one it works on
-    return bestD <= 48.0f * 48.0f && target(app, app.puzzle.objs[size_t(best)]) ? best : -1;
+    if (!at || !app.runner.startAt(app.events, at, 6 + k, app.game, app.area, app.mapNumber)) return false;
+    app.runnerWhat = k == 0 ? "puzzle retry" : k == 1 ? "puzzle help" : "puzzle button 8";
+    if (k < 2) pz.asked[k] = true;
+    return true;
 }
 
 // The keyboard's way: the first object straight ahead of the leader along its row / column (past
@@ -11360,49 +11561,55 @@ void stepCrystalCam(App& app) {
     }
 }
 
-// A click in the frame's pixels: teleport to the block or gem tapped (true when one was)
+// A touch going down (the frame's pixels; true when the puzzle took it): the pad's buttons -
+// (160..204, 14..46) the third (EvrStart 8), (8..52, 56..84) Retry (6), (84..124, 14..46) Help
+// (7) - then the ability: psychokinesis takes hold of the block there at once (onCheckTouch);
+// the others' CheckTap follows the touch from here, a tap once it's let go in time
 bool click(App& app, float px, float py) {
-    if (app.puzzle.stage < 0 || app.runner.running() || !app.dialogue.empty() || !paintedField(app)) return false;
+    App::Puzzle& pz = app.puzzle;
+    if (pz.stage < 0 || app.runner.running() || !app.dialogue.empty() || !paintedField(app)) return false;
     float lx, ly;
     app.renderer.toLogical(px, py, lx, ly);
     float tx, ty;
     logicalToTex2d(app, lx, ly, tx, ty);
-    if (app.puzzle.help) { // the pad's buttons: (8..52, 56..84) Retry (EvrStart 6), (84..124, 14..46) Help (7)
-        const float bx = tx + (app.renderer.uiX() - wideLeft(app)) / 2; // (widescreen: in the corner)
-        if (bx >= 8 && bx < 52 && ty >= 56 && ty < 84) { ask(app, 0); return true; }
-        if (bx >= 84 && bx < 124 && ty >= 14 && ty < 46) { ask(app, 1); return true; }
-    }
-    const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
-    float vx, vy, vw, vh; // the stage view on screen, as drawFrame lays it out
-    if (scrollingField(app)) {
-        vw = fieldViewW(app), vh = fieldViewH(app);
-        vx = (SW - vw) / 2 + app.scroll.offX, vy = (H - vh) / 2 - app.scroll.offY;
-    } else {
-        vw = vh = app.video.paintings == 2 ? std::max(SW, H) : std::min(SW, H);
-        vx = (SW - vw) / 2, vy = (H - vh) / 2;
-    }
-    const int t = pick(app, lx, ly, [&](cr::Vec3 p, float& x, float& y) {
-        float hx, hy;
-        if (!fieldViewPoint(app, p, hx, hy)) return false;
-        x = vx + hx * vw / fieldViewW(app), y = vy + hy * vh / fieldViewH(app);
-        return true;
-    });
+    const float bx = tx + (app.renderer.uiX() - wideLeft(app)) / 2; // (widescreen: the pad in the corner)
+    if (bx >= 160 && bx < 204 && ty >= 14 && ty < 46 && ask(app, 2)) return true;
+    if (bx >= 8 && bx < 52 && ty >= 56 && ty < 84 && ask(app, 0)) return true;
+    if (bx >= 84 && bx < 124 && ty >= 14 && ty < 46 && ask(app, 1)) return true;
+    if (cleared(app) || pz.scene != 4 || pz.scroll.state == 1) return false;
+    const int t = pick(app, tx, ty);
     if (t < 0) return false;
-    app.puzzle.tapX = tx, app.puzzle.tapY = ty;
-    if (stage(app)->ability == cr::kAbilityPsychokinesis) pkGrab(app, t, lx, ly);
-    else if (stage(app)->ability == cr::kAbilityToughness) toughTap(app, t);
-    else if (stage(app)->ability == cr::kAbilityPyrokinesis) pyroTap(app, t);
-    else teleportTo(app, t);
-    app.puzzle.tapX = app.puzzle.tapY = -1;
+    if (stage(app)->ability == cr::kAbilityPsychokinesis) {
+        int r, c; // (onCheckTouch: the leader in a cell, not moving, the pad not held)
+        if (pz.leaderMoved || pz.padHold > 0 || !cellOf(app, app.walker.pos, r, c)) return false;
+        pz.tapX = tx, pz.tapY = ty;
+        pkGrab(app, t, tx, ty);
+        pz.tapX = pz.tapY = -1;
+        return true;
+    }
+    pz.tap = App::Puzzle::Tap(); // CheckTap state 1: this touch, from here
+    pz.tap.state = 1, pz.tap.x = tx, pz.tap.y = ty;
     return true;
 }
 
-// The mouse let go (the frame's pixels): a held block goes the way it was dragged
-void release(App& app, float px, float py) {
-    if (app.puzzle.stage < 0 || app.puzzle.pkState != 1) return;
+// The held touch moved (the frame's pixels): where the detector sees it
+void drag(App& app, float px, float py) {
+    App::Puzzle& pz = app.puzzle;
+    if (pz.stage < 0 || !pz.pkHeld) return;
     float lx, ly;
     app.renderer.toLogical(px, py, lx, ly);
-    pkRelease(app, lx, ly);
+    logicalToTex2d(app, lx, ly, pz.pkAtX, pz.pkAtY);
+}
+
+// The touch let go (the frame's pixels): CheckTap's end, the detector's let-go
+void release(App& app, float px, float py) {
+    App::Puzzle& pz = app.puzzle;
+    if (pz.stage < 0) return;
+    if (pz.tap.state == 1) pz.tap.released = true;
+    if (pz.pkHeld) {
+        drag(app, px, py);
+        pz.pkHeld = false;
+    }
 }
 
 // The ability's key: teleport to / take hold of the block ahead, or let a held one go
@@ -11522,7 +11729,9 @@ void stepEvents(App& app) {
         app.playerAlpha = app.playerAlphaTo + (app.playerAlphaFrom - app.playerAlphaTo) * float(app.playerFadeLeft) /
                                                   float(std::max(1, app.playerFadeFrames));
     }
-    if (app.puzzleStartPending && app.havePlayer) app.puzzleStart = app.walker.pos, app.puzzleStartPending = false;
+    if (app.puzzleStartPending && app.havePlayer)
+        app.puzzleStart = app.walker.pos, app.puzzleStartHeading = app.walker.heading, app.puzzleStartPending = false;
+    if (app.padLock > 0) --app.padLock; // (the main frame's: gac + 0x1e2006 counts down before _gameapp_prc)
     puzzle::step(app);
     puzzle::stepCrystalCam(app);
     puzzle::stepBanner(app);
@@ -16304,7 +16513,7 @@ int menuMaskWanted(const App& app, bool& atOnce) {
         if (app.camp.notice || (app.camp.phase == App::Camp::Exit && app.camp.exitT >= kCampExitHide)) return -1;
         return app.camp.page == App::Camp::Status && app.camp.phase == App::Camp::Slot ? 2 : 1;
     }
-    if (app.optionsOpen || app.shop.open || app.worldChoiceOpen || app.lastBattle.open) return 1;
+    if ((app.optionsOpen && !optionsAbout(app)) || app.shop.open || app.worldChoiceOpen || app.lastBattle.open) return 1;
     if (app.battle.active && app.battle.phase == App::Battle::Results && app.battle.result.stage != 3) return 1; // (MbResultPrc 0 .. 10)
     return -1;
 }
@@ -19697,6 +19906,7 @@ int runSelfTest(App& app) {
         const App::Video video = app.video;
         const int language = app.language;
         int rows = 0, problems = 0;
+        app.game.setFlag(0x43, true); // ("About Option" read: the manual's test below shows it)
         for (int page = 0; page < kOptionPages; ++page) {
             openOptions(app, page);
             rows += int(optionRows(app, page).size());
@@ -19811,6 +20021,7 @@ int runSelfTest(App& app) {
         int bootFrames = 0;
         for (; bootFrames < 1000 && !app.titleOpen; ++bootFrames) stepEvents(app);
         problems += !app.titleOpen;
+        app.game.setFlag(0x43, true); // ("About Option" read)
         openOptions(app, 0);
         const std::vector<OptRow> titlePage = optionRows(app, 0);
         problems += titlePage.size() != 13 || titlePage.back().label != sysLabel(app, 58122, "Reset Data");
@@ -19867,6 +20078,7 @@ int runSelfTest(App& app) {
         if (problems) std::printf("title flow: map %d, leader %d, booting %d\n", openingMap, app.playerChar, int(app.booting));
         app.runner.stop();
         startNewGame(app); // (the hall, for the in-game Options checks below)
+        app.game.setFlag(0x43, true);
         openOptions(app, 0);
         std::vector<OptRow> gamePage = optionRows(app, 0);
         problems += gamePage.size() != 13 || gamePage.back().label != sysLabel(app, 58123, "Return to Title") || !gamePage.back().enabled;
@@ -20197,15 +20409,40 @@ int runSelfTest(App& app) {
             openOptions(app, 0);
             problems += !app.manualOpen || app.manualIntro != 56040 || manualPage(app, 56040).empty() || !app.game.flag(0x43) ||
                         mm.state != 2 || mm.id != 56040 || mm.picture;
+            // OptionPrc 0..2 (3.1.0's OptionSet): no menu mask, the page held back until the window has shut -
+            // and the same from the title (its flag 0x43 the save's)
+            int aboutHeld = 0;
+            auto held = [&] {
+                bool atOnce = false;
+                stepOptions(app);
+                aboutHeld += menuMaskWanted(app, atOnce) < 0 && app.optionsAnim == 0;
+            };
+            held();
             for (int f = 0; f < 6; ++f) stepManual(app);
             problems += mm.win.state != 3;
             manualKey(app, SDLK_ESCAPE); // (the port's Back: the window closes, then on to Options)
             for (int f = 0; f < 8; ++f) stepManual(app);
             problems += app.manualOpen;
+            stepOptions(app);
+            aboutHeld += app.optionsAnim == 1;
             app.optionsOpen = false;
             openOptions(app, 0);
             problems += app.manualOpen;
             app.optionsOpen = false;
+            app.game.setFlag(0x43, false);
+            app.titleOpen = true;
+            openOptions(app, 0);
+            aboutHeld += app.manualOpen && app.manualIntro == 56040 && mm.state == 2;
+            held();
+            for (int f = 0; f < 6; ++f) stepManual(app);
+            manualKey(app, SDLK_ESCAPE);
+            for (int f = 0; f < 8; ++f) stepManual(app);
+            aboutHeld += !app.manualOpen && app.game.flag(0x43);
+            app.optionsOpen = false;
+            app.titleOpen = false;
+            problems += aboutHeld != 5;
+            std::printf("options: \"About Option\" (56040) alone in the message window, the page after it, from the field and "
+                        "the title: %d/5\n", aboutHeld);
             app.titleOpen = keepTitle;
             openManual(app, 0);
             const std::vector<int> topics = manualTopics(app);
@@ -20244,7 +20481,7 @@ int runSelfTest(App& app) {
             app.typeOn = keepType;
             app.game = keepGame;
         }
-        problems += expectSounds("manual", {6, 7, 1, 1, 5, 1, 2, 6, 7, 3});
+        problems += expectSounds("manual", {6, 7, 6, 7, 1, 1, 5, 1, 2, 6, 7, 3});
         // Scenarios: the title's (mode 0, to look at) then the Camp's, a cell opened with a present
         openScenarios(app);
         problems += !app.scc.open || !app.scc.sheet.id;
@@ -21176,6 +21413,190 @@ int runSelfTest(App& app) {
         std::printf("puzzle room: stage 12 (pyrokinesis) - start %s, a switch %s, all lit %s (%d taps), crystal %s; %d problems\n",
                     start12 ? "right" : "WRONG", lighting && lit12 ? "lights" : "DOESN'T light", allLit ? "yes" : "NO", taps,
                     crystal12 ? "came" : "DIDN'T come", problems);
+        { // The touches as 3.1.0 reads them: psychokinesis' arrows and its swipe decided while held,
+          // CheckTap and the windows, the pad lock and the third button, ScrollCamera, a Retry's
+          // entry angle, cleared rooms (no objects) and the PK blocks' empty init
+            int tp = 0;
+            auto pointOf = [&](int t, float dy, float& x, float& y) { // an object's point (tex2d), or its top + dy
+                const cr::FieldNpc& n = app.npcs[size_t(pz.objs[size_t(t)].npc)];
+                float lx = 0, ly = 0;
+                x = y = -1000;
+                if (fieldToLogical(app, {n.pos[0], n.pos[1] + dy, n.pos[2]}, lx, ly)) logicalToTex2d(app, lx, ly, x, y);
+            };
+            // Stage 4: block A at (3, 2), the leader at (1, 1)
+            room(4, false);
+            settle(3000);
+            setActor(app, 0, puzzle::centre(app, 1, 1), nullptr, false);
+            steps(2);
+            int pkInit = 0, pkBlocks = 0;
+            for (const App::Puzzle::Obj& o : pz.objs)
+                if (o.type == cr::kTypeNormal) ++pkBlocks, pkInit += o.shown == npcActive(app, app.npcs[size_t(o.npc)]) && !o.onSwitch;
+            const int a = puzzle::objectAt(app, 1, 3, 2);
+            float bx = 0, by = 0;
+            if (a >= 0) pointOf(a, app.npcs[size_t(pz.objs[size_t(a)].npc)].box[1], bx, by);
+            const bool window = a >= 0 && puzzle::pick(app, bx, by) == a && puzzle::pick(app, bx + 4, by + 6) == a &&
+                                puzzle::inWindow(cr::kTypeNormal, 20, 21) && puzzle::inWindow(cr::kTypeNormal, -20, -16) &&
+                                !puzzle::inWindow(cr::kTypeNormal, 21, 0) && !puzzle::inWindow(cr::kTypeNormal, 0, 22) &&
+                                !puzzle::inWindow(cr::kTypeNormal, 0, -17);
+            bool arrowsOn = false, arrowsAt = false, decided = false, flicker = false, letGo = false, fade5 = false, locked = false;
+            if (a >= 0) {
+                puzzle::pkGrab(app, a, bx, by);
+                for (int f = 0; f < 10 && pz.objs[size_t(a)].pk != 2; ++f) steps(1);
+                static const int kStep[4][2] = {{0, -1}, {-1, 0}, {0, 1}, {1, 0}};
+                arrowsOn = true, arrowsAt = true;
+                float ax = 0, ay = 0;
+                const App::Puzzle::Obj& A = pz.objs[size_t(a)];
+                pointOf(a, 5 - (app.npcs[size_t(A.npc)].pos[1] - (A.baseY + 5)), ax, ay); // (x, rise's y + 5, z)
+                static const float kOff[4][2] = {{-36, 0}, {0, -24}, {36, 0}, {0, 24}};
+                for (int k = 0; k < 4; ++k) {
+                    const int r = 3 + kStep[k][0], c = 2 + kStep[k][1];
+                    const bool want = puzzle::cellSlot(app, 1, r, c) && puzzle::objectAt(app, 1, r, c) < 0;
+                    arrowsOn &= (pz.arrows[k].on == 1) == want;
+                    if (want) arrowsAt &= std::fabs(pz.arrows[k].x - (ax + kOff[k][0])) < 1.5f && std::fabs(pz.arrows[k].y - (ay + kOff[k][1])) < 1.5f;
+                }
+                // still held, the touch 40 to the left: sent at once (onCheckSlide), the pad locked
+                pz.pkAtX = bx - 40, pz.pkAtY = by;
+                steps(1);
+                decided = pz.pkState == 2 && pz.pkHeld && pz.objs[size_t(a)].toCol < 2;
+                steps(1);
+                for (int k = 1; k < 4; ++k) flicker |= pz.arrows[k].timer > 0;
+                flicker = !flicker && pz.arrows[0].on == -1 && pz.arrows[0].timer == 10 && pz.arrows[0].mode == 2;
+                stepPuzzleHud(app);
+                flicker &= pz.arrows[0].alpha == 0xaf;
+                for (int f = 0; f < 3; ++f) stepPuzzleHud(app);
+                flicker &= pz.arrows[0].alpha == 0xbf; // (0xff - 4 x 0x50, the byte wrapped)
+                for (int f = 0; f < 6; ++f) stepPuzzleHud(app);
+                flicker &= pz.arrows[0].timer == 0; // (gone after its 10)
+                locked = app.padLock == 10 && !puzzle::ask(app, 0);
+                pz.pkHeld = false;
+                for (int f = 0; f < 200 && pz.pkState; ++f) steps(1);
+                locked &= app.padLock == 2;
+                // taken hold of again and let go inside the dead zone: down where it was, nothing counted
+                const int uses = app.game.vars[13], ar = pz.objs[size_t(a)].row, ac = pz.objs[size_t(a)].col;
+                pointOf(a, app.npcs[size_t(pz.objs[size_t(a)].npc)].box[1], bx, by);
+                puzzle::pkGrab(app, a, bx, by);
+                const bool regrab = pz.pkState == 1;
+                for (int f = 0; f < 10 && pz.objs[size_t(a)].pk != 2; ++f) steps(1);
+                int shown = 0;
+                for (const App::Puzzle::Arrow& w : pz.arrows) shown += w.on == 1;
+                if (!regrab || !shown) std::printf("puzzle touches: the second hold at (%d, %d): taken %d, block %d, arrows %d\n", ar, ac, regrab, pz.objs[size_t(a)].pk, shown);
+                pz.pkAtX = bx + 20, pz.pkAtY = by + 10;
+                steps(1);
+                pz.pkHeld = false;
+                steps(1);
+                bool anyOn = false;
+                for (const App::Puzzle::Arrow& w : pz.arrows) anyOn |= w.timer == 5 && w.mode == 1;
+                stepPuzzleHud(app);
+                fade5 = anyOn;
+                for (const App::Puzzle::Arrow& w : pz.arrows) fade5 &= w.timer == 0 || w.alpha == 0xcc;
+                for (int f = 0; f < 60 && pz.pkState; ++f) steps(1);
+                letGo = pz.pkState == 0 && app.game.vars[13] == uses && pz.objs[size_t(a)].row == ar && pz.objs[size_t(a)].col == ac;
+            }
+            tp += !window || !arrowsOn || !arrowsAt || !decided || !flicker || !locked || !letGo || !fade5 || pkInit != pkBlocks;
+            std::printf("puzzle touches: psychokinesis - window %s, arrows %s at %s, swipe decided while held %s, the chosen arrow "
+                        "flickers out %s, pad lock %s, a let-go fades them %s and costs nothing %s, blocks as the map has them %d/%d\n",
+                        window ? "ok" : "WRONG", arrowsOn ? "on" : "WRONG", arrowsAt ? "their points" : "WRONG POINTS", decided ? "yes" : "NO",
+                        flicker ? "yes" : "NO", locked ? "10 then 2" : "WRONG", fade5 ? "over 5" : "NO", letGo ? "yes" : "NO", pkInit, pkBlocks);
+            // Stage 0: CheckTap - held 7 frames no tap; the leader moving holds it; let go in time, a teleport (pad lock 12)
+            room(0, false);
+            settle(3000);
+            setActor(app, 0, puzzle::centre(app, 0, 2), nullptr, false);
+            steps(2);
+            const int b = puzzle::objectAt(app, 1, 1, 1);
+            bool longNo = false, movingWaits = false, tapped = false, gemWindow = true;
+            if (b >= 0) {
+                pointOf(b, app.npcs[size_t(pz.objs[size_t(b)].npc)].box[1], bx, by);
+                auto touch = [&] { pz.tap = App::Puzzle::Tap(); pz.tap.state = 1, pz.tap.x = bx, pz.tap.y = by + 10; };
+                touch();
+                steps(7);
+                pz.tap.released = true;
+                steps(1);
+                longNo = pz.tpState == 0 && pz.tap.state == 0;
+                touch();
+                app.walker.gait = cr::Gait::Walk;
+                steps(3);
+                movingWaits = pz.tap.frames == 0 && pz.tap.state == 1;
+                app.walker.gait = cr::Gait::Stand;
+                steps(2);
+                pz.tap.released = true;
+                steps(1);
+                tapped = pz.tpState == 1 && app.padLock == 12;
+                settle(3000);
+            }
+            for (size_t i = 0; i < pz.objs.size(); ++i) // a gem's window: 7..33 below its point, |dx| <= 17
+                if (pz.objs[i].type == cr::kTypeGem && puzzle::target(app, pz.objs[i])) {
+                    float gx, gy;
+                    pointOf(int(i), app.npcs[size_t(pz.objs[i].npc)].box[1], gx, gy);
+                    gemWindow &= puzzle::pick(app, gx, gy + 20) == int(i) && puzzle::pick(app, gx, gy + 6) < 0 &&
+                                 puzzle::inWindow(cr::kTypeGem, 17, 7) && puzzle::inWindow(cr::kTypeGem, -17, 33) &&
+                                 !puzzle::inWindow(cr::kTypeGem, 18, 20) && !puzzle::inWindow(cr::kTypeGem, 0, 34);
+                }
+            // the third button: var 64 + stage above 2 (EvrStart 8), refused while the pad is locked
+            app.game.vars[64] = 2;
+            const bool hidden = !puzzle::thirdButton(app);
+            app.game.vars[64] = 3;
+            app.padLock = 5;
+            const bool lockRefuses = !puzzle::ask(app, 2);
+            app.padLock = 0;
+            const bool third = hidden && lockRefuses && puzzle::thirdButton(app) &&
+                               (!app.events.returnEntry(8) || (puzzle::ask(app, 2) && app.runnerWhat == "puzzle button 8"));
+            app.runner.stop();
+            app.game.vars[64] = 0;
+            // ScrollCamera: one finger 5 frames, a second within 6 - the view goes to it, the ability waits
+            app.fingers = App::Fingers();
+            app.fingers.held = 1;
+            steps(5);
+            app.fingers.held = 2, app.fingers.fresh = 1;
+            app.fingers.x = float(app.renderer.frameWidth()) / 4, app.fingers.y = float(app.renderer.frameHeight()) / 4;
+            steps(1);
+            const bool scrolled = pz.scroll.state == 1;
+            pz.tap = App::Puzzle::Tap();
+            pz.tap.state = 1;
+            steps(2);
+            const bool paused = pz.tap.frames == 0;
+            app.fingers.held = 1;
+            steps(12);
+            const bool back = pz.scroll.state == 0;
+            app.fingers = App::Fingers();
+            pz.tap = App::Puzzle::Tap();
+            // a Retry: the leader back where and as it came in, standing; the pad locked 24
+            const cr::Vec3 start = app.puzzleStart;
+            const float heading = app.puzzleStartHeading;
+            setActor(app, 0, puzzle::centre(app, 4, 4), nullptr, false);
+            app.walker.heading = heading + 1.5f, app.walker.gait = cr::Gait::Walk;
+            puzzle::reset(app);
+            const bool lock24 = app.padLock == 24;
+            for (int f = 0; f < 40 && pz.scene != 4; ++f) steps(1);
+            const bool retry = lock24 && pz.scene == 4 && std::fabs(app.walker.heading - heading) < 1e-4f &&
+                               app.walker.gait == cr::Gait::Stand && std::fabs(app.walker.pos.x - start.x) < 0.01f &&
+                               std::fabs(app.walker.pos.z - start.z) < 0.01f;
+            // cleared rooms: no objects, no Retry / Help, the count 0 (MfMain_ClrPzlData)
+            int clearedOk = 0, crystals = 0;
+            for (int st = 0; st < cr::kPuzzleStages; ++st) {
+                room(st, false);
+                settle(3000);
+                app.game.setFlag(3000 + st, true);
+                app.npcs = app.events.npcs(app.mapNumber);
+                puzzle::enter(app);
+                clearedOk += pz.stage == st && pz.objs.empty() && !pz.help && pz.esp == 0 && !puzzle::thirdButton(app) && !puzzle::ask(app, 0);
+                int have = 0, shown = 0;
+                for (size_t i = 0; i < app.npcs.size(); ++i)
+                    if (app.npcs[i].puzzle & (cr::kPuzzleObject40 | cr::kPuzzleObject100 | cr::kPuzzleObject800)) {
+                        ++have;
+                        shown += npcVisible(app, i);
+                    }
+                crystals += shown > 0;
+                clearedOk -= have && !shown; // (the way on: a crystal the map shows)
+                if (have && !shown) std::printf("puzzle touches: cleared stage %d - %d crystal NPCs, none shown by the map\n", st, have);
+            }
+            tp += !longNo || !movingWaits || !tapped || !gemWindow || !third || !scrolled || !paused || !back || !retry || clearedOk != 16;
+            std::printf("puzzle touches: CheckTap - held 7 frames %s, the leader moving %s, a tap %s; gem window %s; third button %s; "
+                        "ScrollCamera %s, the ability %s, %s; Retry %s; cleared rooms bare %d/16 (a crystal shown in %d - the toughness rooms have none); %d problems\n",
+                        longNo ? "no tap" : "TAPPED", movingWaits ? "waits" : "DOESN'T WAIT", tapped ? "teleports (pad lock 12)" : "DOESN'T",
+                        gemWindow ? "ok" : "WRONG", third ? "ok" : "WRONG", scrolled ? "scrolls" : "DOESN'T SCROLL", paused ? "paused" : "NOT PAUSED",
+                        back ? "let go" : "STUCK", retry ? "back as it came in" : "WRONG", clearedOk, crystals, tp);
+            problems += tp;
+        }
         mapErrors += problems;
         app.runner.stop();
         app.game = cr::GameState();
@@ -24818,7 +25239,9 @@ void consumeInputCancel(App& app) {
     app.padHeldOver.cancel();
     app.pointerCancelled = true;
     app.puzzle.tapX = app.puzzle.tapY = -1;
-    if (app.puzzle.pkState == 1 && app.puzzle.pkFromX > -1e8f) app.puzzle.pkPointerCancelled = true;
+    app.puzzle.tap = App::Puzzle::Tap(); // (CheckTap: the touch gone)
+    app.fingers = App::Fingers();
+    if (app.puzzle.pkState == 1 && app.puzzle.pkFromX > -1e8f) app.puzzle.pkPointerCancelled = true, app.puzzle.pkHeld = false;
 }
 
 // SDL's mobile callbacks may arrive off-thread. Rebuild GL objects only on
@@ -24947,9 +25370,9 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             break;
         }
         if (app.puzzle.stage >= 0 && fieldMenuWanted(app) && !fieldSceneRunning(app) &&
-            (event->key.key == SDLK_T || event->key.key == SDLK_F5 || event->key.key == SDLK_F6)) {
+            (event->key.key == SDLK_T || event->key.key == SDLK_F5 || event->key.key == SDLK_F6 || event->key.key == SDLK_F7)) {
             if (event->key.key == SDLK_T) puzzle::abilityKey(app); // the ability, straight ahead
-            else puzzle::ask(app, event->key.key == SDLK_F5 ? 0 : 1);                  // the pad's two buttons
+            else puzzle::ask(app, event->key.key == SDLK_F5 ? 0 : event->key.key == SDLK_F6 ? 1 : 2); // the pad's buttons
             break;
         }
         if (app.puzzle.pkState == 1) { // a block held: the cross key sends it (up = row - 1, as a swipe up)
@@ -25074,9 +25497,11 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         if (app.puzzle.pkPointerCancelled && app.puzzle.pkState == 1) {
             int ww = 0, wh = 0;
             SDL_GetWindowSize(app.window, &ww, &wh);
+            float lx, ly;
             app.renderer.toLogical(event->button.x * (ww > 0 ? float(app.renderer.frameWidth()) / ww : 1),
-                                   event->button.y * (wh > 0 ? float(app.renderer.frameHeight()) / wh : 1),
-                                   app.puzzle.pkFromX, app.puzzle.pkFromY);
+                                   event->button.y * (wh > 0 ? float(app.renderer.frameHeight()) / wh : 1), lx, ly);
+            logicalToTex2d(app, lx, ly, app.puzzle.pkFromX, app.puzzle.pkFromY); // (the detector's new start)
+            app.puzzle.pkAtX = app.puzzle.pkFromX, app.puzzle.pkAtY = app.puzzle.pkFromY, app.puzzle.pkHeld = true;
             app.puzzle.pkPointerCancelled = false;
             break; // re-grab the held block without spending ESP or sending it anywhere
         }
@@ -25197,7 +25622,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         app.dragging = false;
         app.optionsBarDrag = false;
         touchPadUp(app);
-        if (app.mode == Mode::Maps && app.puzzle.pkState == 1) {
+        if (app.mode == Mode::Maps && app.puzzle.stage >= 0) {
             int ww = 0, wh = 0;
             SDL_GetWindowSize(app.window, &ww, &wh);
             const float kx = ww > 0 ? float(app.renderer.frameWidth()) / float(ww) : 1.0f;
@@ -25205,7 +25630,21 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             puzzle::release(app, event->button.x * kx, event->button.y * ky);
         }
         break;
+    case SDL_EVENT_FINGER_DOWN: // (the touches as such: ScrollCamera counts them; their mouse events do the rest)
+        ++app.fingers.held, ++app.fingers.fresh;
+        app.fingers.x = event->tfinger.x * float(app.renderer.frameWidth());
+        app.fingers.y = event->tfinger.y * float(app.renderer.frameHeight());
+        break;
+    case SDL_EVENT_FINGER_UP:
+        app.fingers.held = std::max(0, app.fingers.held - 1);
+        break;
     case SDL_EVENT_MOUSE_MOTION:
+        if (app.mode == Mode::Maps && app.puzzle.pkHeld && (event->motion.state & SDL_BUTTON_LMASK)) {
+            int ww = 0, wh = 0; // the held block's touch: the detector follows it
+            SDL_GetWindowSize(app.window, &ww, &wh);
+            puzzle::drag(app, event->motion.x * (ww > 0 ? float(app.renderer.frameWidth()) / float(ww) : 1.0f),
+                         event->motion.y * (wh > 0 ? float(app.renderer.frameHeight()) / float(wh) : 1.0f));
+        }
         if (app.mode == Mode::Maps && app.runner.running() && (event->motion.state & SDL_BUTTON_LMASK)) {
             // (pad_chk_circle tests where the held touch is now: one slid off the corner stops the
             // skip, one slid onto it starts it)

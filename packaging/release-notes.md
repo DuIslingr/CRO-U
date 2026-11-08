@@ -281,6 +281,21 @@ Thanks to [metastigma](https://github.com/metastigma) for the report, those fixe
   as the original's, instead of switching at once; while a card not yet done slides, its picture
   stays hidden behind the cells. Choosing Scenarios in the Camp first slides the Camp's windows
   away, and they slide back in when you return.
+- **Puzzle rooms, the touches as 3.1.0 reads them:** a lifted block shows the original's arrows on
+  the sides it can go (the free cells inside the grid); the one it goes flickers out, a let-go fades
+  them all. A swipe sends the block as soon as the finger leaves the original's dead zone, without
+  waiting for the finger to lift; lifting it inside the zone lets the block go. A tap for teleport,
+  toughness or pyrokinesis is the original's: let go within five frames, not while the leader walks,
+  aimed at the object's top within the original's window (a gem's sits lower); a touch that misses
+  walks the leader as before. The pad's third button appears once the room's own counter is past
+  two (the original's rule) and starts the room's third script; the pad's buttons, Camp and Save wait
+  out the original's short lock after a Retry, a teleport or a block's flight. A second finger
+  scrolls the view to it on a touchscreen, as in the original. A Retry puts the leader back facing
+  the way it came in, standing. A cleared room is left as the map has it (no Retry or Help buttons),
+  and the psychokinesis rooms' blocks start as the map places them; a sliding or falling block
+  squashes the try by its own box.
+- **Options, "About Option":** it shows from the title's Options too, as the original's, alone in
+  the message window - the Options page and its dimming come once it's read.
 
 ## Downloads
 
