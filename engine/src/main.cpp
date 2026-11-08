@@ -855,6 +855,7 @@ struct App {
     bool captureWinBattles = false;        // --win-battles: a battle the scripts start is won at once
     bool testNoTutorials = false;          // self-test: battles don't stop for their tutorials (EvrStart 2)
     int captureTalk = -1;                  // --talk-portrait n: (new game) the n-th hall conversation showing a portrait
+    int lastMessageId = -1;                // the last message a script showed (CR_CAPTURE_UNTIL_MSG)
     int captureMenu = 0;                   // --camp (1), --save-screen (2: save, 3: the title's load / new, 7: cleared), --char-select (4), --scenarios (5), --manual (6), --world-select (8), --last-battle (9)
     std::string captureCampView;           // --camp-view items|use|result|equip|slots|wear|status|status-equip|status-skills
     std::string captureFieldMenu;          // --field-menu closed|open|known|off|map[step]
@@ -2667,6 +2668,7 @@ void openItemWindow(App& app, int item) {
 
 void showMessages(App& app, const std::vector<int>& ids) {
     app.heldPage = false;
+    if (!ids.empty()) app.lastMessageId = ids.back();
     if (app.dialogue.empty()) {
         app.dialogueInfo.clear(), app.dialogueVoices.clear(), app.dialoguePage = 0;
         ++app.dialogueSerial;
@@ -3686,9 +3688,13 @@ struct ViewerHost : cr::EventHost {
         // straight blend over a few 20 Hz frames (tex2d_img_prc)
         p.flags = uint16_t((p.flags & ~0x3000) | f);
         // (the iPad's tex2d frame: screen = 2 tex2d + (32, 64); __EvtTex2d homes 0x1000 at tex2d
-        // (-16, 0) - flush left -, 0x2000 at (256, 0) - 32 px past the right edge -, 0x4000 at (176, 96))
-        if (f & 0x1000) p.home = 0, p.y = 0, p.side = -1;
-        if (f & 0x2000) p.home = 544, p.y = 0, p.side = 1; // drawn mirrored (+0xbd0e)
+        // (-16, 0) - flush left -, 0x2000 at (256, 0) - 32 px past the right edge -, 0x4000 at (176, 96).
+        // On the iPhone (is_iPadDisplay 0; Android's path too) 0x1000 at (0, 0) and 0x2000 at (224, 0):
+        // the phone layouts' screen = 2 tex2d + (32, 64) - the reference video's Part 1 298 s puts
+        // Vieg's left portrait at tex2d (-80, 0) on the 1280 x 720 phone, (0 - ox, 0))
+        const bool phone = app.renderer.phoneLayout();
+        if (f & 0x1000) p.home = phone ? 32 : 0, p.y = phone ? 64 : 0, p.side = -1;
+        if (f & 0x2000) p.home = phone ? 480 : 544, p.y = phone ? 64 : 0, p.side = 1; // drawn mirrored (+0xbd0e)
         if (f & 0x4000) {
             p.home = 384, p.y = 256, p.side = 0;
             if (f & 0x40) { p.scale = 2; p.zoomT = 0; p.zoomFrames = 4; } // 200% -> 100%
@@ -25534,7 +25540,16 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             p += used;
             if (*p == ',') ++p;
         }
+    // CR_CAPTURE_UNTIL_MSG="id[:n]": stop the --frames run n frames (60 if not given) after message id
+    // comes up, with no taps meanwhile
+    int untilMsg = -1, untilAfter = 60, untilLeft = -1;
+    if (const char* um = SDL_getenv("CR_CAPTURE_UNTIL_MSG")) std::sscanf(um, "%d:%d", &untilMsg, &untilAfter);
     for (int f = 0; f < app.captureFrames; ++f) { // --frames: play the scripts, reading each page for 45 frames
+        if (untilMsg >= 0 && untilLeft < 0 && app.lastMessageId == untilMsg && !app.dialogue.empty()) {
+            untilLeft = untilAfter;
+            std::printf("frame %d: message %d up\n", f, untilMsg);
+        }
+        if (untilLeft >= 0 && untilLeft-- == 0) break;
         if (!touches.empty() && f >= touches.front().first && !app.runner.running() && app.dialogue.empty()) {
             const int sc = touches.front().second;
             touches.erase(touches.begin());
@@ -25576,7 +25591,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         }
         animateNpcs(app, 1.0f / kFramesPerSecond);
         followPlayerScroll(app, 1.0f); // (drawFrame's, every frame the game shows: a capture draws only its last)
-        if (f % 45 == 44 && f + 1 < app.captureFrames && !SDL_getenv("CR_CAPTURE_NOTAP")) { // (CR_CAPTURE_NOTAP: no taps)
+        if (f % 45 == 44 && f + 1 < app.captureFrames && !SDL_getenv("CR_CAPTURE_NOTAP") && untilLeft < 0) { // (CR_CAPTURE_NOTAP: no taps)
             if (app.choiceFlag >= 0) answerChoice(app, true);
             else if (app.worldChoiceOpen) answerWorldChoice(app, 0);
             else advanceDialogue(app);
