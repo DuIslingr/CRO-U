@@ -24,11 +24,22 @@ struct CollisionPolygon {
     bool isWall() const { return wall; }
 };
 
+// A KD tree node (32 bytes; Cmp::TreeKD::init / searchNode). Every node, inner ones too, lists the
+// polygons of its region: Cmp::CmpBase::searchNode picks one and the floor and wall queries read
+// only its lists.
+struct CollisionNode {
+    float split = 0;        // +12: the plane's x or z
+    int axis = 0;           // +20: 0 = x, else z (+16: the depth)
+    int16_t child[2] = {-1, -1}; // +24: taken when split - p >= 0 (< 0: a leaf), +26: when < 0
+    std::vector<int16_t> floors, walls; // the lists counted at +4 / +6 (+8 / +10: none in the data)
+};
+
 struct Collision {
     int treeType = 0;                 // 0 = KD tree, 1 = quad tree
-    float radius = 0;                 // header f32 (3.0 in every file)
+    float radius = 0;                 // header f32 (3.0 in every file); searchNode adds it to the distance
     std::vector<float> vertices;      // xyz, world space, Y up
     std::vector<CollisionPolygon> polygons;
+    std::vector<CollisionNode> nodes; // node 0 is the root; without a KD tree, one leaf with every floor / wall
     float boundsMin[3] = {0, 0, 0}, boundsMax[3] = {0, 0, 0};
 };
 

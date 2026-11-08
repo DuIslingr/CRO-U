@@ -4,6 +4,14 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
 
 ## What's new
 
+- **Walking as the original's collision has it:** the field's floor and walls are read from the
+  collision file's own tree, as the iOS game does - the floor under the leader is the highest one
+  in reach (ramps such as d0207's climb smoothly, no 5-unit step limit), walls push only when faced
+  and a move through one is undone, and the floor, NPC bodies and walls are checked every frame, so
+  standing still or during a scene the leader stays on the ground. Chests and other solid NPCs are
+  hit where they stand now, from their own height up (a box high above lets the leader pass under),
+  and j001_p01's floor plates lift the leader onto them. The encounter count uses the distance the
+  leader actually moved after the pushes.
 - **FSR 3.1.6:** the built-in FSR is updated from 3.1.4 to AMD's FSR SDK 2.4 passes.
 - **FSR 4 (Linux and Windows, AMD GPUs):** a new Upscaler choice. AMD ships FSR 4 for Vulkan only as
   its own Windows DLLs, so they aren't included: put AMD's two SDK DLLs, the driver's
