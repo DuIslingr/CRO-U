@@ -762,6 +762,12 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             if (a >= 0 && !f[size_t(a)].alive()) a = -1;
         if (e.actors[0] < 0) std::swap(e.actors[0], e.actors[1]);
         if (e.actors[0] < 0 || e.done) continue;
+        // btlque_make_que (3.1.0): a pair attack with one actor left becomes that one's own - 36 / 37
+        // the member's record + 27, the first game's 18..21 its species + 10 - and is announced anew
+        if (e.actors[1] < 0 && e.actors[0] < 2 && e.kind == kCmdAttack && ((e.action >= 18 && e.action <= 21) || e.action == 36 || e.action == 37)) {
+            e.action = e.action >= 36 ? f[size_t(e.actors[0])].character + 27 : f[size_t(e.actors[0])].character + 10;
+            e.paid = false; // (its name comes up again)
+        }
         out = BattleTurn();
         notices_.clear();
         note_ = 0, noteValue_ = 0;
@@ -1148,7 +1154,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                 }
                 // 154 (or calc 34's stance): a physical hit may be answered with the target's attack
                 if (calc == 0 && counterBy < 0 && !e.counter &&
-                    (tf.counterStance || (has(t, 154) && random(100) < (holdsBreak(t) ? 20 : 10))))
+                    (tf.counterStance || (has(t, 154) && (random(100), true)))) // (3.1.0: the draw is made but not compared - 1.0.0 took 10 / 20 %)
                     counterBy = t;
             }
             if (calc == 0 && a->id == 201 && h.amount >= 1) { // btlcalc_0404: Trompe-L'oeil

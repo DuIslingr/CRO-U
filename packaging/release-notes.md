@@ -77,6 +77,10 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   its actors with the fighter's own counter action), and speeds are read afresh for every action
   of a round (a Speed Up or Down moves the rest of the round); the AI's fallback targets are the
   original's (a random living opponent).
+- **Checked against the newest release (3.1.0):** the game logic of the passes above was re-read in
+  the 3.1.0 code; two rules changed there and the port now follows them - the Counter skill (154)
+  answers every physical hit it survives (1.0.0 rolled 10 / 20 %), and a pair attack whose partner
+  has fallen becomes the survivor's own attack, announced anew.
 - **One save for both scenarios:** the game now keeps a single `data.dat`, as the original's
   `_prty` is - both scenarios' records, bags and Oz, one set of flags and variables, and each
   scenario's own saved place. The second scenario therefore sees what the first earned (the shared
