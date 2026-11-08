@@ -5991,7 +5991,8 @@ void drawHelpWindow(App& app, cr::MenuPainter& m, int item, float a) {
     if (!app.systemText.message(cr::itemHelpId(item), app.language, nullptr, help) || help.empty()) return;
     const int n = std::min(3, int(help[0].size()));
     static const int kTop[4] = {0, 24, 18, 10};
-    for (int i = 0; i < n; ++i) m.text(help[0][size_t(i)], 156, float(kTop[n] + 8 + 16 * i), false, a, 13);
+    // (MuComFontDisp style 1: black, edged white - Part 3 403 s, a dark 2 px core with light either side)
+    for (int i = 0; i < n; ++i) m.text(help[0][size_t(i)], 156, float(kTop[n] + 8 + 16 * i), true, a, 13);
 }
 
 // ComUty_StateBoardDraw at (bx, by) for character c; `item` (if > 0) shows what wearing it changes;
@@ -16945,7 +16946,9 @@ void drawBattleHud(App& app, float W, float H) {
         m.quad(88, 4 + by, 24, 24, clear, dark);
         m.quad(112, 4 + by, 351, 24, dark, dark);
         m.quad(463, 4 + by, 24, 24, dark, clear);
+        m.setOutline(false); // (drawfont_btl: the banner's text plain)
         m.textCentred(b.banner, 287 - m.textWidth(b.banner, 14) / 2, 16 + by, false, 1, 14);
+        m.setOutline(true);
     }
 
     // Right: the menus - the page as shown (b.view), slid right by b.slide (menub_mainPut: x + +0x38)
@@ -16965,7 +16968,7 @@ void drawBattleHud(App& app, float W, float H) {
             if (app.systemText.message(cr::itemHelpId(item), app.language, nullptr, help) && !help.empty()) {
                 float hy = 20;
                 for (const std::string& line : help[0]) {
-                    m.text(line, hx + 14, hy, false, a, 13);
+                    m.text(line, hx + 14, hy, true, a, 13); // (black, edged white: Part 3 877 s)
                     if ((hy += 16) > 52) break;
                 }
             }

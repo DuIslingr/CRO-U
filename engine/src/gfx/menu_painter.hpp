@@ -56,6 +56,10 @@ public:
     // French, German and Spanish
     void setMenuFont(float size) { menuFont_ = size; }
     float menuSize(float size) const { return size == 14 ? menuFont_ : size; }
+    // drawfont_l / drawfont_center: every string drawn 8 times a unit off (+-1, +-1) in the opposite
+    // colour - white text edged black, black text edged white - then itself. drawfont_btl (the battle
+    // banner) and drawfont_text (messages) draw it plain: setOutline(false) around those
+    void setOutline(bool on) { outline_ = on; }
     // Text with its top-left at (x, y), 14 units high; dark = black (style 1), else white
     void text(const std::string& s, float x, float y, bool dark, float alpha = 1, float size = 14);
     float textWidth(const std::string& s, float size = 14);
@@ -90,6 +94,8 @@ public:
 private:
     float sx_ = 0, sy_ = 0, k_ = 1, dx_ = 0, dy_ = 0, fx_ = 0, fy_ = 0, fk_ = 1;
     float menuFont_ = 14;
+    bool outline_ = true;
+    void edge(const Texture& tex, float x, float y, float w, float h, float k, float alpha);
     float X(float x) const { return fx_ + (sx_ + (x - sx_) * k_ + dx_) * fk_; }
     float Y(float y) const { return fy_ + (sy_ + (y - sy_) * k_ + dy_) * fk_; }
     float K() const { return k_ * fk_; }
