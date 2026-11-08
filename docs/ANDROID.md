@@ -86,6 +86,57 @@ iPhone's place. The battle's command pages slide 480 there, 120 a frame (`_menub
 Retina or 720 x 480 screen; 320 at 80 below, and in iOS 3.1.0), so they start off the wider
 phone's screen rather than in the bar beside the centred one.
 
+### The phone's edges
+
+Not everything is centred: some pieces add or subtract the centring offset over the 2D scale
+(gac +0x1e2688 / +0x1e268c over +0x1e2690; ox, oy = (80, 20) tex2d units on a 1280 x 720 phone)
+so they sit on the phone's own edges. The port's Android layout does the same through
+`androidEdgeX` / `androidEdgeY` (engine/src/main.cpp; 0 in the other layouts). Addresses are the
+library's own (llvm-objdump, symbols.txt; Ghidra's decomp.c names them 0x10000 higher).
+
+| Piece | Android 1.1.6 | Offset | Edge |
+|---|---|---|---|
+| Battle: Break badge, its ticks and its label | `_menub_mainPut` 0x6254e | - ox, - oy | top left |
+| Battle: the pair's rows and their backing | `_menub_mainPut` 0x62782 (floored) | - ox, + oy | bottom left |
+| Battle: the banner (action names, target prompt) | `_menub_mainPut` 0x62d3e | - oy | top |
+| Battle: the command pages, plates, Back bar | `_menub_mainPut` | none (centred) | - |
+| Break effect: first stripe and "Player" | `btlbreak_effect_prc` 0x4b128 | - ox, - oy | top left |
+| Break effect: second stripe and "Enemy" | `btlbreak_effect_prc` | + ox, + oy | bottom right |
+| Break effect: "BREAK!!" and its line | `btlbreak_effect_prc` | none | - |
+| Field: low battery | `_menuf_mainPut` 0x66ff8 | - ox, - oy | top left |
+| Field: the Pheromones battle button, and its tap box | `_menuf_mainPut` 0x67b3e, `_menuf_mainPrc` 0x67f3c | - ox, - oy | top left |
+| Field: the corner button and the bar (Camp, Save, Map, Encounters), and their taps | `_menuf_mainPut` 0x670d8, `SetFldMenu` 0x66a8a, `_menuf_mainPrc` 0x67e5c | + ox, - oy | top right |
+| Field: the puzzle panel, digits, Retry, Help, the third button, and their taps | `_menuf_mainPut` 0x67252, `PuzzleManager::update` | - ox, - oy | top left |
+| Field: the "!" (easy) button | `_menuf_mainPut` 0x6735c | + ox, + oy | bottom right |
+| Field: the dungeon key icons | `_menuf_mainPut` 0x673a2 | - ox, + oy | bottom left |
+| Messages: the "next" mark | `PutMsg` 0x5e48e / 0x5e362 | + ox, + oy (beside a tutorial's band: + ox) | bottom right |
+| Messages: the skip button, and its tap circle | `PutMsg` 0x5e3d4, `is_MsgSkip` 0x5e6d6 | + ox, - oy | top right |
+| Event portraits on the left / right (flags 0x1000 / 0x2000) | `__EvtTex2d` in `PrcEvnt` 0x5ac54 / 0x5ace2 | - ox / + ox | left / right |
+| Loading spinner | `NowLoadProc` 0x2b0c4 | + ox, + oy | bottom right |
+| Staff roll: the fast button, and its hold box | `StaffRollPut` 0x802e8 / 0x8069a | + ox, - oy | top right |
+
+In the port the taps follow their pieces. One exception in the original:
+`FollowWindow::checkTouchEasyButton` (0x8be78) still tests the "!" button's tap at the centred
+screen's (444, 284), with no offset, while the button is drawn at the phone's corner. The port
+takes the tap where the button is drawn.
+
+The offsets that only convert a point are not edge placements. `_dmg_prc` and `Put_follow`
+project a 3D point into tex2d, `gameapp_touch` maps touches, and `getNearestPuzzleObject` /
+`ScrollCamera::checkTouch` map puzzle and scroll touches. The port's projection is the screen's
+own, so these already match.
+
+Not done in the port yet (code reading only):
+- Full-width bands and masks that already cover the phone's width: `draw_vista` / `draw_abeblack`
+  (the tutorial bands, - ox .. 480 + ox), `achievement_prc`'s banner, `MuScrList_Draw`'s list
+  masks, and the History menu's masks.
+- `ScnEffect*`: the scene effects' rect is the whole phone, and effect 10's fog band sits at
+  64 + oy.
+- Character Select (`__menuu_StartPut`, symbol `_PictTexNoDrawFull2W`): the cord and banner at
+  - oy, the card at - ox, the second page at + oy.
+- The staff roll's picture (- oy) and its lines' range (320 + oy .. -20 - oy, over a taller
+  screen).
+- `gameapp_prc`'s Android progress spinner.
+
 The separate parchment follows the loaded Android atlas in the iPhone and Vita layouts too,
 including Android artwork used over iOS data. Omega's iPad layout keeps its own `window_cutin`
 panel. The strip is fitted to the selected layout's visible width and bottom edge.

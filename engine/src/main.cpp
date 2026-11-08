@@ -1063,6 +1063,7 @@ struct App {
         bool fast = false;                 // DAT_000e5c34: the corner button held (10 x)
         float picY = 0;                    // DAT_000e5d5c: the picture's y (tex2d), up to -(1024 - the screen)
         bool phone = false;                // the iPhone layout (_is_iPadDisplay 0): its numbers
+        float edgeX = 0, edgeY = 0;        // the Android layout's androidEdgeX / Y (the fast button)
         struct Line { bool on = false; float y = 0; int entry = 0; } lines[17];
         float win[5] = {}, winTo[5] = {};  // ComUty_WinDispOn / Off: each window's alpha
         float fade = 1, fadeFrom = 1, fadeTo = 1; // SetFade: white (the first scenario) or black over it all
@@ -4884,6 +4885,21 @@ float wideRight(const App& app) {
     const cr::Renderer& r = app.renderer;
     return r.phoneLayout() ? r.uiX() : std::max(r.uiX(), 2 * r.uiX() - r.safeRight());
 }
+// The Android layout (docs/ANDROID.md "The phone's edges"): how far the phone's own edges lie
+// outside the centred 480 x 320 screen, in tex2d units - Android 1.1.6's gac +0x1e2688 / +0x1e268c
+// (the centring offset in pixels) over +0x1e2690 (the 2D scale): (80, 20) on a 1280 x 720 phone.
+// The pieces 1.1.6 puts on the phone's edges and corners add or subtract it (the HUD's badge and
+// rows, the field's corner buttons, the message's arrow...); 0 in the iPhone, iPad and Vita layouts
+float androidEdgeX(const App& app) {
+    const cr::Renderer& r = app.renderer;
+    if (!r.androidScreen()) return 0;
+    // tex2d x 0 is layout x uiX + 32; the screen's left edge is layout x w/2 - w/2 / scale
+    return (r.uiX() + 32 - r.screenW() * 0.5f * (1 - 1 / r.layoutScale())) / 2;
+}
+float androidEdgeY(const App& app) {
+    const cr::Renderer& r = app.renderer;
+    return r.androidScreen() ? (64 - r.layoutTop()) / 2 : 0.0f; // (tex2d y 0 is layout y 64)
+}
 // A logical point in menu units of the group drawn from `origin`
 void menuPointAt(const App& app, float lx, float ly, float origin, float& mx, float& my) {
     mx = (lx - origin) / 2, my = ly / 2;
@@ -7318,6 +7334,7 @@ void drawPuzzleHud(App& app, float a) {
     };
     const float dark[4] = {0, 0, 0, float(0xb8) / 255.0f * a};
     app.renderer.setOrigin(wideLeft(app)); // (widescreen: the panel in the screen's corner)
+    m.setOffset(-androidEdgeX(app), -androidEdgeY(app)); // (Android's _menuf_mainPut: the phone's top left)
     m.quad(16, 12 + 32, 80, 36, dark, dark);
     const int esp = pz.esp < 0 ? -1 : std::max(0, pz.esp - (pz.pkState == 2 && pz.pkMoved));
     if (esp < 0) piece(4, 16, 792, 58, 72, 28);
@@ -7335,6 +7352,7 @@ void drawPuzzleHud(App& app, float a) {
         if (it != app.game.vars.end() && it->second > 2) piece(160, 14, 420, 216, 44, 32);
     }
     if (pz.help) piece(84, 14, 984, 64, 40, 32);
+    m.setOffset(0, 0);
     app.renderer.setOrigin(app.renderer.uiX()); // (the mark and the arrows: where on the field)
     // the psychokinesis arrows (0xe037c..: on, or fading - their colour's alpha byte), 24 x 24 at
     // their point less 12: left (432, 72), up (480, 48), right (456, 72), down (480, 72)
@@ -7426,6 +7444,7 @@ void openStaffRoll(App& app, int mode) {
     st.open = true;
     st.mode = std::clamp(mode, 0, 2);
     st.phone = app.renderer.phoneLayout();
+    st.edgeX = androidEdgeX(app), st.edgeY = androidEdgeY(app);
     staffFade(st, app.game.scenario == 0, 1, 1, 1); // SetFade(colour, 0, 255, 1): covered
     for (int i = 0; i < kShown; ++i)
         st.lines[i] = App::StaffRoll::Line{staffLine(app, i).size() >= 3, lineStart(st.phone) + 20.0f * float(i), i};
@@ -7513,7 +7532,7 @@ void drawStaffRoll(App& app) {
         if (st.win[3] > 0)
             for (const auto& l : st.lines)
                 if (l.on) m.text(staffLine(app, l.entry), 16, float(int(l.y)), false, st.win[3], 13);
-        if (st.win[2] > 0) m.picture(115, st.phone ? 444 : 460, st.phone ? 0 : -32, st.win[2]); // the fast button
+        if (st.win[2] > 0) m.picture(115, st.phone ? 444 + st.edgeX : 460, st.phone ? -st.edgeY : -32, st.win[2]); // the fast button (Android: + ex, - ey)
         if (st.mode == 0 && st.win[4] > 0 && st.endAlpha > 0) outPicture(m, st.endTex, 14, 176, 128, st.win[4] * float(st.endAlpha) / 255);
     }
     r.setOrigin(0);
@@ -8253,8 +8272,10 @@ int fieldRoute(const App& app) { return std::clamp(app.game.scenario, 0, cr::kSc
 
 // 2.2.0's iPhone layout: the bar keeps to the screen's corner, (-16, +32) (its menuf_mainPut /
 // Prc and kganMfMainButtonPosTbl)
-float fieldDx(const App& app) { return app.renderer.phoneLayout() ? -16.0f : 0.0f; }
-float fieldDy(const App& app) { return app.renderer.phoneLayout() ? 32.0f : 0.0f; }
+// The corner button and the bar's offset from the iPad's places: the iPhone's (444, 4) corner; on
+// Android (SetFldMenu, _menuf_mainPut / Prc) + ex, - ey - the phone's top right, taps with them
+float fieldDx(const App& app) { return app.renderer.phoneLayout() ? -16.0f + androidEdgeX(app) : 0.0f; }
+float fieldDy(const App& app) { return app.renderer.phoneLayout() ? 32.0f - androidEdgeY(app) : 0.0f; }
 
 bool fieldMenuWanted(const App& app) { // the field, the player free to walk
     return app.mode == Mode::Maps && app.havePlayer && !app.titleOpen && !app.booting && !app.battle.active && !app.campOpen &&
@@ -8358,15 +8379,16 @@ void drawFieldMenu(App& app) {
     cr::MenuPainter& m = app.menu;
     m.begin(r, app.windowTex, &app.font);
     const bool phone = app.renderer.phoneLayout();
-    if (const int u = fieldLowBattery(); u >= 0) {
+    const float ex = androidEdgeX(app), ey = androidEdgeY(app); // (Android: the phone's corners)
+    if (const int u = fieldLowBattery(); u >= 0) { // (Android: - ex, - ey)
         r.setOrigin(wideLeft(app));
-        m.piece(phone ? 16.0f : 0.0f, phone ? 32.0f : 0.0f, float(u), 206, 21, 11, 1);
+        m.piece(phone ? 16.0f - ex : 0.0f, phone ? 32.0f - ey : 0.0f, float(u), 206, 21, 11, 1);
     }
     if (f.fade <= 0) { r.setOrigin(r.uiX()); return; }
     const float a = 1;
-    if (fieldBattleButton(app)) { // __menuf_mainPut: window piece (656, 400) at tex2d (-8, -20) / (8, 12)
+    if (fieldBattleButton(app)) { // __menuf_mainPut: window piece (656, 400) at tex2d (-8, -20) / (8, 12) (Android - ex, - ey)
         r.setOrigin(wideLeft(app));
-        m.piece(-8 + 16 + (phone ? 16.0f : 0.0f), -20 + 32 + (phone ? 32.0f : 0.0f), 656, 400, 48, 32, a);
+        m.piece(-8 + 16 + (phone ? 16.0f - ex : 0.0f), -20 + 32 + (phone ? 32.0f - ey : 0.0f), 656, 400, 48, 32, a);
     }
     drawTouchPad(app, a);
     r.setOrigin(wideRight(app)); // (widescreen: in the screen's corner)
@@ -8383,9 +8405,9 @@ void drawFieldMenu(App& app) {
     if (app.puzzle.stage >= 0) drawPuzzleHud(app, a);
     drawEasyButton(app);
     r.setOrigin(wideLeft(app));
-    for (const KeyIcon& k : fieldKeyIcons(app)) {
+    for (const KeyIcon& k : fieldKeyIcons(app)) { // (Android: - ex, + ey - the phone's bottom left)
         const float c = k.lit ? 1.0f : float(0x40) / 255.0f;
-        m.piece(k.x + 16, k.y + 32, k.u, k.v, 32, 32, 1, c, c, c);
+        m.piece(k.x + 16 - ex, k.y + 32 + ey, k.u, k.v, 32, 32, 1, c, c, c);
     }
     r.setOrigin(r.uiX());
 }
@@ -8438,7 +8460,8 @@ bool fieldMenuClick(App& app, float px, float py) {
     const float tx = (lx - wideRight(app)) / 2 - 16 - fieldDx(app), ty = ly / 2 - 32 - fieldDy(app); // tex2d
     if (fieldBattleButton(app)) { // __menuf_mainPrc: the battle button's box, then fldencount_encount_debug
         const bool phone = app.renderer.phoneLayout();
-        const float bx = (lx - wideLeft(app)) / 2 - 16, by = ly / 2 - 32, x0 = phone ? 8.0f : -8.0f, y0 = phone ? 12.0f : -20.0f;
+        const float x0 = phone ? 8.0f - androidEdgeX(app) : -8.0f, y0 = phone ? 12.0f - androidEdgeY(app) : -20.0f;
+        const float bx = (lx - wideLeft(app)) / 2 - 16, by = ly / 2 - 32;
         if (bx >= x0 && bx < x0 + 48 && by >= y0 && by < y0 + 32) {
             app.encounters.force();
             return true;
@@ -8491,8 +8514,9 @@ void noteWindowAtlas(App& app, const cr::Image& wi) {
 const touchpad::Art& padArt(const App& app) { return app.bigPad ? touchpad::kBig : touchpad::kIpad; }
 
 // The "!" button's centre (tex2d, from wideRight): the iPad display's, or the iPhone's in its layout
+// (Android's _menuf_mainPut: + ex, + ey - the phone's bottom right; the tap follows it here)
 void easyButtonCentre(const App& app, float& x, float& y) {
-    x = app.renderer.phoneLayout() ? 444.0f : 460.0f, y = app.renderer.phoneLayout() ? 284.0f : 316.0f;
+    x = app.renderer.phoneLayout() ? 444.0f + androidEdgeX(app) : 460.0f, y = app.renderer.phoneLayout() ? 284.0f + androidEdgeY(app) : 316.0f;
 }
 
 bool easyButtonShown(const App& app) {
@@ -11972,10 +11996,11 @@ bool click(App& app, float px, float py) {
     app.renderer.toLogical(px, py, lx, ly);
     float tx, ty;
     logicalToTex2d(app, lx, ly, tx, ty);
-    const float bx = tx + (app.renderer.uiX() - wideLeft(app)) / 2; // (widescreen: the pad in the corner)
-    if (bx >= 160 && bx < 204 && ty >= 14 && ty < 46 && ask(app, 2)) return true;
-    if (bx >= 8 && bx < 52 && ty >= 56 && ty < 84 && ask(app, 0)) return true;
-    if (bx >= 84 && bx < 124 && ty >= 14 && ty < 46 && ask(app, 1)) return true;
+    // (widescreen: the pad in the corner; Android's PuzzleManager::update: the phone's top left)
+    const float bx = tx + (app.renderer.uiX() - wideLeft(app)) / 2 + androidEdgeX(app), by = ty + androidEdgeY(app);
+    if (bx >= 160 && bx < 204 && by >= 14 && by < 46 && ask(app, 2)) return true;
+    if (bx >= 8 && bx < 52 && by >= 56 && by < 84 && ask(app, 0)) return true;
+    if (bx >= 84 && bx < 124 && by >= 14 && by < 46 && ask(app, 1)) return true;
     if (cleared(app) || pz.scene != 4 || pz.scroll.state == 1) return false;
     const int t = pick(app, tx, ty);
     if (t < 0) return false;
@@ -13047,6 +13072,9 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
     const bool phone = r.phoneLayout();
     const float H = phone ? 704.0f : float(cr::Renderer::kLogicalH), top = phone ? 64.0f : 0.0f;
     const float left = phone ? 32.0f : -r.uiX(), width = phone ? 960.0f : r.screenW();
+    // Android 1.1.6's PutMsg: the "next" mark (+ ex, + ey: the phone's bottom right; beside a
+    // tutorial's band + ex only) and the skip button (+ ex, - ey: its top right), 1024 units
+    const float ex = 2 * androidEdgeX(app), ey = 2 * androidEdgeY(app);
     bool portraits = false;
     for (const App::Portrait& p : app.portraits) portraits = portraits || (p.tex.id && p.alpha > 0.5f);
     // PrcWin / PutWin: the window fades in and out (its alpha); PutMsg draws the text, the name and
@@ -13125,9 +13153,9 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         (void)pageNo; // (PutMsg draws no page count)
         // PutMsg's "next" mark: tex2d x 452, at y 328 - beside a tutorial's band 84 below its
         // top; none on the grey panel - drawn steadily, no blink
-        const float markY = style & 8 ? 2.0f * (rect[0] + 84) + 64 : H - 44;
-        if (next && textOn && !(style & 0x40)) drawWinPiece(app, kWinNext, right - 76, markY, 46, 22);
-        if (app.runner.running() && !app.messageSkip) drawWinPiece(app, kWinSkip, right - 66, top + 12, 50, 50);
+        const float markY = style & 8 ? 2.0f * (rect[0] + 84) + 64 : H - 44 + ey;
+        if (next && textOn && !(style & 0x40)) drawWinPiece(app, kWinNext, right - 76 + ex, markY, 46, 22);
+        if (app.runner.running() && !app.messageSkip) drawWinPiece(app, kWinSkip, right - 66 + ex, top + 12 - ey, 50, 50);
         return;
     }
     (void)portraits;
@@ -13190,8 +13218,8 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
     }
     ink();
     if (textOn) drawMessageLines(app, page, textX, textY, kMsgScale, false); // text and name from the screen's left
-    if (next && textOn) drawWinPiece(app, kWinNext, right - 76, H - 44, 46, 22); // (steady: PutMsg doesn't blink it)
-    if (app.runner.running() && !app.messageSkip) drawWinPiece(app, kWinSkip, right - 66, top + 12, 50, 50); // a scene is playing
+    if (next && textOn) drawWinPiece(app, kWinNext, right - 76 + ex, H - 44 + ey, 46, 22); // (steady: PutMsg doesn't blink it)
+    if (app.runner.running() && !app.messageSkip) drawWinPiece(app, kWinSkip, right - 66 + ex, top + 12 - ey, 50, 50); // a scene is playing
 }
 
 void drawWinPiece(App& app, const float* piece, float x, float y, float w, float h, float alpha) {
@@ -15684,19 +15712,22 @@ void drawBreakFx(App& app, cr::MenuPainter& m) {
         // corners ((0, 160)-(280, 0)-(0, 216)-(376, 0), (160, 320)-(480, 140)-(256, 320)-(480, 192)),
         // "Player" at (pos cos 30 + 130, 10 - pos sin 30), "Enemy" at (234 - pos cos 30, pos sin 30
         // + 208), "BREAK!!" (528, 432, 480 x 72) at (slide - 480, 120), the line (528, 504, 480 x 32)
-        // at (480 - slide, 192)
+        // at (480 - slide, 192). Android 1.1.6's btlbreak_effect_prc: the first stripe and "Player"
+        // (- ex, - ey) into the phone's top left, the second and "Enemy" (+ ex, + ey) into its
+        // bottom right; "BREAK!!" and the line stay centred
+        const float ex = androidEdgeX(app), ey = androidEdgeY(app);
         for (float x = 0; x < 480; x += 2) {
             const float top1 = 160 - 160 * x / 280, bot1 = 216 - 216 * x / 376;
-            if (bot1 > top1 && bot1 > 0) m.quad(x + 16, std::max(top1, 0.0f) + 32, 2, bot1 - std::max(top1, 0.0f), white, white);
+            if (bot1 > top1 && bot1 > 0) m.quad(x + 16 - ex, std::max(top1, 0.0f) + 32 - ey, 2, bot1 - std::max(top1, 0.0f), white, white);
             if (x >= 160) {
                 const float top2 = std::max(140.0f, 320 - 180 * (x - 160) / 320);
                 const float bot2 = x < 256 ? 320 : std::max(192.0f, 320 - 128 * (x - 256) / 224);
-                if (bot2 > top2) m.quad(x + 16, top2 + 32, 2, bot2 - top2, white, white);
+                if (bot2 > top2) m.quad(x + 16 + ex, top2 + 32 + ey, 2, bot2 - top2, white, white);
             }
         }
         const float c = std::cos(30 * 3.14159265f / 180), s = std::sin(30 * 3.14159265f / 180), pos = float(fx.pos);
-        m.piece(pos * c + 130 + 16, 10 - pos * s + 32, 704, 328, 160, 104);
-        m.piece(234 - pos * c + 16, pos * s + 208 + 32, 864, 328, 160, 104);
+        m.piece(pos * c + 130 + 16 - ex, 10 - pos * s + 32 - ey, 704, 328, 160, 104);
+        m.piece(234 - pos * c + 16 + ex, pos * s + 208 + 32 + ey, 864, 328, 160, 104);
         m.piece(float(fx.slide) - 480 + 16, 120 + 32, 528, 432, 480, 72);
         m.piece(480 - float(fx.slide) + 16, 192 + 32, 528, 504, 480, 32);
         return;
@@ -16810,9 +16841,12 @@ void drawBattleHud(App& app, float W, float H) {
     }
     const float a = std::min(1.0f, float(b.frames) / 10.0f);
     // The iPhone layout (2.2.0's __menub_mainPut): the badge and the rows into its screen's
-    // corners - (+16, +32) / (+16, -32) - the banner 32 lower, the menus where they are
+    // corners - (+16, +32) / (+16, -32) - the banner 32 lower, the menus where they are. Android
+    // 1.1.6's _menub_mainPut puts them on the phone's edges: the badge (- ex, - ey) (top left),
+    // the rows (- ex, + ey) (bottom left), the banner - ey (top); the menus stay centred
     const bool phone = r.phoneLayout();
     const float edge = wideLeft(app); // the left-hand pieces' origin (the screen's edge inside the safe area)
+    const float ex = androidEdgeX(app), ey = androidEdgeY(app);
 
     // Damage numbers (__dmg_prc): over their targets, projected from the 3D across the screen, put in
     // the 480 x 320 layout's units (tex2d's: the 1024 layout's (32, 64) + 2x): y 32..272, x 64 and over
@@ -16864,7 +16898,7 @@ void drawBattleHud(App& app, float W, float H) {
     const int g = b.gaugeShown;
     const float hud = -float(b.hudSlide); // (menub_mainPut: the badge and the rows at x - +0x3c)
     r.setOrigin(edge);
-    m.setOffset((phone ? 16.0f : 0.0f) + hud, phone ? 32.0f : 0.0f);
+    m.setOffset((phone ? 16.0f : 0.0f) + hud - ex, (phone ? 32.0f : 0.0f) - ey);
     m.piece(0, 0, 0, 120, 64, 64, a);
     for (int i = 0; i < std::min(8, std::abs(g)); ++i) {
         const short* t = kBreakTick[i];
@@ -16883,7 +16917,7 @@ void drawBattleHud(App& app, float W, float H) {
     r.setOrigin(edge);
     // Bottom left: the rows' backing (tex2d_add4 on slot 47): a 0x98 black box, solid for 44 then
     // fading over 120, from 262 to 320 (the iPad's 32 down), a 2-pixel 0x98 white rule over it
-    m.setOffset(hud, 0);
+    m.setOffset(hud - ex, ey);
     {
         const float bx = phone ? 16.0f : 0.0f, by = phone ? 294.0f : 326.0f, k = 0x98 / 255.0f;
         const float black[4] = {0, 0, 0, k * a}, clear[4] = {0, 0, 0, 0}, white[4] = {1, 1, 1, k * a}, gone[4] = {1, 1, 1, 0};
@@ -16906,7 +16940,7 @@ void drawBattleHud(App& app, float W, float H) {
     r.setOrigin(r.uiX());
     if (b.bannerFrames > 0 && !b.banner.empty()) {
         const float clear[4] = {0, 0, 0, 0}, dark[4] = {0, 0, 0, 0x98 / 255.f};
-        const float by = phone ? 32.0f : 0.0f;
+        const float by = phone ? 32.0f - ey : 0.0f;
         m.quad(88, 4 + by, 24, 24, clear, dark);
         m.quad(112, 4 + by, 351, 24, dark, dark);
         m.quad(463, 4 + by, 24, 24, dark, clear);
@@ -17611,7 +17645,11 @@ void drawFrame(App& app, bool present = true) {
                 const float w = float(p.tex.width) * p.scale, h = float(p.tex.height) * p.scale; // zooms about its centre
                 // Widescreen: side portraits keep to the screen's edges (as the later widescreen
                 // release does), centre images to the middle
-                const float edge = r.vitaScreen() ? 0.0f : p.side < 0 ? wideLeft(app) - r.uiX() : p.side > 0 ? wideRight(app) - r.uiX() : 0.0f; // (inside the safe area)
+                // (Android's __EvtTex2d: the side ones 2 ex further out, to the phone's edges)
+                const float edge = r.vitaScreen() ? 0.0f
+                                   : p.side < 0  ? wideLeft(app) - r.uiX() - 2 * androidEdgeX(app)
+                                   : p.side > 0  ? wideRight(app) - r.uiX() + 2 * androidEdgeX(app)
+                                                 : 0.0f; // (inside the safe area)
                 const float x = edge + p.x - (w - float(p.tex.width)) / 2, y = p.y - (h - float(p.tex.height)) / 2;
                 r.drawQuadUV(p.tex, x, y, w, h, p.side == 1 ? float(p.tex.width) : 0, 0,
                              p.side == 1 ? -float(p.tex.width) : float(p.tex.width), float(p.tex.height), p.shade,
@@ -17707,8 +17745,8 @@ void drawFrame(App& app, bool present = true) {
     if (app.nowLoading.on && app.windowTex.id) { // NowLoadProc (draw order 500): 8 frames of (820 + 24k, 96, 24 x 24) at tex2d (464, 320)
         app.menu.begin(r, app.windowTex, &app.font);
         r.setOrigin(r.uiX());
-        const bool phone = app.renderer.phoneLayout(); // 2.2.0: (448, 288), the iPhone screen's corner
-        app.menu.piece((phone ? 448 : 464) + 16, (phone ? 288 : 320) + 32, 820 + 24.0f * float(app.nowLoading.frame % 8), 96, 24, 24, 1);
+        const bool phone = app.renderer.phoneLayout(); // 2.2.0: (448, 288), the iPhone screen's corner (Android: + ex, + ey)
+        app.menu.piece((phone ? 448 + androidEdgeX(app) : 464) + 16, (phone ? 288 + androidEdgeY(app) : 320) + 32, 820 + 24.0f * float(app.nowLoading.frame % 8), 96, 24, 24, 1);
     }
     // The menus over everything else (Options draws above them)
     if (app.charSelectOpen) {
@@ -17754,7 +17792,8 @@ void drawFrame(App& app, bool present = true) {
             float lx, ly, tx, ty;
             r.toLogical(mx * (ww > 0 ? float(r.frameWidth()) / float(ww) : 1.0f), my * (wh > 0 ? float(r.frameHeight()) / float(wh) : 1.0f), lx, ly);
             logicalToTex2d(app, lx, ly, tx, ty);
-            corner = app.staffRoll.phone ? tx >= 444 && tx < 476 && ty >= 0 && ty < 32 : tx >= 460 && tx < 492 && ty >= -32 && ty < 0;
+            const float ex = app.staffRoll.edgeX, ey = app.staffRoll.edgeY; // (Android's hold box: + ex, - ey)
+            corner = app.staffRoll.phone ? tx >= 444 + ex && tx < 476 + ex && ty >= -ey && ty < 32 - ey : tx >= 460 && tx < 492 && ty >= -32 && ty < 0;
         }
         app.staffRoll.fast = keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_RETURN] || corner;
         for (app.staffRoll.clock += dt; app.staffRoll.clock >= 1.0f / kFramesPerSecond; app.staffRoll.clock -= 1.0f / kFramesPerSecond)
@@ -19197,6 +19236,27 @@ int fieldPresentationSelfTest(App& app) {
         app.msgStyle = keepStyle, app.msgLines = keepLines;
         app.video = keepVideo;
         applyVideo(app);
+    }
+    { // The Android layout's phone edges (androidEdgeX / Y): Android 1.1.6's centring offset over
+      // its 2D scale - (80, 20) tex2d on a 1280 x 720 phone, the HUD's badge, rows and corner
+      // buttons moved by it - and none in the iPad, iPhone and Vita layouts
+        const App::Video keepVideo = app.video;
+        int edgeProblems = 0;
+        for (int layout = 1; layout <= 4; ++layout) {
+            app.video.layout = layout, app.video.widescreen = false;
+            applyVideo(app);
+            app.renderer.beginFrame(1280, 720);
+            app.renderer.endFrame(false);
+            const float ex = androidEdgeX(app), ey = androidEdgeY(app), wx = layout == 4 ? 80.0f : 0.0f, wy = layout == 4 ? 20.0f : 0.0f;
+            const bool ok = std::fabs(ex - wx) < 0.01f && std::fabs(ey - wy) < 0.01f;
+            edgeProblems += !ok;
+            if (!ok) std::printf("android edges: layout %d gives (%.2f, %.2f), wanted (%.0f, %.0f)\n", layout, ex, ey, wx, wy);
+        }
+        app.video = keepVideo;
+        applyVideo(app);
+        std::printf("android edges: the phone's edges (80, 20) tex2d outside the centred screen in the Android layout, 0 in the others; %d problems\n",
+                    edgeProblems);
+        problems += edgeProblems;
     }
     app.noEncounters = keepNoEncounters;
     return problems;
@@ -25584,6 +25644,11 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             spawnEffect(app, id, 2);
             for (int f = 0; f < frames; ++f) stepBattle(app);
             std::printf("battle view %s: %zu effects playing\n", v.c_str(), b.effects.size());
+        }
+        if (v.rfind("break@", 0) == 0) { // break@n: the Break effect (btlbreak_effect_prc), its n-th frame
+            startBreakFx(app);
+            for (int f = 0, n = SDL_atoi(v.c_str() + 6); f < n; ++f) stepBreakFx(app);
+            std::printf("battle view %s: state %d, slide %d, alpha %d\n", v.c_str(), b.breakFx.state, b.breakFx.slide, b.breakFx.alpha);
         }
         if (v.rfind("stage", 0) == 0) { // stage<action>[@frame]: the first enemy's staged action, that frame of it
             const int action = SDL_atoi(v.c_str() + 5);
