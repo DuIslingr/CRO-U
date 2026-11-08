@@ -539,6 +539,11 @@ struct App {
         std::string message;
         int messageFrames = 0;
         int anim = 0;
+        // The scrolling list's offset (MuScrList eb6c0, here positive, in menu units): 48 x the focus row once
+        // settled, stepping 8 a frame toward it; scrollKey names the list it belongs to (-1 none yet)
+        float scroll = 0;
+        int scrollKey = -1;
+        int mark = 0;                      // the message board's mark (DAT_000ec5b4's count, one a frame)
         // Scenarios chosen (CampMainPrc 6 -> 7, FUN_0006c548): the main page's windows go - the boards (2)
         // to x -240, the plates (3) to +360, the Scenarios / Collection pictures (0x14 / 0x15) to -120,
         // the rest fading - and Scenarios opens 4 frames on (frames into it, 0 none)
@@ -861,7 +866,7 @@ struct App {
     int captureTalk = -1;                  // --talk-portrait n: (new game) the n-th hall conversation showing a portrait
     int lastMessageId = -1;                // the last message a script showed (CR_CAPTURE_UNTIL_MSG)
     int captureMenu = 0;                   // --camp (1), --save-screen (2: save, 3: the title's load / new, 7: cleared), --char-select (4), --scenarios (5), --manual (6), --world-select (8), --last-battle (9)
-    std::string captureCampView;           // --camp-view items|use|result|equip|slots|wear|status|status-equip|status-skills
+    std::string captureCampView;           // --camp-view items|use|result|equip|slots|wear|status|status-equip|status-skills|genes|plate|entries
     std::string captureFieldMenu;          // --field-menu closed|open|known|off|map[step]
     std::string captureTouchPad;           // --touch-pad dx,dy[,chest]: the pad held that far from the screen's middle
     int captureSceneFx[3] = {-1, 0, 0};    // --scene-fx set effect [frames]
@@ -6434,6 +6439,9 @@ constexpr int kCategoryKind[kCategories] = {16, 3, 6, 7, 8, 10, 11, 12}; // make
 constexpr int kCategoryLabel[kCategories] = {58071, 58072, 58073, 58074, 58075, 58079, 58124, 58125}; // (_kanStrItemTbl)
 constexpr float kRowX = 192, kRowY = 92, kRowH = 48;
 constexpr int kRows = 4;
+// MuScrList mode 0 (d2a70..): rows at x 192, the focus row's line at y 150, the rows cut to 76..280 (the mask
+// quads over 0..76 and 280..356), the gauge at (456, 72), 208 high
+constexpr float kFocusY = 150, kListTop = 76, kListBottom = 280, kGaugeX = 456, kGaugeY = 72, kGaugeH = 208;
 constexpr float kBackX = 192, kBackY = 344;
 constexpr float kPhoneBackY = 286; // 2.2.0's (__MuCamp_NextProc's box (192, 286, 256, 34)); it has no Save plate
 constexpr uint32_t kSoundEquip = 0x91 + 21, kSoundUse = 0x91 + 20; // __ChangeEquipItem's 0xa6, an item used (CampMainPrc 7)'s 0xa5
@@ -6499,7 +6507,9 @@ void drawClockAndOz(App& app, cr::MenuPainter& m, float a) {
     static const float kAt[4] = {0, 12, 36, 48};
     for (int i = 0; i < 4; ++i)
         if (i || digit[0]) drawShopNumber(m, digit[i], 363 + 47 + kAt[i], 6, 1, 12, a);
-    if (SDL_GetTicks() / 667 % 2 == 0) m.picture(75, 363 + 71, 6, a);
+    // (__ComUty_RealTimeDraw: the colon while its own count, one a frame, is under 20 of 40 - a second on,
+    // a second off at 20 Hz; Part 5 207-215 s: on 208.46-209.42, off to 210.44, on to 211.52, ...)
+    if (SDL_GetTicks() / 1000 % 2 == 0) m.picture(75, 363 + 71, 6, a);
     m.picture(74, 363 + 36, 16, a);
     m.picture(72, 326, 24, a);
     drawShopNumber(m, app.game.oz, 362, 26, 9, 12, a);
@@ -6524,7 +6534,9 @@ void drawFaceBoard(App& app, cr::MenuPainter& m, float x, float y, int c, int hp
     const cr::GameState& g = gs ? *gs : app.game;
     if (g.scenario == 1 && c == g.leaders[1]) m.picture(164, x + 238, y + 26, a); // the leader's mark
     m.picture(61, x + 24, y + 86, a);
-    drawShopNumber(m, pm.level, x + 48, y + 86, 3, 12, a, 1, true);
+    // (__ComUty_FaceBoardFaceDraw: PictNumDraw(x + 0x30, y + 0x56, level, 3 places, 12, style 1) right-aligned
+    // - Part 3 394 s: "LV  10", the digits at the field's right)
+    drawShopNumber(m, pm.level, x + 48, y + 86, 3, 12, a, 1);
     for (int k = 0; k < 2; ++k) {
         const float hx = x + 96, hy = y + 50 + 20.0f * float(k);
         m.picture(k ? 63 : 62, hx, hy, a);
@@ -6693,7 +6705,7 @@ float campEase(const App& app) {
     return 1 - (1 - t) * (1 - t);
 }
 float campListX(const App& app) {
-    return campui::kRowX + (app.camp.page == App::Camp::Items ? 160 * (1 - campEase(app)) : 64);
+    return campui::kRowX + (app.camp.page == App::Camp::Items ? 160 * (1 - campEase(app)) : 0);
 }
 bool campSlotList(const App& app) { return app.camp.page == App::Camp::Equip && app.camp.phase == App::Camp::Slot; }
 bool campStatusList(const App& app) { // the Status details' equipment or skill list
@@ -6706,15 +6718,36 @@ bool campScrollable(const App& app) {
 }
 int campScrollCount(const App& app) { return campSlotList(app) ? campui::kEquipSlots : int(app.camp.list.size()); }
 int campScrollTop(const App& app) { return campSlotList(app) ? app.camp.slotTop : app.camp.listTop; }
+// MuScrList (mode 0): the rows move under a fixed line - the focus row is the one on it - so a scroll
+// is a move of the focus (keys, the wheel, a drag, the gauge's arrows)
 void campScrollBy(App& app, int rows) {
     if (!campScrollable(app)) return;
     auto& c = app.camp;
-    int& top = campSlotList(app) ? c.slotTop : c.listTop;
     int& cursor = campSlotList(app) ? c.slot : c.listCursor;
-    const int n = campScrollCount(app), before = top;
-    top = std::clamp(top + rows, 0, std::max(0, n - campui::kRows));
-    cursor = std::clamp(cursor, top, std::max(top, std::min(n - 1, top + campui::kRows - 1)));
-    if (before != top) menuSound(app, se::kCursor);
+    const int n = campScrollCount(app), before = cursor;
+    cursor = std::clamp(cursor + rows, 0, std::max(0, n - 1));
+    int& top = campSlotList(app) ? c.slotTop : c.listTop; // (kept for the Status lists' memory)
+    top = cursor;
+    if (before != cursor) menuSound(app, se::kCursor);
+}
+int campFocus(const App& app) { return campSlotList(app) ? app.camp.slot : app.camp.listCursor; }
+// Which list is up: a new one (a page, a phase, a category, a member, a Status view) starts settled
+int campScrollKey(const App& app) {
+    const App::Camp& c = app.camp;
+    return int(c.page) * 4096 + int(c.phase) * 256 + c.statusView * 64 + c.category * 8 + c.member;
+}
+// The rows' offset now: 48 x the focus row, or on the way to it (MuScrList_Proc: eb6c0 steps d2a74 = 8 a
+// frame toward eb6c8; a jump - the ⬇ / ⬆ pills, SetListPosFromNo - sets both at once)
+float campScrollPx(const App& app) {
+    return app.camp.scrollKey == campScrollKey(app) ? app.camp.scroll : campui::kRowH * float(campFocus(app));
+}
+void stepCampScroll(App& app) {
+    App::Camp& c = app.camp;
+    const int key = campScrollKey(app);
+    const float to = campui::kRowH * float(campFocus(app));
+    if (c.scrollKey != key || std::fabs(to - c.scroll) > campui::kRowH) c.scrollKey = key, c.scroll = to;
+    else if (c.scroll < to) c.scroll = std::min(to, c.scroll + 8);
+    else c.scroll = std::max(to, c.scroll - 8);
 }
 
 int campEntries(const App&) { return campui::kEntries; }
@@ -6774,11 +6807,10 @@ std::vector<int> campStatusItems(const App& app, int view) {
 void campStatusTurn(App& app, int dir) {
     App::Camp& c = app.camp;
     menuSound(app, se::kPage);
-    c.viewTop[c.statusView] = c.listTop;
+    c.viewTop[c.statusView] = c.listCursor;
     c.statusView = (c.statusView + dir + 3) % 3;
     c.list = campStatusItems(app, c.statusView);
-    c.listTop = std::clamp(c.viewTop[c.statusView], 0, std::max(0, int(c.list.size()) - campui::kRows));
-    c.listCursor = c.listTop;
+    c.listCursor = c.listTop = std::clamp(c.viewTop[c.statusView], 0, std::max(0, int(c.list.size()) - 1));
 }
 
 void campRefreshList(App& app) {
@@ -7095,6 +7127,8 @@ void stepCamp(App& app) {
     App::Camp& c = app.camp;
     if (!app.campOpen) return;
     if (c.leaving) { stepCampLeaving(app); return; } // (Scenarios chosen: the windows going)
+    stepCampScroll(app);
+    ++c.mark;
     if (c.notice && app.dialogue.empty()) { // the message closed: on to what was asked (CampMain 2)
         const int id = c.notice;
         c.notice = 0;
@@ -7189,6 +7223,12 @@ bool campArrows(const App& app) {
            (c.page == App::Camp::Equip && c.phase == App::Camp::Slot && campMembers(app) > 1) ||
            (c.page == App::Camp::Status && c.phase == App::Camp::Slot);
 }
+// ComUty_BackButtonProc mode 3 (Back and OK, OK -5): a plate's entries in Equip while the member doesn't
+// wear it (CampMainPrc 0x1a: SetIdInfo(7, 0x13, .., 1 if worn else 3); Part 3 406 s "Back | OK")
+bool campOkBar(const App& app) {
+    const App::Camp& c = app.camp;
+    return c.page == App::Camp::Equip && c.phase == App::Camp::Entries && !campWears(app, campCharacter(app, c.member), c.plate);
+}
 bool campBackShown(const App& app) {
     const App::Camp& c = app.camp;
     return !(c.page == App::Camp::Items && (c.phase == App::Camp::Ask || c.phase == App::Camp::Result || c.phase == App::Camp::Exit));
@@ -7212,7 +7252,11 @@ void campClick(App& app, float px, float py) {
     auto in = [&](float x, float y, float w, float h) { return mx >= x && mx < x + w && my >= y && my < y + h; };
     auto inAt = [&](float at, float x, float y, float w, float h) { return at >= x && at < x + w && my >= y && my < y + h; };
     if (campBackShown(app)) {
-        if (!campArrows(app) && inAt(cx, kBackX, campBackY(app), 256, 34)) { campBack(app); return; }
+        if (campOkBar(app)) {
+            if (inAt(cx, 0xc0, campBackY(app), 0x72, 34)) campBack(app);
+            else if (inAt(cx, 0x137, campBackY(app), 0x72, 34)) campChoose(app); // (-5: __ChangeEquipItem)
+            if (inAt(cx, 0xc0, campBackY(app), 0xe8, 34)) return;
+        } else if (!campArrows(app) && inAt(cx, kBackX, campBackY(app), 256, 34)) { campBack(app); return; }
         if (campArrows(app)) {
             if (inAt(cx, 0xc0, campBackY(app), 0x33, 34)) { campKey(app, SDLK_LEFT); return; }
             if (inAt(cx, 0xf8, campBackY(app), 0x78, 34)) { campBack(app); return; }
@@ -7247,30 +7291,28 @@ void campClick(App& app, float px, float py) {
         return;
     }
     if (c.page == App::Camp::Status && c.phase == App::Camp::Slot && c.statusView == 0) return; // (the board: arrows and swipes)
-    if (campScrollable(app) && campScrollCount(app) > kRows) {
-        if (in(454, kRowY - 18, 28, 20)) { campScrollBy(app, -1); return; }
-        if (in(454, kRowY + kRowH * kRows - 2, 28, 22)) { campScrollBy(app, 1); return; }
-    }
-    if (c.phase == App::Camp::Slot) { // the slot list's rows, as the item lists' (the Status lists: none chosen)
-        if (c.page == App::Camp::Equip && in(campListX(app), kRowY, 256, kRowH * kRows)) {
-            const int slot = c.slotTop + int((my - kRowY) / kRowH);
-            if (slot < kEquipSlots) { c.slot = slot; campChoose(app); }
+    if (campScrollable(app)) {
+        // The gauge's arrows (0x4c / 0x4d at (456, 72) / (456, 272)) step the list
+        if (in(kGaugeX - 4, kGaugeY - 4, 24, 24)) { campScrollBy(app, -1); return; }
+        if (in(kGaugeX - 4, kGaugeY + kGaugeH - 12, 24, 28)) { campScrollBy(app, 1); return; }
+        // A row (MuScrList_Proc): the one on the line is chosen (pad_chk_updw_box(192, 150, 256, 48)); another
+        // is brought to the line (the original scrolls it there by a drag). Above the first row is the down
+        // pill's box (192, 76, 256, 74: SetListPosFromNo(n) - the end), under the last the up pill's (the top)
+        if (in(campListX(app), kListTop, 256, kListBottom - kListTop)) {
+            const int n = campScrollCount(app);
+            int& cursor = campSlotList(app) ? c.slot : c.listCursor;
+            const int row = int(std::floor((my - kFocusY + campScrollPx(app)) / kRowH));
+            if (row >= 0 && row < n) {
+                if (row == cursor) {
+                    if (c.page != App::Camp::Status && !(c.page == App::Camp::Equip && c.phase == App::Camp::Entries)) campChoose(app);
+                } else { cursor = row; menuSound(app, se::kCursor); }
+            } else if (n > 2 && row < 0 && cursor < 2) { cursor = n - 1; c.scrollKey = -1; menuSound(app, se::kCursor); }
+            else if (n > 2 && row >= n && cursor >= n - 2) { cursor = 0; c.scrollKey = -1; menuSound(app, se::kCursor); }
+            return;
         }
-        return;
     }
-    if (c.phase == App::Camp::List) {
-        if (in(campListX(app), kRowY, 256, kRowH * kRows)) {
-            const int index = c.listTop + int((my - kRowY) / kRowH);
-            if (index < int(c.list.size())) { c.listCursor = index; campChoose(app); }
-        } else if (c.page == App::Camp::Items && inAt(lx0, 0, 40, 180, 40))
-            campNextCategory(app, 1), menuSound(app, se::kPage);
-        return;
-    }
-    if (c.phase == App::Camp::Entries) {
-        if (in(campListX(app), kRowY, 256, kRowH * kRows)) {
-            const int index = c.listTop + int((my - kRowY) / kRowH);
-            if (index < int(c.list.size())) { c.listCursor = index; if (c.page == App::Camp::Genes) campChoose(app); }
-        } else if (c.page == App::Camp::Equip && in(336, kEntriesEquipY, 136, 40)) campChoose(app); // Equip
+    if (c.phase == App::Camp::List && c.page == App::Camp::Items && inAt(lx0, 0, 40, 180, 40)) {
+        campNextCategory(app, 1), menuSound(app, se::kPage);
         return;
     }
     if (c.phase == App::Camp::Ask) {
@@ -7294,8 +7336,8 @@ void campPointerDown(App& app, float px, float py) {
     campPointerPoint(app, px, py, p.startX, p.startY);
     p.lastY = p.startY;
     const bool list = campScrollable(app);
-    p.bar = list && campScrollCount(app) > campui::kRows && p.startX >= 454 && p.startX < 482 &&
-        p.startY >= campui::kRowY && p.startY < campui::kRowY + campui::kRowH * campui::kRows;
+    p.bar = list && campScrollCount(app) > 1 && p.startX >= campui::kGaugeX - 2 && p.startX < campui::kGaugeX + 22 &&
+        p.startY >= campui::kGaugeY + 12 && p.startY < campui::kGaugeY + campui::kGaugeH - 12;
 }
 void campPointerMove(App& app, float px, float py) {
     auto& p = app.campPointer;
@@ -7305,13 +7347,12 @@ void campPointerMove(App& app, float px, float py) {
     campPointerPoint(app, px, py, mx, my);
     const bool list = campScrollable(app);
     const bool inList = p.startX >= campListX(app) && p.startX < campListX(app) + 256 &&
-        p.startY >= campui::kRowY && p.startY < campui::kRowY + campui::kRowH * campui::kRows;
+        p.startY >= campui::kListTop && p.startY < campui::kListBottom;
     if (std::fabs(mx - p.startX) > 6 || std::fabs(my - p.startY) > 6) p.dragging = true;
     if (list && p.bar && p.dragging) {
-        const float track = campui::kRowH * campui::kRows - 40;
-        const int most = std::max(0, campScrollCount(app) - campui::kRows);
-        const int top = int(std::lround(std::clamp((my - campui::kRowY - 20) / track, 0.0f, 1.0f) * most));
-        campScrollBy(app, top - campScrollTop(app));
+        const int most = std::max(0, campScrollCount(app) - 1);
+        const int to = int(std::lround(std::clamp((my - campui::kGaugeY - 24) / (campui::kGaugeH - 48), 0.0f, 1.0f) * float(most)));
+        campScrollBy(app, to - campFocus(app));
     } else if (list && inList && p.dragging) {
         p.remainder += p.lastY - my;
         const int rows = int(p.remainder / campui::kRowH);
@@ -7337,27 +7378,36 @@ void campPointerUp(App& app, float px, float py) {
     }
     if (p.down && !p.dragging && app.campOpen && app.camp.page == p.page && app.camp.phase == p.phase) {
         if (p.bar) {
-            const float track = campui::kRowH * campui::kRows - 40;
-            const int most = std::max(0, campScrollCount(app) - campui::kRows);
-            const int top = int(std::lround(std::clamp((p.startY - campui::kRowY - 20) / track, 0.0f, 1.0f) * most));
-            campScrollBy(app, top - campScrollTop(app));
+            const int most = std::max(0, campScrollCount(app) - 1);
+            const int to = int(std::lround(std::clamp((p.startY - campui::kGaugeY - 24) / (campui::kGaugeH - 48), 0.0f, 1.0f) * float(most)));
+            campScrollBy(app, to - campFocus(app));
         } else campClick(app, px, py);
     }
 }
 
-// A list row (ComUty_CampItemPlate): plate 8 / 9, the icon, the name, the count at (222, 30)
-void drawCampRow(App& app, cr::MenuPainter& m, float x, float y, int item, int count, bool lit, float a,
+// MuComFontPlateDisp's colours: 0 white, 2 grey (0x808080), 3 yellow (0x00ffff, its BGR) - the plate and the
+// icon stay as they are (Part 13 1174 s: an item that can't be used, grey "White Chocolate" on a lit plate)
+void plateText(cr::MenuPainter& m, const std::string& s, float x, float y, int style, float a) {
+    if (style == 2) m.textTint(s, x, y, 0x80 / 255.0f, 0x80 / 255.0f, 0x80 / 255.0f, a, 14);
+    else if (style == 3) m.textTint(s, x, y, 1, 1, 0, a, 14);
+    else m.text(s, x, y, false, a, 14);
+}
+
+// A list row (ComUty_ComPlate_Base): plate 8 / 9, the icon at (12, 8), the name at (56, 12) in the style's
+// colour; an item count (FUN_00061610 / 000618dc: ComUty_PictNumDraw(x + 0xde, y + 0x1e, 2 places, 10,
+// style 0 - white; Part 13 1174 s "49", "20", "4")
+void drawCampRow(App& app, cr::MenuPainter& m, float x, float y, int item, int count, bool lit, float a, int style = 0,
                  const std::string& label = std::string()) {
     m.picture(lit ? 9 : 8, x, y, a);
     if (const cr::ItemParam* p = app.itemTable.item(item); p && p->icon >= 0)
         m.piece(x + 12, y + 8, float(p->icon % 16) * 32, 248 + float(p->icon / 16) * 32, 32, 32, a);
-    m.text(item > 0 ? itemName(app, item) : std::string("-"), x + 56, y + 12, false, a, 14);
+    plateText(m, item > 0 ? itemName(app, item) : std::string("-"), x + 56, y + 12, style, a);
     if (!label.empty()) m.text(label, x + 56, y + 30, false, a * 0.8f, 11);
-    if (count > 0) drawShopNumber(m, count, x + 222, y + 30, 2, 10, a, 2); // (ComUty_PictNumDraw(x + 0xde, 2 digits): the field from 222)
+    if (count > 0) drawShopNumber(m, count, x + 222, y + 30, 2, 10, a, 0);
 }
 
 // A plate's entry in the Camp (MuScrList type 7: ComUty_ComPlate_Equip_GeneAbility): the base plate,
-// then for a gene (0x51..0x82) "MP/" (picture 0x1b at (188, 34)) and its cost in three digits from
+// then for a gene (0x51..0x82) "MP/" (picture 0x1b at (188, 34)) and its cost in three white digits from
 // (218, 30) - halved while the member has skill 0x84; a skill shows no cost (Part 3 406 s:
 // "Healing (HP) MP/ 20", "Analyze MP/ 4", "Beast Wavelength")
 void drawGeneAbilityRow(App& app, cr::MenuPainter& m, float x, float y, int it, int ch, bool lit, float a) {
@@ -7367,39 +7417,46 @@ void drawGeneAbilityRow(App& app, cr::MenuPainter& m, float x, float y, int it, 
     if (!act) return;
     const int cost = ch >= 0 && ch < cr::kCharacters && cr::hasSkill(app.game, ch, 132) ? act->mp / 2 : act->mp;
     m.picture(27, x + 188, y + 34, a);
-    drawShopNumber(m, cost, x + 218, y + 30, 3, 10, a, 2);
+    drawShopNumber(m, cost, x + 218, y + 30, 3, 10, a, 0);
 }
 
-// A gene plate's row (ComUty_ComPlate_Equip_GenePlate): plate 8 / 9, its icon and name - yellow
-// for one the member wears, grey while none of it is known - then its six entries as pips at
-// (167 + 14k, 30), the unknown ones first and dim (10, known 11), or "MASTER" (picture 96 at
-// (176, 24)) once all are known
+// A gene plate's row (ComUty_ComPlate_Equip_GenePlate): plate 8 / 9, its icon and name - yellow (3)
+// for one worn, grey (2) while none of it is known - then six pips at (167 + 14k, 30), the unknown ones
+// first and dim (10, known 11), or "MASTER" (picture 96 at (176, 24)) once all six are known
+// (MuScrList_Draw types 6 / 0xb pass 6; Part 3 403 s: three dark, three gold)
 void drawGeneRow(App& app, cr::MenuPainter& m, float x, float y, int plate, bool lit, bool worn, float a) {
     m.picture(lit ? 9 : 8, x, y, a);
     if (const cr::ItemParam* p = app.itemTable.item(plate); p && p->icon >= 0)
         m.piece(x + 12, y + 8, float(p->icon % 16) * 32, 248 + float(p->icon / 16) * 32, 32, 32, a);
     const int known = cr::plateLearned(app.game, plate);
-    int total = 0;
-    for (int e : cr::plateContents(plate)) total += e > 0;
-    const std::string name = itemName(app, plate);
-    if (worn) m.textTint(name, x + 56, y + 12, 1, 1, 0.25f, a, 14);
-    else if (known == 0) m.textTint(name, x + 56, y + 12, 0.6f, 0.6f, 0.6f, a, 14);
-    else m.text(name, x + 56, y + 12, false, a, 14);
-    if (total <= 0) return;
+    constexpr int total = 6;
+    plateText(m, itemName(app, plate), x + 56, y + 12, known == 0 ? 2 : worn ? 3 : 0, a);
     if (known >= total) m.picture(96, x + 176, y + 24, a);
     else
         for (int k = 0; k < total; ++k) m.picture(k < total - known ? 10 : 11, x + 251 - 14 * float(total) + 14 * float(k), y + 30, a);
 }
 
-void drawCampScrollBar(cr::MenuPainter& m, int top, int n, float a) {
+// ComUty_GuageBarDraw(456, 72, offset, 2, n, 48, 208): the track (window sheet (144, 184) 16 x 16, (144, 200)
+// 16 x 8 down to the end (144, 208) at +200), its arrows (0x4c at the top, 0x4d at +200) and the knob - top
+// (160, 196) 16 x 12, middle (160, 208) 16 x 4, end (160, 212) 16 x 8 - max(24, 368 / n) long (the whole 192
+// under three rows), moved (196 - L) x offset / ((n - 2) x 48) down from +12. Drawn for any list
+void drawCampScrollBar(cr::MenuPainter& m, float scroll, int n, float a) {
     using namespace campui;
-    if (n <= kRows) return;
-    const float sx = 462, h = kRowH * kRows;
-    const float dark[4] = {0.05f, 0.05f, 0.08f, 0.8f * a};
-    m.quad(sx, kRowY, 8, h, dark, dark);
-    m.picture(76, sx - 4, kRowY - 14, a);
-    m.picture(77, sx - 4, kRowY + h - 2, a);
-    m.picture(106, sx, kRowY + (h - 40) * float(top) / float(n - kRows), a);
+    const float x = kGaugeX, y = kGaugeY, h = kGaugeH;
+    m.piece(x, y, 144, 184, 16, 16, a);
+    for (int i = 0; i < int(h - 24) / 8; ++i) m.piece(x, y + 16 + 8 * float(i), 144, 200, 16, 8, a);
+    m.piece(x, y + h - 8, 144, 208, 16, 16, a);
+    m.picture(0x4c, x, y, a);
+    m.picture(0x4d, x, y + h - 8, a);
+    float len = 192, at = 0;
+    if (n >= 3) {
+        len = std::max(24.0f, std::floor((h - 24) * 2 / float(n)));
+        at = std::clamp(std::floor((196 - len) * scroll / (float(n - 2) * kRowH)), 0.0f, h - 24 - len + 10);
+    }
+    const float top = y + 12 + at;
+    m.piece(x, top, 160, 196, 16, 12, a);
+    if (len > 20) m.pieceTo(x, top + 12, 16, len - 20, 160, 208, 16, 4, a);
+    m.piece(x, top + len - 8, 160, 212, 16, 8, a);
 }
 
 // ComUty_GeneBoardDraw at (x, y): the plate's name and "n / 6" known, then EITHER (mode 1, while the
@@ -9128,6 +9185,7 @@ void drawMapScreen(App& app) {
     if (ms.spot[0] >= 0) outPicture(m, t, 16, float(ms.spot[0]), float(ms.spot[1]), a * float(ms.alpha) / 255, frame);
 }
 
+int pictAnimFrame(int draws, int ticks, int frames);
 void drawCamp(App& app) {
     using namespace campui;
     App::Camp& c = app.camp;
@@ -9168,7 +9226,8 @@ void drawCamp(App& app) {
     // ComUty_BackButtonDraw: the arrows (mode 2) where the page turns (campArrows), else the plain
     // bar; none during the Items Yes / No, its board and the Emergency Exit
     if (campBackShown(app)) {
-        if (campArrows(app)) m.backButton(kBackX, campBackY(app), false, 0, 1);
+        if (campOkBar(app)) m.backOkBar(kBackX, campBackY(app), 0, 1);
+        else if (campArrows(app)) m.backButton(kBackX, campBackY(app), false, 0, 1);
         else m.backBar(kBackX, campBackY(app), false, 1 - leave);
     }
     left();
@@ -9179,8 +9238,9 @@ void drawCamp(App& app) {
         if (app.game.scenario != 0) m.picture(161, 84 - 120 * out, 236, 1 - out);
     }
     // The Items page's title and section (windows 9, 0x10 / 0x11) are its list's: off from the member
-    // choice to the list again (CampMainPrc 0's 2 -> 3 .. 10 -> 1)
-    if (!main && !(c.page == App::Camp::Items && c.phase != App::Camp::List)) {
+    // choice to the list again (CampMainPrc 0's 2 -> 3 .. 10 -> 1). Equip's and Status's come with the member
+    // (__MuEquip_CategoryChoiceInit, CampMainPrc 3's 2): none on their member choice (Part 3 395.5 s)
+    if (!main && !(c.page == App::Camp::Items && c.phase != App::Camp::List) && c.phase != App::Camp::Member) {
         static const int kTitle[5] = {0, 58070, 58059, 58087, 58077};
         const float pa = ease;
         m.picture(15, 0 - 140 * (1 - ease), 56, pa);
@@ -9202,10 +9262,8 @@ void drawCamp(App& app) {
             m.picture(16, 24 - 140 * (1 - ease), 72, pa);
             m.textCentred(section, 40 - 140 * (1 - ease), 65, false, pa, 15);
         }
-        if (c.page == App::Camp::Items && c.phase == App::Camp::List) { // ◀ ▶ beside the section
-            m.picture(99, 8, 60, pa);
-            m.picture(100, 168, 60, pa);
-        }
+        // (No arrows beside the Items section: CampMainPut 0 draws windows 0x10 / 0x11 - the category's
+        // line and the one it changes from - and the page turns on the Back bar's arrows; Part 13 1172.5 s)
     }
     const int ch = campCharacter(app, c.member);
     const int item = c.list.empty() ? 0 : c.list[size_t(c.listCursor)];
@@ -9223,19 +9281,44 @@ void drawCamp(App& app) {
         drawHelpWindow(app, m, it, ease);
         left();
     };
+    // MuScrList_Draw (mode 0): row k at (x, 150 + 48k - offset), cut to y 76..280 (its mask quads over 0..76
+    // and 280..356), the row on the line lit; with more than two rows the down pill (0x90) at (280, 112 -
+    // offset) while the focus is one of the first two and the up pill (0x91) under the last row while it is
+    // one of the last two (taps there jump to the other end); then the gauge. Part 3 396 / 398 / 403 s,
+    // Part 13 1172.5 / 1174 s: the focus row at y 340 of 720, the pill over the first row
+    const float scroll = campScrollPx(app);
+    auto scrollList = [&](float x, int n, auto&& row) {
+        const int focus = std::clamp(int((scroll + 28) / kRowH), 0, std::max(0, n - 1)); // (__MuScrList_GetFocusPos)
+        m.setClip(kListTop, kListBottom);
+        for (int k = 0; k < n; ++k) {
+            const float y = kFocusY + kRowH * float(k) - scroll;
+            if (y + kRowH > kListTop && y < kListBottom) row(k, x, y, k == focus);
+        }
+        if (n > 2) {
+            if (focus < 2) m.picture(0x90, x + 88, 112 - scroll, ease);
+            if (focus >= n - 2) m.picture(0x91, x + 88, 208 + kRowH * float(n - 1) - scroll, ease);
+        }
+        m.clearClip();
+        drawCampScrollBar(m, scroll, n, ease);
+    };
     switch (c.page) {
     case App::Camp::Items:
         if (c.phase == App::Camp::List) {
             helpBoard(item);
             right();
-            if (c.list.empty()) m.text("Nothing here.", kRowX + 56, kRowY + 16, false, ease, 15);
-            for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
-                const int index = c.listTop + k, it = c.list[size_t(index)];
-                const bool usable = campUsable(app, it);
-                drawCampRow(app, m, kRowX + 160 * (1 - ease), kRowY + kRowH * float(k), it, ownedCount(app, it),
-                            index == c.listCursor, usable || c.category != 0 ? ease : ease * 0.6f);
-            }
-            drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
+            if (c.list.empty()) m.text("Nothing here.", kRowX + 56, kFocusY + 16, false, ease, 15);
+            // MuScrList_Draw type 10 (__ChkCampItem): white for what can be used here (its table: 1 while
+            // MuCom_CheckExitItem, 3..6, 24..27), yellow for what either member wears, else grey; no count for a
+            // plate (Part 13 1172.5 s: "Emergency Exit" white, "Key" and the Collection grey)
+            scrollList(kRowX + 160 * (1 - ease), int(c.list.size()), [&](int k, float x, float y, bool lit) {
+                const int it = c.list[size_t(k)];
+                bool worn = false;
+                for (int g = 0; g < campMembers(app); ++g) {
+                    const cr::PartyMember& pm = app.game.party[size_t(campCharacter(app, g))];
+                    worn |= std::find(std::begin(pm.equip), std::end(pm.equip), it) != std::end(pm.equip) || campWears(app, campCharacter(app, g), it);
+                }
+                drawCampRow(app, m, x, y, it, cr::isPlate(it) ? 0 : ownedCount(app, it), lit, ease, worn ? 3 : campUsable(app, it) ? 0 : 2);
+            });
             left();
         } else if (c.phase == App::Camp::Member) memberPlates(true); // (the face boards above; no state board)
         else if (c.phase == App::Camp::Result) // window 0x12: StateBoardDraw(12, 92, .., item, count, 0, 1)
@@ -9247,8 +9330,13 @@ void drawCamp(App& app) {
             m.plate(336, 104, plateIcon(0), 0, c.confirm == 0, 1, false); // Yes
             m.plate(336, 160, plateIcon(1), 1, c.confirm == 1, 1, false); // No
             centre();
+            // ComUty_MsgBoardDraw(0, 0xdc, .., 0, font 3): picture 12, the mark (picture 13, PictAnimInit(1 tick, 4
+            // frames, 20 px, out and back)) at (458, 298), the line at (24, 234) in the menu font (Part 13 2946 s:
+            // "Use Emergency Exit?" at the menu text's size, the mark at the board's lower right)
             m.picture(12, 0, 220, 1);
-            m.text(sysText(app, seed ? 57077 : 57014, itemName(app, item)), 24, 234, false, 1, 15);
+            const short* mark = cr::kMenuPicture[13];
+            m.piece(458, 298, float(mark[0] + 20 * pictAnimFrame(c.mark, 1, 4)), mark[1], mark[2], mark[3], 1);
+            m.text(sysText(app, seed ? 57077 : 57014, itemName(app, item)), 24, 234, false, 1, 14);
             left();
         }
         break;
@@ -9259,47 +9347,45 @@ void drawCamp(App& app) {
             drawShopBoard(app, 12, 92, ch, 0, ease);
             right();
             // __MuCampScrListEquipInit: a scrolling list of the seven - weapon, armor, jewel (else item
-            // 0x1c6, "Jewel"), the Human Genes and three plates (else 0x1c7.., their names) - four rows
-            // of ComUty_ComPlate (one line each) with the list's scroll bar
-            for (int k = 0; k < kRows && c.slotTop + k < kEquipSlots; ++k) {
-                const int slot = c.slotTop + k, worn = slot < 3 ? pm.equip[slot] : pm.genes[slot - 3];
+            // 0x1c6, "Jewel"), the Human Genes and three plates (else 0x1c7.., their names). Their text
+            // (__MuScrList_ScrListEquip_Main): yellow for what is worn, white for an empty slot that can be
+            // filled, grey for one that can't (MuScrList_GetChoiceListNo's -4) - Part 3 396 / 398 s: the three
+            // worn yellow, "Berserker" grey
+            scrollList(kRowX, kEquipSlots, [&](int slot, float x, float y, bool lit) {
+                const int worn = slot < 3 ? pm.equip[slot] : pm.genes[slot - 3];
                 const int shown = worn > 0 ? worn : slot == 2 ? 0x1c6 : slot >= 3 ? 0x1c7 + (slot - 3) : 0;
-                // (a row MuScrList_GetChoiceListNo refuses, -4, is drawn dim)
-                drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), shown, 0, c.slot == slot, campSlotLocked(app, c.member, slot) ? ease * 0.6f : ease);
-            }
-            drawCampScrollBar(m, c.slotTop, kEquipSlots, ease);
+                drawCampRow(app, m, x, y, shown, 0, lit, ease, campSlotLocked(app, c.member, slot) ? 2 : worn > 0 ? 3 : 0);
+            });
             left();
         } else if (c.slot >= 3 && c.phase == App::Camp::Entries) { // CampMainPrc 0x1c: the chosen plate's picture, its known
             // entries listed, the Equip plate (the list's -5 row) unless the member wears it
             drawGeneBoard(app, m, 14, 92, c.plate, ease, 2);
             right();
-            for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
-                const int index = c.listTop + k, it = c.list[size_t(index)];
-                drawGeneAbilityRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, ch, index == c.listCursor, ease);
-            }
-            drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
-            if (!campWears(app, ch, c.plate)) m.plate(336, kEntriesEquipY, -1, -1, true, ease, false, sysText(app, 58059));
+            scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
+                drawGeneAbilityRow(app, m, x, y, c.list[size_t(k)], ch, lit, ease);
+            });
+            helpBoard(item);
             left();
         } else if (c.slot >= 3) { // a gene plate for the slot: its board (the cursor's known entries) beside the list
             drawGeneBoard(app, m, 14, 92, cr::isPlate(item) ? item : pm.genes[c.slot - 3], ease, 1);
             right();
-            for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
-                const int index = c.listTop + k, it = c.list[size_t(index)];
-                const bool worn = campWears(app, ch, it) || (campMembers(app) > 1 && campWears(app, campCharacter(app, c.member ^ 1), it));
-                if (cr::isPlate(it)) drawGeneRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, index == c.listCursor, worn, campPlateLocked(app, it) ? ease * 0.6f : ease);
-                else drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, 0, index == c.listCursor, ease);
-            }
-            drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
+            // (MuScrList_Draw type 6: yellow for a plate this member wears - MuScrList_IsNowEquip(.., the member) -
+            // grey while none of it is known; Part 3 403 s: "Deer Genes" yellow, the others white)
+            scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
+                const int it = c.list[size_t(k)];
+                if (cr::isPlate(it)) drawGeneRow(app, m, x, y, it, lit, campWears(app, ch, it), ease);
+                else drawCampRow(app, m, x, y, it, 0, lit, ease);
+            });
             helpBoard(cr::isPlate(item) ? item : 0);
         } else {
             drawShopBoard(app, 12, 92, ch, item > 0 ? item : 0, ease);
             right();
-            for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
-                const int index = c.listTop + k, it = c.list[size_t(index)];
-                drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, it > 0 ? ownedCount(app, it) : 0,
-                            index == c.listCursor, ease);
-            }
-            drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
+            // (MuScrList_Draw type 5: yellow for what the member wears - MuScrList_IsNowEquip -, no count)
+            scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
+                const int it = c.list[size_t(k)];
+                const bool worn = it > 0 && std::find(std::begin(pm.equip), std::end(pm.equip), it) != std::end(pm.equip);
+                drawCampRow(app, m, x, y, it, 0, lit, ease, worn ? 3 : 0);
+            });
             helpBoard(item);
         }
         break;
@@ -9308,24 +9394,25 @@ void drawCamp(App& app) {
         if (c.phase == App::Camp::Entries) { // Genes 4-5: the chosen plate's picture and its known entries
             drawGeneBoard(app, m, 14, 92, c.plate, ease, 2);
             right();
-            for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
-                const int index = c.listTop + k, it = c.list[size_t(index)];
-                drawGeneAbilityRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, ch, index == c.listCursor, ease);
-            }
-            drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
+            scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
+                drawGeneAbilityRow(app, m, x, y, c.list[size_t(k)], ch, lit, ease);
+            });
+            helpBoard(item);
             left();
             break;
         }
         drawGeneBoard(app, m, 14, 92, item, ease, 1); // (browsing: the cursor's known entries by name)
         right();
-        if (c.list.empty()) m.text("No gene plates.", kRowX + 56, kRowY + 16, false, ease, 15);
-        for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
-            const int index = c.listTop + k, it = c.list[size_t(index)];
+        if (c.list.empty()) m.text("No gene plates.", kRowX + 56, kFocusY + 16, false, ease, 15);
+        // (MuScrList_Draw type 0xb: yellow for a plate either member wears; its HELP the plate's own text -
+        // SetIdInfo(0xb, 0xe, .., 1, ..) - Part 5 1132 s "Gene Plate used to record / Dragon abilities")
+        scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
+            const int it = c.list[size_t(k)];
             bool worn = false;
             for (int g = 0; g < campMembers(app); ++g) worn |= campWears(app, campCharacter(app, g), it);
-            drawGeneRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, index == c.listCursor, worn, campPlateLocked(app, it) ? ease * 0.6f : ease);
-        }
-        drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
+            drawGeneRow(app, m, x, y, it, lit, worn, ease);
+        });
+        helpBoard(item);
         break;
     case App::Camp::Status:
         if (c.phase == App::Camp::Member) memberPlates(true); // (the face boards; no state board)
@@ -9344,29 +9431,28 @@ void drawCamp(App& app) {
             outPicture(m, art, 4, 0 - 140 * (1 - ease), 64, ease);
             right();
             if (c.statusView == 0) drawShopBoard(app, 308 + 200 * (1 - ease), 68, ch, 0, ease, false); // (StateBoardDraw param_11 = 0)
-            else {
-                for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
-                    const int it = c.list[size_t(c.listTop + k)];
-                    drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, 0, false, ease,
-                                c.statusView == 2 ? (cr::isSkill(it) ? "Skill" : "Gene") : std::string());
-                }
-                if (c.list.empty()) m.text("-", kRowX + 120, kRowY + 16, false, ease, 15);
-                drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
+            else { // (MuScrList mode 0 as the others - code reading only: no video shows the Status page)
+                scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
+                    const int it = c.list[size_t(k)];
+                    if (c.statusView == 2) drawGeneAbilityRow(app, m, x, y, it, ch, lit, ease);
+                    else drawCampRow(app, m, x, y, it, 0, lit, ease);
+                });
+                if (c.list.empty()) m.text("-", kRowX + 120, kFocusY + 16, false, ease, 15);
             }
             left();
         }
         break;
     default: break;
     }
-    const bool helpUp = c.phase == App::Camp::List && item > 0 &&
-                        (c.page == App::Camp::Items || c.page == App::Camp::Equip);
+    // Window 1 (BattryAndRealTimeAndOzDraw) is the main page's: CampMain's 6 takes it off for any page and
+    // its 9 puts it back with the main page (Part 3 395.5-396 s: no clock on Equip's member choice or lists)
     right();
-    if (!helpUp) drawClockAndOz(app, m, 1 - leave); // the HELP board takes the top while it's up
+    if (main) drawClockAndOz(app, m, 1 - out);
     centre();
     if (c.messageFrames > 0) --c.messageFrames;
     if (c.messageFrames > 0 && !c.message.empty()) {
         m.picture(12, 0, 220, 1);
-        m.text(c.message, 24, 234, false, 1, 15);
+        m.text(c.message, 24, 234, false, 1, 14);
     }
     left();
     const char* help = main ? "Up/Down  Enter  Esc or K: back"
@@ -19505,7 +19591,7 @@ int mobileInputSelfTest(App& app) {
             pointer(SDL_EVENT_MOUSE_BUTTON_DOWN, 468, 140);
             pointer(SDL_EVENT_MOUSE_MOTION, 468, 284);
             pointer(SDL_EVENT_MOUSE_BUTTON_UP, 468, 284);
-            ok &= campScrollTop(app) == n - campui::kRows;
+            ok &= campScrollTop(app) == n - 1; // (the gauge's foot: the last row on the line)
             pointer(SDL_EVENT_MOUSE_BUTTON_DOWN, 468, 250);
             pointer(SDL_EVENT_MOUSE_MOTION, 468, 92);
             pointer(SDL_EVENT_MOUSE_BUTTON_UP, 468, 92);
@@ -19514,10 +19600,9 @@ int mobileInputSelfTest(App& app) {
             ok &= campScrollTop(app) == 1;
             tap(468, 82);
             ok &= campScrollTop(app) == 0;
-            if (view == 2) c.slotTop = 2;
-            else c.listTop = 2;
-            tap(campListX(app) + 60, campui::kRowY + campui::kRowH + 20);
-            ok &= (view == 2 ? c.slot : c.listCursor) == 3;
+            // (a row under the line comes to it; the row on it is the one a tap chooses)
+            tap(campListX(app) + 60, campui::kFocusY + campui::kRowH + 20);
+            ok &= (view == 2 ? c.slot : c.listCursor) == 1 && c.phase == phase;
             if (!ok) std::printf("mobile input: layout %d wide %d view %d FAILED (top %d cursor %d slot %d phase %d)\n",
                                       layout, wide, view, c.listTop, c.listCursor, c.slot, int(c.phase));
             problems += !ok;
@@ -19527,8 +19612,8 @@ int mobileInputSelfTest(App& app) {
             openCamp(app);
             auto& c = app.camp;
             c.page = App::Camp::Equip, c.phase = App::Camp::Slot, c.anim = anim;
-            c.slotTop = std::min(slot, campui::kEquipSlots - campui::kRows);
-            tap(campListX(app) + 60, campui::kRowY + campui::kRowH * (slot - c.slotTop) + 20);
+            c.slot = c.slotTop = slot; // (the slot on the line)
+            tap(campListX(app) + 60, campui::kFocusY + 20);
             const bool ok = c.slot == slot && c.phase == App::Camp::List;
             problems += !ok;
             if (!ok) std::printf("mobile equipment: layout %d wide %d anim %d slot %d FAILED\n", layout, wide, anim, slot);
@@ -26155,7 +26240,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
     if (app.captureMenu == 1) {
         openCamp(app);
         app.camp.anim = 100;
-        // --camp-view items|use|result|equip|slots|wear|status|status-equip|status-skills: a page, with a bag to show
+        // --camp-view items|use|result|equip|slots|wear|status|status-equip|status-skills|genes|plate|entries: a page, with a bag to show
         const std::string& v = app.captureCampView;
         if (!v.empty()) {
             app.game.setFlag(0x38, true), app.game.setFlag(0x39, true); // (the once-only messages seen)
@@ -26174,13 +26259,14 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             if (v == "status" || v == "status-equip" || v == "status-skills") app.camp.cursor = 3, key(SDLK_RETURN), key(SDLK_RETURN);
             if (v == "status-equip") key(SDLK_RIGHT);
             if (v == "status-skills") key(SDLK_LEFT);
-            if (v == "genes" || v == "plate") app.game.items[481] = 1, app.game.items[108] = 1, app.game.items[94] = 1;
+            if (v == "genes" || v == "plate" || v == "entries") app.game.items[481] = 1, app.game.items[108] = 1, app.game.items[94] = 1;
             if (v == "genes") app.camp.cursor = 2, key(SDLK_RETURN), key(SDLK_DOWN), key(SDLK_DOWN);
-            if (v == "plate") {
+            if (v == "plate" || v == "entries") {
                 app.camp.cursor = 1, key(SDLK_RETURN), key(SDLK_RETURN);
                 for (int k = 0; k < 4; ++k) key(SDLK_DOWN); // Gene Plate 1
                 key(SDLK_RETURN);
             }
+            if (v == "entries") key(SDLK_RETURN); // (the first plate's known entries, Back / OK under them)
             app.camp.anim = 100;
         }
     }

@@ -96,6 +96,9 @@ public:
     // ComUty_CmdBack type 1 (the shop's): a plain 232-wide bar, white fading in over 24 at each end,
     // "Back" at x + 82
     void backBar(float x, float y, bool pressed, float alpha);
+    // ComUty_CmdBack type 3: Back (x .. x + 114, faded in over 24, the word at + 36) and OK (x + 118 .. x + 208,
+    // fading out to 232, its word (sheet (76, 224) 64 x 20) at (+126, +2)); `pressed` 1 lights Back, 5 OK
+    void backOkBar(float x, float y, int pressed, float alpha);
     // The 14 x 14 digits of sheet 0 (0 at (0, 0), then every 14 units) and "/" (picture 66)
     void digit(int d, float x, float y, float alpha = 1);
 

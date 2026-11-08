@@ -433,7 +433,8 @@ c101/c102/c104/m207a, 2026-10-12).
       **Status** - a member's boards (Left/Right for the other); **Genes** - the gene plates in
       the bag on the gene board (picture, n / 6 known, abilities and skills). Seed points and
       worn plates are saved. `--capture … --camp --camp-view
-      items|use|equip|slots|wear|status|genes|plate` renders a page.
+      items|use|equip|slots|wear|status|genes|plate|entries` renders a page (`entries`: the first
+      plate's known entries with Back / OK).
 - [x] Genes (`game/genes.cpp`): abilities (items 81-130, battle actions +120), skills (131-186)
       and the 22 gene plates; each member wears the Human Genes and up to three plates (Equip).
       In battle **Genes** lists what the worn plates hold that's known, with its MP (pair mode:
