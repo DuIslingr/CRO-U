@@ -190,6 +190,7 @@ struct App {
     std::vector<bool> npcWarps;            // per NPC: its touch script warps (from a trial run)
     cr::GpuMesh triggerMesh;               // trigger boxes, shown with the collision overlay
     cr::GpuMesh puzzleBeams;               // the candle switches' beams (CandleSwitch::draw3D)
+    cr::GpuMesh battleShadows;             // the fighters' floor shadows (_btl_shadow's fans)
     cr::GameState game;                    // flags / variables the scripts use (new game)
     int lastKick = 0;                      // G+0x8a980: the touch box last kicked - kept across warps and loads,
                                            // 0 once the leader stands in none (RectWrapper::checkEventKick)
@@ -620,7 +621,14 @@ struct App {
             uint32_t hp = 0, hpMax = 0;
             std::string name;
             cr::Vec3 pos;
-            float yaw = 0;
+            float yaw = 0;                 // +0xfac: the yaw shown (radians)
+            // _mdl_put's GetNewMdlDir: the shown yaw turns toward the wanted one (+0xf98) by turnStep
+            // degrees a frame (+0xfb0: 15, set again once it's there); btlmove_setpos_angy's move turns
+            // it home over the move (turnHome: at the move's start)
+            float wantYaw = 0, turnStep = 15;
+            bool turnHome = false;
+            float approachYaw = 0;         // the attack's heading out (DAT_000dfb58), turned to on the way back
+            bool approached = false;
             int slot = 0, action = -1;     // action slot (BattleAnim) and the package's action index
             float time = 0;
             float scale = 1, scaleY = 1;   // +0xfa0..: the monster row's +0x46 / +0x48 (read_btlcpl); +0xf98 is the yaw in turns
@@ -650,6 +658,10 @@ struct App {
         std::map<std::string, LoadedModel> models;
         int frames = 0;
         float clock = 0;
+        struct Shadow { int fighter = -1; float alpha = 0; cr::Vec3 at; float rx = 0, rz = 0; }; // _btl_shadow's fans drawn (tests)
+        std::vector<Shadow> shadows;
+        std::vector<float> shadowTris;     // their triangles this frame (xyz x 3 each)
+        std::vector<uint8_t> shadowAlpha;  // and their vertices' alpha
         int fieldTrack = -1;               // music to resume afterwards
         bool requested = false;            // a script's Battle, started once its step ends
         bool eventBattle = false;          // G+0xa4e: a running script started it - it waits, and goes
@@ -741,6 +753,7 @@ struct App {
             size_t upNext = 0, itemNext = 0;
         } result;
         cr::Mat4 vp;                       // the last frame's camera (the damage numbers)
+        cr::Mat4 proj;                     // and its projection (tests)
         int cam = -1, camActor = 0, camFrame = 0; // btlcamera_set: the camera (+0xa96), its actor (+0xa94), its count (+0xa90)
         int camDur = 0, camHold = 25;      // +0xa92 its frames; +0xae8 as its 10000..10002 read it
         bool camLive = false;              // +0xa88 set: btlcamera_prc still runs it
@@ -1588,6 +1601,7 @@ void unloadModel(App& app) {
     app.renderer.destroy(app.collision);
     app.renderer.destroy(app.triggerMesh);
     app.renderer.destroy(app.puzzleBeams);
+    app.renderer.destroy(app.battleShadows);
     app.collisionPolys = 0;
     unloadLoaded(app, app.model);
 }
@@ -12498,7 +12512,7 @@ void updateNpcJoints(App& app) {
 }
 
 void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::Material* override = nullptr,
-                float alpha = 1.0f, float matTime = -1.0f);
+                float alpha = 1.0f, float matTime = -1.0f, int pass = 0);
 const cr::Action* effectMaterialAction(const LoadedModel& lm, const cr::Material* mt);
 bool effectUvMotion(const LoadedModel& lm, const cr::Material* mt, float time, float shift[2], float scale[2], int unit = 0);
 const cr::Texture* secondUnit(const LoadedModel& lm, size_t mesh, const cr::Material* mt, float time, float uv2[4]);
@@ -12546,7 +12560,8 @@ void drawNpcs(App& app, const cr::Mat4& vp) {
 
 // Draws a model's visible meshes: opaque materials first, then blended ones by draw order.
 // `override`, if given, replaces every material (texture unbound); `alpha` < 1 fades it.
-void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::Material* override, float alpha, float matTime) {
+// `pass` 1 draws those of draw order under 0 alone, 2 those of 0 and over (0 all)
+void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::Material* override, float alpha, float matTime, int pass) {
     const cr::Model& cpu = m.cpu;
     static const cr::Material kDefaultMaterial;
     auto baseOf = [&](size_t i) -> const cr::Material& {
@@ -12579,6 +12594,7 @@ void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::M
     });
     for (size_t i : order) {
         if (i < cpu.meshes.size() && !cpu.meshes[i].visible) continue;
+        if (pass && (materialOf(i).drawOrder >= 0) != (pass == 2)) continue;
         if (i < animated.size() && animated[i].blended() && animated[i].diffuse[3] <= 0.004f) continue;
         const cr::GpuMesh& mesh = m.meshes[i];
         const cr::Texture* tex =
@@ -12904,6 +12920,7 @@ constexpr int kSlotIdle = 0, kSlotWin = 1, kSlotReturn = 3, kSlotGuard = 4, kSlo
 } // namespace btlui
 
 constexpr int kPropFighter = 5; // an actor that is no fighter: groups 0x291 / 0x22c's extra model
+constexpr int kIntroWhite = 4;  // the steps under the encounter's white before btl_main 200 (10, 100, 199 - then 200)
 App::Battle::Actor* battleActor(App& app, int fighter) {
     for (App::Battle::Actor& a : app.battle.actors)
         if (a.fighter == fighter) return &a;
@@ -13572,6 +13589,27 @@ int battleModelOf(const App& app, int c, int slot) {
     return std::clamp(c + 8, 0, cr::kNumBattleModels - 1);
 }
 
+// _btl_in_eff (5977): the sound a battle opens with, by its group - 0xa9 for the bosses' and story
+// fights' pairs (9-10, 0x2a-0x2b, 0x48-0x49, 0x7a-0x7b, 0xac-0xad, 0x154-0x163, 0x168-0x16f, 0x179),
+// 0xaa for 0x104-0x106, 0x118-0x11b, 0x12c-0x12e, 0x140-0x142, 0x170, 0x173, 0x176, 0x178, 0xab for
+// 0x164-0x167, else 0xa8 (sound effects, not the btlvoice table's)
+int battleInSound(int g) {
+    for (int base : {9, 0x2a, 0x48, 0x7a, 0xac})
+        if (g == base || g == base + 1) return 0xa9;
+    if ((g >= 0x154 && g <= 0x163) || (g >= 0x168 && g <= 0x16f) || g == 0x179) return 0xa9;
+    if ((g >= 0x104 && g <= 0x106) || (g >= 0x118 && g <= 0x11b) || (g >= 0x12c && g <= 0x12e) || (g >= 0x140 && g <= 0x142) ||
+        g == 0x170 || g == 0x173 || g == 0x176 || g == 0x178)
+        return 0xaa;
+    if (g >= 0x164 && g <= 0x167) return 0xab;
+    return 0xa8;
+}
+
+// read_btlcpl (6526-6529): a monster's name row (+0xaa) - its id - 1, but 0x106 (Dante's) for model
+// 0xa5 (m010: monster rows 125 and 140) while MuCom_GetOlgarDanteCheck holds
+int monsterNameRow(const App& app, const cr::MonsterDef& m) {
+    return m.model == 0xa5 && olgarIsDante(app) ? 0x106 : m.id - 1;
+}
+
 void startBattle(App& app, const cr::BattleStart& start, int flags) {
     app.renderer.resetHistory(); // a cut: the upscaler starts over
     App::Battle& b = app.battle;
@@ -13589,9 +13627,11 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     b.breakFx = {};
     app.game.setFlag(0xffd, false), app.game.setFlag(0xffe, false); // btl_main 0: the defeat's and the story end's flags
     app.runner.setGate(battletalk::kFlag); // PrcEvnt in battle mode
-    // CRView::prc: SetFade(white, 255, 255) as the field goes; btl_main 200: SetFade(white, 255, 0,
-    // 1000 ms) - the battle comes in out of white over its opening (whatever the field's fade was)
-    app.fadeGrey = 1, app.fadeFrom = 1, app.fadeTo = 0, app.fadeFrames = 20, app.fadeT = 0; // (btl_main 200: SetFade(white, 255, 0, 1000 ms))
+    // CRView::prc's encounter frame (1283-1284): one get_random(2), then SetFade(white, 255, 255, 1 ms) -
+    // solid white at once; btl_main 0 -> 10 -> 100 -> 199 -> 200 run under it, and 200 starts the
+    // fade in (SetFade(white, 255, 0, 1000 ms): the Intro phase, kIntroWhite steps on)
+    app.rng.get(2);
+    app.fadeGrey = 1, app.fadeFrom = 1, app.fadeTo = 1, app.fadeFrames = 20, app.fadeT = 0;
     b.frames = 0;
     b.clock = 0;
     b.formation = std::max(0, app.battleData.formation(ids));
@@ -13635,7 +13675,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
         if (!b.models.count(a.model)) loadModelFile(app, a.model, b.models[a.model], true);
         if (fighter >= 0 && fighter < 5) battleSlotsLoaded(b.models[a.model], modelId, fighter < 2, fighter >= 2 && b.rules.f[size_t(fighter)].def && b.rules.f[size_t(fighter)].def->strongGrowth);
         a.pos = a.home = {float(place[0]), 0.0f, float(place[1])};
-        a.yaw = a.homeYaw = yaw;
+        a.yaw = a.homeYaw = a.wantYaw = yaw; // (+0xfb0 = 15: read_btlcpl 6598, btl_main 7270 / 7293)
         a.fighter = fighter;
         b.actors.push_back(a);
         playSlot(app, b.actors.back(), btlui::kSlotIdle);
@@ -13687,7 +13727,10 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
         a.monster = m->id;
         a.level = rules.f[size_t(2 + k)].level;
         a.hp = a.hpMax = uint32_t(rules.f[size_t(2 + k)].hpMax);
-        a.name = sysText(app, 53000 + m->id - 1); // font block 2: monster names
+        a.name = sysText(app, 53000 + monsterNameRow(app, *m)); // font block 2: monster names
+        // read_btlcpl (6560-6562): slot 0's frame get_random(btlanm_get_max_frm(slot 0)) - the
+        // monsters' idles out of step
+        a.time = float(app.rng.get(int(actorDuration(app, a) - 1.0f)));
     }
     if (start.group == 0x291 || start.group == 0x22c) {
         // read_btlcpl: these two bring btlcplname[28] (m127) in on model slot 4 at (500, 0, 465), no
@@ -13702,7 +13745,13 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
         b.shownMp[i] = rules.f[size_t(i)].mp;
         if (i < 2) b.rollHp[i] = b.shownHp[i], b.rollMp[i] = b.shownMp[i];
     }
-    setBattleCamera(app, std::max(0, b.formation - 2), -1); // btl_main 0xc8 -> 300: the formation's still view (actor -1)
+    setBattleCamera(app, std::max(0, b.formation - 2), -1); // (under the white; btl_main 200 sets it again)
+    // btl_main 0: _btl_in_eff(group) - the battle's opening sound
+    {
+        const uint32_t id = uint32_t(battleInSound(start.group));
+        app.sound.play(id);
+        app.soundLog.push_back(id);
+    }
     // btl_main 0: var 58 names the battle's track (_BGM_FILE index); 38 and over - a random
     // battle's 999 - play track 31 (bgm43); 997 leaves the field's music playing
     const auto v58 = app.game.vars.find(58);
@@ -13712,6 +13761,15 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     if (track >= 0) playBgm(app, uint32_t(track));
     app.dialogue.clear();
     ++app.battlesFought;
+    if (SDL_getenv("CR_BATTLE_DEBUG")) {
+        for (size_t i = 0; i < b.stage.cpu.meshes.size(); ++i) {
+            const int ap = b.stage.cpu.meshes[i].appearance;
+            if (ap < 0 || ap >= int(b.stage.cpu.materials.size())) continue;
+            const cr::Material& mt = b.stage.cpu.materials[size_t(ap)];
+            std::printf("battle stage %s: mesh %zu draw order %d%s%s%s\n", cr::kBattleStageFile[start.stage], i, mt.drawOrder, mt.blended() ? " blended" : "",
+                        mt.depthWrite() ? " depth-write" : "", b.stage.cpu.meshes[i].visible ? "" : " hidden");
+        }
+    }
     if (SDL_getenv("CR_BATTLE_DEBUG"))
         for (const auto& a : b.actors)
             std::printf("battle actor: fighter %d model %d %s (%zu meshes) at %.0f %.0f %.0f scale %.2f/%.2f\n", a.fighter, a.modelId,
@@ -14097,10 +14155,11 @@ void battleEscapeAnswer(App& app, bool yes) {
 
 // ---- Playing the round (btlact_*) ----
 
-// The fighter's model faces `target`
+// _btlact_attack_init's mdl_ang_y (12444-12698): the attacker's wanted yaw toward `target` - turned
+// to at 15 degrees a frame by mdl_put, not snapped
 void faceFighter(App& app, App::Battle::Actor& a, int target) {
     if (const App::Battle::Actor* t = battleActor(app, target))
-        if (t != &a) a.yaw = std::atan2(t->home.x - a.pos.x, t->home.z - a.pos.z);
+        if (t != &a) a.wantYaw = std::atan2(t->pos.x - a.pos.x, t->pos.z - a.pos.z);
 }
 
 // ---- Screen quakes and flashes (Quake, SetFade_back) ----
@@ -14514,7 +14573,7 @@ int speaker(const App& app, int k) {
         for (const App::Battle::Actor& a : b.actors)
             if (a.fighter == k) model = a.modelId;
     } else {
-        row = f.monster - 1;
+        row = f.def ? monsterNameRow(app, *f.def) : f.monster - 1;
         model = f.def ? f.def->model : -1;
     }
     int sp = -1;
@@ -14868,12 +14927,21 @@ void startTurn(App& app) {
         if (t.kind == cr::kCmdAttack && SDL_getenv("CR_BATTLE_DEBUG"))
             std::printf("attack: fighter %d (model %d %s) slot %d%s, cls %d\n", t.actors[k], u->modelId, u->model.c_str(), slot,
                         inPlace ? " in place" : "", a ? a->cls : -1);
-        if (target >= 0) faceFighter(app, *u, target);
+        if (target >= 0 && t.kind == cr::kCmdAttack) faceFighter(app, *u, target); // (gene_init / item_init turn no one)
         const cr::BattleAnim an = app.battleData.anim(u->modelId, slot);
         // btlact_attack_init: btlmove_setpos_angy with the model's own move_cnt / start / end for the
         // slot - a model with no window acts in place, as do slots 9 and 10 (no btlmove at all)
         const bool approach = !inPlace && cr::battleApproachEnabled(a ? a->motion : 0, opposingTarget, an);
-        playSlot(app, *u, slot, approach ? btlui::kSlotReturn : btlui::kSlotIdle);
+        u->turnHome = false, u->approached = false;
+        if ((t.kind == cr::kCmdGene || t.kind == cr::kCmdItem) && !approach) {
+            // _btlact_gene_init / _btlact_item_init (42018 / 42756): _mdl_set_act_motion_loop(slot, 2,
+            // loop start, loop end) - played to the loop's end, then its loop over and over (the whole
+            // slot when it has none) till another motion is set (the round's end, a blow)
+            playSlot(app, *u, slot, -1);
+            const cr::BattleAnim ca = app.battleData.anim(u->modelId, u->slot);
+            if (ca.loopEnd > ca.loopStart) u->loopFrom = ca.loopStart, u->loopTo = ca.loopEnd;
+        } else
+            playSlot(app, *u, slot, approach ? btlui::kSlotReturn : btlui::kSlotIdle);
         // (_btlact_gene_init / _btlact_item_init: the hit at the cast slot's loop start + 30)
         if (k == 0) b.hitFrame = t.kind == cr::kCmdGene || t.kind == cr::kCmdItem ? an.loopStart + 30 : an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
         u->moveFrom = u->moveTo = 0;
@@ -14883,7 +14951,10 @@ void startTurn(App& app) {
             u->from = u->pos;
             u->to = {spot.x, u->pos.y, spot.z};
             if (k == 0) b.attackCam2At = an.moveEnd; // (que +0x10 = FUN_00047d8c: the slot's move end)
-            if (u->to.x != u->from.x || u->to.z != u->from.z) u->yaw = std::atan2(u->to.x - u->from.x, u->to.z - u->from.z);
+            // (12536-12539: mdl_ang_y(from, to) into both the wanted and the shown yaw - kept for the way
+            // back (DAT_000dfb58) - and the setpos_angy move turns it home once it starts)
+            if (u->to.x != u->from.x || u->to.z != u->from.z) u->yaw = u->wantYaw = std::atan2(u->to.x - u->from.x, u->to.z - u->from.z);
+            u->approachYaw = u->wantYaw, u->approached = true, u->turnHome = true;
             u->moveFrom = an.moveStart;
             u->moveTo = an.moveEnd;
         } else if (approach) { // (a gene's move) btlmove_setpos: up to the target, a step short of it
@@ -15312,7 +15383,7 @@ void victoryShown(App& app) {
     if (b.start.group == 0x295) app.game.setFlag(0x644, true);
     for (int k = 0; k < 2; ++k)
         if (App::Battle::Actor* a = battleActor(app, k); a && b.rules.f[size_t(k)].alive()) {
-            a->yaw = a->homeYaw;
+            a->yaw = a->wantYaw = a->homeYaw;
             playSlot(app, *a, btlui::kSlotWin);
         }
     for (App::Battle::Actor& a : b.actors)
@@ -15397,7 +15468,7 @@ void stepBossDown(App& app) {
         for (App::Battle::Actor& a : b.actors)
             if (a.fighter >= 0 && a.fighter < 2 && b.rules.f[size_t(a.fighter)].alive()) {
                 a.hidden = false;
-                a.yaw = a.homeYaw;
+                a.yaw = a.wantYaw = a.homeYaw;
                 playSlot(app, a, btlui::kSlotWin); // (btl_win_anm)
             }
     }
@@ -15509,6 +15580,11 @@ void endRound(App& app) {
         settleBattle(app);
         break;
     default: {
+        // btl_main 0x320 (7444-7461): the pair standing (slot 7, the getting up, apart) - and formation 2's
+        // first two monsters - back to their idles (mdl_set_act_motion_nextanm 0): a cast's loop ends here
+        for (int k = 0; k < (b.formation == 2 ? 4 : 2); ++k)
+            if (App::Battle::Actor* a = battleActor(app, k); a && b.rules.f[size_t(k)].alive() && a->slot != btlui::kSlotRise && a->slot != btlui::kSlotIdle)
+                playSlot(app, *a, btlui::kSlotIdle);
         // btl_main 0x352's end: group 0x294's tenth round (chk_cpl660) or group 0x291's stage change
         // (chk_cpl657_mapchange) in place of the commands
         const int piece = app.game.scenario == 0 && b.start.group == 0x294 && b.rules.round == 10 ? 0x366 : 0;
@@ -15633,6 +15709,28 @@ bool battleMenuReady(const App& app) {
     return b.viewState == 2 && b.view.page == b.page;
 }
 
+// _mdl_put (11752-11761): each model's shown yaw toward its wanted one, by +0xfb0 degrees a frame
+// (GetNewMdlDir: the shorter way round, wrapped), the step back to 15 once it's there
+void turnActors(App& app) {
+    constexpr float kTurn = 2.0f * 3.14159265f;
+    for (App::Battle::Actor& a : app.battle.actors) {
+        float d = std::remainder(a.wantYaw - a.yaw, kTurn);
+        const float step = a.turnStep / 360.0f * kTurn;
+        if (std::fabs(d) <= step) {
+            a.yaw = a.wantYaw;
+            a.turnStep = 15;
+        } else
+            a.yaw = std::remainder(a.yaw + (d > 0 ? step : -step), kTurn);
+    }
+}
+
+// A turn timed over `frames` (btlmove_prc / the attack's return and end: the gap x 360 / frames)
+void turnOver(App::Battle::Actor& a, float want, float frames) {
+    const float d = std::fabs(std::remainder(want - a.wantYaw, 2.0f * 3.14159265f));
+    a.wantYaw = want;
+    a.turnStep = d * 180.0f / 3.14159265f / std::max(1.0f, frames);
+}
+
 void stepBattle(App& app) {
     rollPartyNumbers(app.battle);
     App::Battle& b = app.battle;
@@ -15664,9 +15762,11 @@ void stepBattle(App& app) {
                         a.moveTo = ra.moveEnd;
                     } else
                         a.moveFrom = a.moveTo = 0;
-                } else if (next == btlui::kSlotIdle) {
+                    // (0x406: the wanted yaw the heading out again, turned to over the way back)
+                    if (a.approached) turnOver(a, a.approachYaw, float(ra.hasMoveWindow() ? ra.moveEnd - ra.moveStart : 1));
+                    a.turnHome = false;
+                } else if (next == btlui::kSlotIdle) { // (the yaw is left: the attack's end turns it home)
                     a.pos = a.home;
-                    a.yaw = a.homeYaw;
                     a.moveFrom = a.moveTo = 0;
                 }
             }
@@ -15679,6 +15779,11 @@ void stepBattle(App& app) {
         if (a.moveTo > a.moveFrom) {
             const float t = std::clamp((a.time + a.blend.lag() - float(a.moveFrom)) / float(a.moveTo - a.moveFrom), 0.0f, 1.0f);
             a.pos = a.from + (a.to - a.from) * t;
+            // btlmove_prc: a setpos_angy move, its wait over, turns the wanted yaw home (0 / 0.5) over the move
+            if (a.turnHome && a.time + a.blend.lag() >= float(a.moveFrom)) {
+                turnOver(a, a.homeYaw, float(a.moveTo - a.moveFrom));
+                a.turnHome = false;
+            }
         }
         if (a.fading) a.alpha = std::max(0.0f, a.alpha - 1.0f / 20.0f);
     }
@@ -15701,6 +15806,7 @@ void stepBattle(App& app) {
     battletalk::rules(app);
     if (app.game.flag(battletalk::kFlag)) { // a talk: the script runs (its fades with it), the battle waits
         battletalk::step(app);
+        turnActors(app);
         stepBattleCamera(app);
         stepQuake(app);
         stepFlash(app);
@@ -15709,12 +15815,19 @@ void stepBattle(App& app) {
     if (app.fadeT < app.fadeFrames) ++app.fadeT; // the screen's fade (stepEvents' while a talk runs)
     if (app.fadeBackT < app.fadeBackFrames) ++app.fadeBackT;
     switch (b.phase) {
-    case App::Battle::Intro: // the fade and the opening camera (btl_main 200 / 300): 30 frames, a boss's (formation 2) 60
-        // with its camera 0x21b from the second; a strike's or ambush's announcement (sys texts 0x36 /
-        // 0x37 for 60 frames) from the first
-        if (b.phaseFrames == 1 && (b.start.strike == 1 || b.start.strike == 2)) setBanner(app, sysText(app, 57053 + b.start.strike), 60);
-        if (b.phaseFrames == 2 && b.formation == 2) setBattleCamera(app, 0x21b);
-        if (b.phaseFrames >= (b.formation == 2 ? 60 : 30)) {
+    case App::Battle::Intro: // btl_main 10 / 100 / 199 under the encounter's white, then 200 and 300
+        if (b.phaseFrames == kIntroWhite) {
+            // 200: the fade in over 20 frames, the formation's camera held still (actor -1), the 300
+            // counter (+0xae8: 30, a boss's formation 2 60), a strike's or ambush's announcement (sys
+            // texts 0x36 / 0x37 for 60 frames)
+            app.fadeGrey = 1, app.fadeFrom = 1, app.fadeTo = 0, app.fadeFrames = 20, app.fadeT = 0;
+            setBattleCamera(app, std::max(0, b.formation - 2), -1);
+            if (b.start.strike == 1 || b.start.strike == 2) setBanner(app, sysText(app, 57053 + b.start.strike), 60);
+        }
+        // 300's first frame (7348-7358): the counter at 29 sets the formation's camera again with actor 0 -
+        // cameras 0..0xd turn (raw[14] -20 over raw[15] 15); formation 2's at 59 camera 0x21b instead
+        if (b.phaseFrames == kIntroWhite + 1) setBattleCamera(app, b.formation == 2 ? 0x21b : std::max(0, b.formation - 2), 0);
+        if (b.phaseFrames >= kIntroWhite + (b.formation == 2 ? 60 : 30)) {
             b.phase = App::Battle::Command;
             b.phaseFrames = 0;
             battleMenu(app, App::Battle::Top);
@@ -15833,11 +15946,15 @@ void stepBattle(App& app) {
                     app.game.setFlag(0xfaa, true); // btl_main 799: 0x2b5's blows don't land - the script's scene
                     battletalk::open(app);         // (its story battle's, after Battle: flag 4010)
                 }
+                // (btlact_attack 1999's end: each attacker's wanted yaw home (0 / 0.5), turned over 3
+                // frames - a size-3 monster's 7; the other actions don't turn their actors)
                 for (int k = 0; k < 2; ++k)
                     if (App::Battle::Actor* u = b.turn.actors[k] >= 0 ? battleActor(app, b.turn.actors[k]) : nullptr) {
                         u->pos = u->home;
                         u->moveFrom = u->moveTo = 0;
-                        if (u->slot != btlui::kSlotGuard) u->yaw = u->homeYaw;
+                        u->turnHome = false, u->approached = false;
+                        if (u->slot != btlui::kSlotGuard)
+                            turnOver(*u, u->homeYaw, b.turn.kind == cr::kCmdAttack && b.turn.actors[k] >= 2 && monsterSize(app, b.turn.actors[k]) == 3 ? 7.0f : 3.0f);
                     }
             }
         }
@@ -15893,13 +16010,78 @@ void stepBattle(App& app) {
         const auto v60 = app.game.vars.find(60);
         if (v60 == app.game.vars.end() || v60->second != 997) playBgm(app, 1u << 26);
     } else if (b.ending && ++b.endFrames >= 12) b.exit = b.pendingExit, b.ending = false;
+    turnActors(app); // (btl_prc's mdl_put)
     stepBattleCamera(app); // (btl_main's end: btlcamera_prc; btl_prc: the eye, the easing)
     stepQuake(app); // gameapp_prc: UpdateQuake and PutMask after the battle's frame
     stepFlash(app);
 }
 
+// btl_prc (8040-8042): _mceCamera_setPerspectiveFov_op(cam, aspect, fov / 360, 1.0, 3500.0)
+constexpr float kBattleNear = 1.0f, kBattleFar = 3500.0f;
+
+// _btl_shadow (5929-5969, after mdl_put): a 32-triangle black ellipse fan under each fighter, into
+// tex2d slot 0x5e (untextured, depth tested, not written, draw order 0x3de - after the models'): centred
+// on the x / z of the model's node 1102 at its y + 0.1, radii its row's +0x42 (x) and +0x44 (z) turned
+// by its shown yaw (+0xfac). The pair's (FUN_0001628c) at 80% of 255 from their rows (record + 4), the
+// monsters' (FUN_00016008) at 80% of the model's colour alpha (+0xfb7: the death fade), none when
+// +0x42 is 0; none while a model is hidden (+0xfb4 = 0)
+void addBattleShadow(App& app, const App::Battle::Actor& a) {
+    App::Battle& b = app.battle;
+    if (a.fighter < 0 || a.fighter > 4 || a.hidden) return;
+    const cr::Fighter& f = b.rules.f[size_t(a.fighter)];
+    const cr::MonsterDef* row = a.fighter < 2 ? app.battleData.monster(f.character + 5) : f.def; // (1-based: row c + 4)
+    if (!row) return;
+    const int rx = int16_t(row->raw[0x42] | row->raw[0x43] << 8), rz = int16_t(row->raw[0x44] | row->raw[0x45] << 8);
+    if (a.fighter >= 2 && rx == 0) return;
+    App::Battle::Shadow sh;
+    sh.fighter = a.fighter;
+    // (80 x alpha / 100 in whole numbers: the pair's 204, a monster's from its colour's alpha byte)
+    sh.alpha = float(a.fighter < 2 ? 80 * 255 / 100 : 80 * int(std::lround(std::clamp(a.alpha, 0.0f, 1.0f) * 255.0f)) / 100) / 255.0f;
+    const cr::Vec3 c = actorPoint(app, a, 1102); // (btlcamera_getpos2: node 1102)
+    sh.at = {c.x, a.pos.y + 0.1f, c.z};
+    sh.rx = float(rx), sh.rz = float(rz);
+    // the fan's triangles: (centre, point i, point i + 1), i / 31 turns round, the last back to 0
+    const float cy = std::cos(a.yaw), sy = std::sin(a.yaw);
+    auto point = [&](int i) {
+        const float t = float(i == 32 ? 0 : i) / 31.0f * 2.0f * 3.14159265f;
+        const float x = sh.rx * std::sin(t), z = sh.rz * std::cos(t);
+        return cr::Vec3{sh.at.x + x * cy + z * sy, sh.at.y, sh.at.z + z * cy - sy * x};
+    };
+    b.shadowTris.reserve(b.shadowTris.size() + 32 * 9);
+    for (int i = 0; i < 32; ++i) {
+        const cr::Vec3 p0 = point(i), p1 = point(i + 1);
+        b.shadowTris.insert(b.shadowTris.end(), {sh.at.x, sh.at.y, sh.at.z, p0.x, p0.y, p0.z, p1.x, p1.y, p1.z});
+    }
+    b.shadowAlpha.insert(b.shadowAlpha.end(), 32 * 3, uint8_t(std::lround(sh.alpha * 255.0f)));
+    b.shadows.push_back(sh);
+}
+
+void drawBattleShadows(App& app, const cr::Mat4& vp) {
+    App::Battle& b = app.battle;
+    constexpr size_t kVerts = 5 * 32 * 3;
+    if (b.shadowAlpha.empty()) return;
+    if (!app.battleShadows.vao) {
+        cr::Mesh mesh;
+        mesh.positions.assign(kVerts * 3, 0.0f);
+        mesh.uvs.assign(kVerts * 2, 0.0f);
+        mesh.colors.assign(kVerts * 4, 0);
+        for (uint32_t i = 0; i < kVerts; ++i) mesh.indices.push_back(i);
+        app.battleShadows = app.renderer.upload(mesh);
+    }
+    std::vector<float> pos = b.shadowTris, uv(kVerts * 2, 0.0f);
+    pos.resize(kVerts * 3, 0.0f);
+    std::vector<uint8_t> col(kVerts * 4, 0);
+    for (size_t v = 0; v < b.shadowAlpha.size() && v < kVerts; ++v) col[v * 4 + 3] = b.shadowAlpha[v];
+    app.renderer.updatePositions(app.battleShadows, pos, uv, col);
+    cr::Material m; // untextured, double-sided, depth tested, not written (9626: properties & ~0x10)
+    m.culling = 0;
+    m.properties = 8;
+    m.blendSrc = 4, m.blendDst = 5;
+    app.renderer.drawMesh(app.battleShadows, nullptr, vp, m);
+}
+
 // btl_prc: the whole screen through the formation's camera (btl_main: camera formation - 2;
-// perspective 0.0792 turns = 28.5 degrees vertical, 4:3, near 9, far 2000)
+// perspective 0.0792 turns = 28.5 degrees vertical, 4:3)
 void drawBattle(App& app, float dt) {
     App::Battle& b = app.battle;
     auto& r = app.renderer;
@@ -15937,7 +16119,7 @@ void drawBattle(App& app, float dt) {
     if (SDL_getenv("CR_BETWEEN_DEBUG"))
         std::printf("battle frame: valid %d alpha %.2f camera %s (cam %d %d now %d)\n", int(bt.valid), bt.alpha, camBetween ? "between" : "as is",
                     bt.cam[0], bt.cam[1], b.cam);
-    cr::Mat4 proj = cr::Mat4::perspective(b.fov * 3.14159265f / 180.0f, W / H, 9.0f, 2000.0f);
+    cr::Mat4 proj = cr::Mat4::perspective(b.fov * 3.14159265f / 180.0f, W / H, kBattleNear, kBattleFar);
     // btl_prc: the quake shifts the frustum by its offset in the 1024 x 768 screen's pixels
     proj.m[8] -= 2.0f * b.quake.off[0] / W;
     proj.m[9] -= 2.0f * b.quake.off[1] / H;
@@ -15952,10 +16134,16 @@ void drawBattle(App& app, float dt) {
     }
     const cr::Mat4 vp = proj * view;
     b.vp = vp;
-    r.setCamera(9.0f, 2000.0f, app.battle.fov * 3.14159265f / 180.0f);
+    b.proj = proj;
+    r.setCamera(kBattleNear, kBattleFar, app.battle.fov * 3.14159265f / 180.0f);
     if (r.vitaScreen()) r.begin3D(); // (CRView: the Vita's whole screen)
     else r.begin3DRect(0, 0, W, H);
-    drawLoaded(app, b.stage, vp);
+    // _mdl_put (11800): the stage (model 0) drawn at once - but stage 0xf's (d0555bt) goes into the
+    // draw-order queue with the fighters: its meshes of order -300..-100 before them, 100..300 after
+    // (the shadows' 0x3de after those)
+    const bool stageQueued = b.start.stage == 0xf;
+    drawLoaded(app, b.stage, vp, nullptr, 1.0f, -1.0f, stageQueued ? 1 : 0);
+    b.shadows.clear(), b.shadowTris.clear(), b.shadowAlpha.clear();
     for (size_t ai = 0; ai < b.actors.size(); ++ai) {
         // the actor as a frame between steps shows it: moved, turned, faded and its animation
         // played on by then (an animation that looped, changed or jumped is shown as it is)
@@ -15990,7 +16178,10 @@ void drawBattle(App& app, float dt) {
         world.m[8] = sn * a.scale; world.m[10] = c * a.scale;
         world.m[12] = a.pos.x; world.m[13] = a.pos.y; world.m[14] = a.pos.z;
         drawLoaded(app, lm, vp * world, nullptr, a.alpha);
+        addBattleShadow(app, a);
     }
+    if (stageQueued) drawLoaded(app, b.stage, vp, nullptr, 1.0f, -1.0f, 2);
+    drawBattleShadows(app, vp); // (_btl_shadow after mdl_put: draw order 0x3de)
     drawEffects(app, vp, eye, target);
     r.end3D();
     drawSceneEffects(app, true); // the field's weather goes on over the battle
@@ -22605,6 +22796,181 @@ int runSelfTest(App& app) {
                     "0x1fe, gene / item hits) %s, attack spots %s, reactions %s, 0404 gating %s, number slots and places %s; %d problems%s\n",
                     camOk ? "yes" : "NO", spotsOk ? "yes" : "NO", reactOk ? "yes" : "NO", gateOk ? "yes" : "NO", slotsOk ? "yes" : "NO", problems,
                     why.c_str());
+        mapErrors += problems;
+        app.runner.stop();
+        app.game = keepGame;
+    }
+    { // The battle scene as 3.1.0's: the opening (CRView::prc's white, btl_main 0..300, _btl_in_eff),
+      // read_btlcpl's idle phases and names, _btl_shadow's fans, the casts' loops, mdl_put's turning,
+      // btl_prc's projection
+        int problems = 0;
+        std::string why;
+        auto check = [&](bool ok, const char* what) { if (!ok) ++problems, why += std::string(" ") + what; };
+        auto near = [](float x, float y, float e = 0.01f) { return std::fabs(x - y) < e; };
+        const cr::GameState keepGame = app.game;
+        app.game = cr::GameState();
+        cr::giveStartingItems(app.game, app.itemTable);
+        showMap(app, 0, 0, 2);
+        app.pendingEntry = App::Entry::None;
+        app.runner.stop();
+        bool openOk = false, soundOk = false, idleOk = false, shadowOk = false, castOk = false, turnOk = false, projOk = false, nameOk = false;
+        int shadowsDrawn = 0, castFrames = 0, phases = 0;
+        // _btl_in_eff's table
+        soundOk = battleInSound(1) == 0xa8 && battleInSound(9) == 0xa9 && battleInSound(0x2b) == 0xa9 && battleInSound(0xae) == 0xa8 &&
+                  battleInSound(0x105) == 0xaa && battleInSound(0x107) == 0xa8 && battleInSound(0x11b) == 0xaa && battleInSound(0x15f) == 0xa9 &&
+                  battleInSound(0x165) == 0xab && battleInSound(0x170) == 0xaa && battleInSound(0x171) == 0xa8 && battleInSound(0x179) == 0xa9;
+        check(soundOk, "in-eff-table");
+        // a group of two or more monsters (their idles out of step)
+        int group = 1;
+        for (int g = 1; g <= app.battleData.groupCount(); ++g) {
+            const std::array<int, 3> ids = app.battleData.group(g);
+            const cr::MonsterDef *m0 = app.battleData.monster(ids[0]), *m1 = app.battleData.monster(ids[1]);
+            if (m0 && m1 && m0->model >= 0 && m1->model >= 0 && m0->model < cr::kNumBattleModels && m1->model < cr::kNumBattleModels &&
+                app.battleData.formation(ids) != 2) {
+                group = g;
+                break;
+            }
+        }
+        app.soundLog.clear();
+        app.rng.seed(5);
+        startBattle(app, {group, 0, -1, 0}, 0);
+        App::Battle& b = app.battle;
+        if (b.active) {
+            soundOk &= std::find(app.soundLog.begin(), app.soundLog.end(), uint32_t(battleInSound(group))) != app.soundLog.end();
+            check(soundOk, "in-eff-played");
+            // monsters' idles: each frame below slot 0's max frame, not all alike
+            std::set<int> seen;
+            bool inRange = true;
+            for (const App::Battle::Actor& a : b.actors)
+                if (a.fighter >= 2 && a.fighter <= 4) {
+                    seen.insert(int(a.time));
+                    inRange &= a.time >= 0 && a.time < std::max(1.0f, actorDuration(app, a) - 1.0f);
+                    ++phases;
+                }
+            idleOk = phases >= 2 && seen.size() >= 2 && inRange;
+            check(idleOk, "idle-phases");
+            // the white held, 200's fade and still camera, 300's turning one, the commands 30 frames on
+            const int fm = std::max(0, b.formation - 2);
+            bool white = true;
+            for (int f = 1; f < kIntroWhite; ++f) {
+                stepBattle(app);
+                white &= app.fadeFrom == 1 && app.fadeTo == 1 && app.fadeGrey == 1;
+            }
+            check(white, "white-held");
+            stepBattle(app); // 200
+            check(app.fadeFrom == 1 && app.fadeTo == 0 && app.fadeT == 0 && app.fadeFrames == 20 && b.cam == fm && b.camActor == -1, "state-200");
+            stepBattle(app); // 300's first
+            const cr::BattleCamera* c = app.battleData.camera(fm);
+            check(b.cam == fm && b.camActor == 0 && c && (c->raw[14] == 0 || (b.camDur == c->raw[15] && b.camFrame >= 1)), "state-300-turn");
+            if (c) check(fm > 0xd || (c->raw[14] == -20 && c->raw[15] == 15), "formation-camera-turns");
+            int toCommand = kIntroWhite + 1;
+            for (; toCommand < 100 && b.phase == App::Battle::Intro; ++toCommand) stepBattle(app);
+            check(toCommand == kIntroWhite + 30, "intro-30");
+            openOk = why.find("white") == std::string::npos && why.find("state-") == std::string::npos && why.find("intro") == std::string::npos &&
+                     why.find("formation-") == std::string::npos;
+            // the shadows: one fan per fighter, the pair at 204, a monster's fading with it
+            App::Battle::Actor* m0 = battleActor(app, 0);
+            App::Battle::Actor* e2 = battleActor(app, 2);
+            app.lastTicks = 0;
+            drawFrame(app, false);
+            auto shadowOf = [&](int k) -> const App::Battle::Shadow* {
+                for (const App::Battle::Shadow& sh : b.shadows)
+                    if (sh.fighter == k) return &sh;
+                return nullptr;
+            };
+            shadowsDrawn = int(b.shadows.size());
+            const App::Battle::Shadow* s0 = shadowOf(0);
+            check(s0 && near(s0->alpha, 204.0f / 255.0f, 0.001f) && s0->rx > 0 && b.shadowTris.size() == b.shadows.size() * 32 * 9, "shadow-member");
+            if (s0 && m0) check(near(s0->at.y, m0->pos.y + 0.1f), "shadow-height");
+            const cr::MonsterDef* d2 = b.rules.f[2].def;
+            const bool e2Has = d2 && (d2->raw[0x42] | d2->raw[0x43]) != 0;
+            check((shadowOf(2) != nullptr) == e2Has, "shadow-monster-gated");
+            if (e2 && e2Has) {
+                e2->alpha = 0.5f;
+                drawFrame(app, false);
+                const App::Battle::Shadow* s2 = shadowOf(2);
+                check(s2 && near(s2->alpha, float(80 * 128 / 100) / 255.0f, 0.001f), "shadow-monster-fade");
+                e2->hidden = true, e2->alpha = 1;
+                drawFrame(app, false);
+                check(!shadowOf(2), "shadow-hidden");
+                e2->hidden = false;
+            }
+            shadowOk = why.find("shadow") == std::string::npos;
+            { // btl_prc's projection: near 1, far 3500
+                const cr::Mat4 want = cr::Mat4::perspective(b.fov * 3.14159265f / 180.0f, app.renderer.screenW() / cr::Renderer::kLogicalH, 1.0f, 3500.0f);
+                projOk = near(b.proj.m[10], want.m[10], 1e-5f) && near(b.proj.m[14], want.m[14], 1e-4f);
+                check(projOk, "projection");
+            }
+            // mdl_put's turning: 15 degrees a frame toward the wanted yaw; an attacker's wanted yaw, not snapped
+            if (m0) {
+                const float y0 = m0->yaw, quarter = 3.14159265f / 2.0f, deg = 3.14159265f / 180.0f, full = 2 * 3.14159265f;
+                m0->wantYaw = y0 + quarter;
+                turnActors(app);
+                bool ok = near(std::remainder(m0->yaw - y0, full), 15 * deg, 1e-4f);
+                for (int f = 0; f < 5; ++f) turnActors(app);
+                ok &= near(std::remainder(m0->yaw - (y0 + quarter), full), 0, 1e-4f) && m0->turnStep == 15;
+                m0->yaw = m0->wantYaw = y0;
+                faceFighter(app, *m0, 2);
+                ok &= m0->yaw == y0 && (!e2 || near(m0->wantYaw, std::atan2(e2->pos.x - m0->pos.x, e2->pos.z - m0->pos.z)));
+                turnOver(*m0, y0, 3); // (the attack's end: home over 3 frames)
+                for (int f = 0; f < 3; ++f) turnActors(app);
+                ok &= near(std::remainder(m0->yaw - y0, full), 0, 1e-4f);
+                turnOk = ok;
+                check(turnOk, "turning");
+            }
+            // a gene's cast: the slot played to its loop's end, then that loop over and over
+            int gene = -1;
+            for (int id = 1; id < app.battleActions.count() && gene < 0; ++id)
+                if (const cr::BattleActionDef* d = app.battleActions.get(id); d && d->cls == 11 && d->motion != 1) gene = id;
+            if (m0 && gene >= 0) {
+                const LoadedModel& lm = b.models[m0->model];
+                const int slot = realSlot(lm, 11);
+                const cr::BattleAnim ca = app.battleData.anim(m0->modelId, slot);
+                b.turn = cr::BattleTurn();
+                b.turn.kind = cr::kCmdGene, b.turn.action = gene, b.turn.actors[0] = 0;
+                startTurn(app);
+                bool ok = m0->slot == slot && m0->then == -1;
+                if (ca.loopEnd > ca.loopStart) {
+                    ok &= m0->loopFrom == ca.loopStart && m0->loopTo == ca.loopEnd;
+                    float top = 0, prev = m0->time;
+                    bool wrapped = false;
+                    b.phase = App::Battle::Command, b.turnOn = false; // (the actor alone steps on)
+                    for (int f = 0; f < ca.loopEnd + 2 * (ca.loopEnd - ca.loopStart) + 4; ++f) {
+                        stepBattle(app);
+                        top = std::max(top, m0->time);
+                        wrapped |= m0->time < prev;
+                        prev = m0->time;
+                        ++castFrames;
+                    }
+                    ok &= wrapped && top < float(ca.loopEnd) && m0->slot == slot && m0->time >= float(ca.loopStart);
+                } else
+                    castFrames = -1;
+                castOk = ok;
+                check(castOk, "cast-loop");
+            }
+            endBattle(app, false);
+        } else
+            check(false, "no-battle");
+        { // read_btlcpl's name row: model 0xa5 Dante's (0x106) in the second scenario
+            bool ok = true;
+            int found = 0;
+            for (int id : {126, 141})
+                if (const cr::MonsterDef* m = app.battleData.monster(id); m && m->model == 0xa5) {
+                    ++found;
+                    app.game.scenario = 1;
+                    ok &= monsterNameRow(app, *m) == 0x106;
+                    app.game.scenario = 0;
+                    ok &= monsterNameRow(app, *m) == id - 1;
+                }
+            nameOk = ok && found == 2;
+            check(nameOk, "name-0x106");
+        }
+        problems += app.renderer.takeErrors();
+        std::printf("battle scene: the opening (white %d steps, 200's fade and still camera, 300's turning one, 30 to the commands) %s, "
+                    "start sound %s, idle phases (%d monsters) %s, shadows (%d fans, 204 / 80%% of the fade, hidden none) %s, cast loop "
+                    "(%d frames) %s, turning 15/frame %s, near 1 far 3500 %s, m010's name row %s; %d problems%s\n",
+                    kIntroWhite, openOk ? "yes" : "NO", soundOk ? "yes" : "NO", phases, idleOk ? "yes" : "NO", shadowsDrawn, shadowOk ? "yes" : "NO",
+                    castFrames, castOk ? "yes" : "NO", turnOk ? "yes" : "NO", projOk ? "yes" : "NO", nameOk ? "yes" : "NO", problems, why.c_str());
         mapErrors += problems;
         app.runner.stop();
         app.game = keepGame;

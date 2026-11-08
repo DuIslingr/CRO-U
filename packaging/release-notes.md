@@ -78,6 +78,17 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   Omega's Down and Ward status icons use their own sprites; "Critical!" and its kind slide in
   sideways; the Camp's item and equip sounds are the original's, and a No to using an item goes
   back to the list.
+- **The battle scene, as 3.1.0 draws it** (`_btl_prc`, `_btl_shadow`, `_mdl_put` and the casts read in
+  its code): every fighter stands on the original's soft black floor shadow, an ellipse the size its
+  row gives, turning with it and fading with a fallen monster; a battle opens on a few frames of
+  solid white before the fade in, with the original's opening sound (by the battle - the bosses'
+  their own), and the formation's camera then sweeps 20 degrees as it settles; the monsters' idles
+  no longer move in step; a gene or item caster holds its casting loop until the round ends instead
+  of playing it once; fighters turn toward their target at 15 degrees a frame instead of snapping,
+  turn back home as the original times it, and casters no longer turn to their target at all; the
+  3D view's near and far planes are the original's (1 and 3500), so nothing close to the camera is
+  cut away; the enemy m010 takes Dante's name (row 0x106) in the second scenario, as the party's
+  Dante does; stage d0555's glowing layers are sorted in with the fighters as the original draws them.
 - **Puzzle rooms:** the pyrokinesis stages (12..15) pass a lit switch's light on to the switches it
   links to, with the beam and the five-frame chain, as the original - the port took them for the
   first game's candle-block stages, so each switch had to be tapped on its own; a tap counts only
