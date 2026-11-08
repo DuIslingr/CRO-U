@@ -485,8 +485,10 @@ struct App {
     cr::Texture charSelectArt, charSelectArt2; // Select Scenario's sheets: chara1 / chara2 (slot 0x10), chara3 (0x12)
     struct Camp {                          // the Camp menu's page and cursors (__menuu_CampMain*)
         enum Page { Main, Items, Equip, Status, Genes } page = Main;
-        enum Phase { List, Member, Slot, Ask, Entries } phase = List; // Status: Slot = the member's details;
-                                           // Entries: a plate's known-entry list (CampMainPrc 0x1a-0x1d, Genes 4-5)
+        enum Phase { List, Member, Slot, Ask, Entries, Result, Exit } phase = List; // Status: Slot = the member's
+                                           // details; Entries: a plate's known-entry list (CampMainPrc 0x1a-0x1d,
+                                           // Genes 4-5); Result: the board after an item is used (0's 8-10); Exit:
+                                           // the Emergency Exit's frames (0's 7, 0xf-0x12, then CampMain 9, 0xd-0x10)
         int cursor = 0;                    // Main: the plate
         int category = 0;                  // Items: campui::kCategoryKind index
         std::vector<int> list;
@@ -497,12 +499,18 @@ struct App {
         int slot = 0;                      // Equip: weapon, armor, jewel, Human Genes, gene plates 1-3
         int slotTop = 0;                   // the slot list's first row shown (a MuScrList of seven, four rows)
         int count = 1, confirm = 0;        // Items: how many seeds, Yes / No
+        int resultItem = 0, resultCount = 0; // Result: the item used and how many (DAT_000ec6ac / ec6c4)
+        int exitT = 0;                     // Exit: frames since Yes
+        int statusView = 0;                // Status details: 0 the board, 1 the equipment, 2 the skills (CampMainPrc 3's 5 / 8 / 0xb)
+        int viewTop[3] = {0, 0, 0};        // ... each list's first row
+        int notice = 0;                    // a once-only message up over the Camp (MsgUty: 56010 / 56016), 0 none
         std::string message;
         int messageFrames = 0;
         int anim = 0;
         std::array<cr::Texture, 31> plateArt; // gene_m*c.mct, loaded when a board first shows them
         std::array<cr::Texture, 11> statusArt; // _gkpachFaceImage: the records' Status portraits (j039_L01..)
     } camp;
+    float campClock = 0;
     struct CampPointer {
         bool down = false, dragging = false, bar = false;
         float startX = 0, startY = 0, lastY = 0, remainder = 0;
@@ -800,7 +808,7 @@ struct App {
     bool testNoTutorials = false;          // self-test: battles don't stop for their tutorials (EvrStart 2)
     int captureTalk = -1;                  // --talk-portrait n: (new game) the n-th hall conversation showing a portrait
     int captureMenu = 0;                   // --camp (1), --save-screen (2: save, 3: the title's load / new, 7: cleared), --char-select (4), --scenarios (5), --manual (6), --world-select (8), --last-battle (9)
-    std::string captureCampView;           // --camp-view items|use|equip|slots|wear|status
+    std::string captureCampView;           // --camp-view items|use|result|equip|slots|wear|status|status-equip|status-skills
     std::string captureFieldMenu;          // --field-menu closed|open|known|off|map[step]
     std::string captureTouchPad;           // --touch-pad dx,dy[,chest]: the pad held that far from the screen's middle
     int captureSceneFx[3] = {-1, 0, 0};    // --scene-fx set effect [frames]
@@ -5611,8 +5619,9 @@ void drawShopBar(cr::MenuPainter& m, float x, float y, float value, float most, 
 }
 
 // ComUty_StateBoardDraw at (bx, by) for character c; `item` (if > 0) shows what wearing it changes;
-// `record` draws the small record picture over the name (param_11: the Status page leaves it out)
-void drawShopBoard(App& app, float bx, float by, int c, int item, float a, bool record = true) {
+// `record` draws the small record picture over the name (param_11: the Status page leaves it out);
+// a seed `item` (3..6) marks its stat with `seeds` x 10 (param_9: the Camp's board after use)
+void drawShopBoard(App& app, float bx, float by, int c, int item, float a, bool record = true, int seeds = 0) {
     using namespace shopui;
     cr::MenuPainter& m = app.menu;
     const cr::PartyMember& pm = app.game.party[size_t(c)];
@@ -5654,10 +5663,17 @@ void drawShopBoard(App& app, float bx, float by, int c, int item, float a, bool 
         else drawShopNumber(m, values[k], bx + 80, y - 2, 4, 12, a);
     }
     if (item <= 0) return;
-    const cr::ItemParam* p = app.itemTable.item(item);
-    if (!p || cr::equipSlot(p->kind) < 0) return;
+    int delta[6] = {0, 0, 0, 0, 0, 0};
+    if (item >= 3 && item <= 6) // a seed (kind 1, param_8 3..6): its stat by param_9 x 10 - the Camp's board after use
+        delta[cr::kAttack + item - 3] = seeds * cr::kSeedPoints;
+    else {
+        const cr::ItemParam* p = app.itemTable.item(item);
+        if (!p || cr::equipSlot(p->kind) < 0) return;
+        for (int st = 0; st < 6; ++st)
+            delta[st] = cr::memberStat(app.game, c, cr::Stat(st), app.itemTable, item) - cr::memberStat(app.game, c, cr::Stat(st), app.itemTable);
+    }
     for (int st = 0; st < 6; ++st) { // the change: ▲ / ▼ at x + 158, sign and amount from x + 128 for the stats
-        const int d = cr::memberStat(app.game, c, cr::Stat(st), app.itemTable, item) - cr::memberStat(app.game, c, cr::Stat(st), app.itemTable);
+        const int d = delta[st];
         if (d == 0) continue;
         const float y = by + kStatRowY[st];
         m.picture(d > 0 ? 93 : 94, bx + 158, y, a);
@@ -6167,7 +6183,20 @@ std::vector<int> campEquipList(const App& app, int c, int slot) {
     return out;
 }
 
-bool campUsable(int item) { return (item >= 3 && item <= 6) || (item >= 24 && item <= 27); }
+// MuCom_CheckExitItem = use_item(0, 1): the Emergency Exit works while the scenario's exit flag
+// (0x43e, the second scenario 0x632) is clear and the area (gac+0x8a972) isn't 1, 9 or 10
+bool campExitUsable(const App& app) {
+    if (app.game.flag(app.game.scenario == 1 ? 0x632 : 0x43e)) return false;
+    return app.area != 1 && app.area != 9 && app.area != 10;
+}
+// __ChkCampItem (MuScrList_GetChoiceListNo kind 10; table 0xd2b90): the Emergency Exit (1) while it
+// works, the seeds 3..6 and the MP items 24..27. (It passes 419..473 as well - CampMainPrc 2's
+// event path, EvrStart 3 with var 0 = item - 418 - but those are the manual's (make_item_list 9),
+// which none of the Camp's eight categories lists)
+bool campUsable(const App& app, int item) {
+    if (item == 1) return campExitUsable(app);
+    return (item >= 3 && item <= 6) || (item >= 24 && item <= 27);
+}
 
 [[maybe_unused]] void campMessage(App& app, const std::string& text) {
     app.camp.message = text;
@@ -6182,9 +6211,13 @@ float campListX(const App& app) {
     return campui::kRowX + (app.camp.page == App::Camp::Items ? 160 * (1 - campEase(app)) : 64);
 }
 bool campSlotList(const App& app) { return app.camp.page == App::Camp::Equip && app.camp.phase == App::Camp::Slot; }
+bool campStatusList(const App& app) { // the Status details' equipment or skill list
+    return app.camp.page == App::Camp::Status && app.camp.phase == App::Camp::Slot && app.camp.statusView != 0;
+}
 bool campScrollable(const App& app) {
-    return campSlotList(app) || ((app.camp.page == App::Camp::Items || app.camp.page == App::Camp::Equip ||
-                                app.camp.page == App::Camp::Genes) && (app.camp.phase == App::Camp::List || app.camp.phase == App::Camp::Entries));
+    return campSlotList(app) || campStatusList(app) ||
+           ((app.camp.page == App::Camp::Items || app.camp.page == App::Camp::Equip || app.camp.page == App::Camp::Genes) &&
+            (app.camp.phase == App::Camp::List || app.camp.phase == App::Camp::Entries));
 }
 int campScrollCount(const App& app) { return campSlotList(app) ? campui::kEquipSlots : int(app.camp.list.size()); }
 int campScrollTop(const App& app) { return campSlotList(app) ? app.camp.slotTop : app.camp.listTop; }
@@ -6202,6 +6235,7 @@ void campScrollBy(App& app, int rows) {
 int campEntries(const App&) { return campui::kEntries; }
 float campBackY(const App&) { return campui::kPhoneBackY; } // (Omega's iPad: the iPhone layout doubled)
 
+void campNotice(App& app, int id);
 void openCamp(App& app) {
     App::Camp& c = app.camp;
     app.campOpen = true;
@@ -6212,6 +6246,54 @@ void openCamp(App& app) {
     c.plateArt = std::move(art);
     c.statusArt = std::move(portraits);
     c.cursor = 0; // (Omega: none lit until touched - the keys start on Items)
+    // CampMainSet: the first time a gene plate 0x1e1..0x1f8 is in the bag (flag 0x38), message
+    // 56010 comes before the Camp's windows (CampMain 0-2, then 3)
+    if (!app.game.flag(0x38))
+        for (int p = 0x1e1; p < 0x1f9; ++p)
+            if (ownedCount(app, p) > 0) {
+                app.game.setFlag(0x38, true);
+                campNotice(app, 56010);
+                break;
+            }
+}
+
+// The Camp's once-only messages (MsgUty_WinOpen / SetMsg, block 5): the field's message window
+// over the Camp, its windows and the mask down until the message is read
+void campNotice(App& app, int id) {
+    app.camp.notice = id;
+    showMessages(app, {id});
+}
+
+// The Status details' lists (CampMainPrc 3's state 2): the seven the member wears
+// (__MuCampScrListEquipInit(.., 0xc, 0): an empty jewel slot 0x1c6, empty plate slots 0x1c7..),
+// and every known entry of the four plates worn, each once
+std::vector<int> campStatusItems(const App& app, int view) {
+    std::vector<int> out;
+    const cr::PartyMember& pm = app.game.party[size_t(campCharacter(app, app.camp.member))];
+    if (view == 1) {
+        for (int slot = 0; slot < campui::kEquipSlots; ++slot) {
+            const int worn = slot < 3 ? pm.equip[slot] : pm.genes[slot - 3];
+            out.push_back(worn > 0 ? worn : slot == 2 ? 0x1c6 : slot >= 3 ? 0x1c7 + (slot - 3) : 0);
+        }
+    } else if (view == 2) {
+        for (int g : pm.genes) {
+            if (g <= 0) continue;
+            for (int e : cr::plateContents(g))
+                if (e > 0 && ownedCount(app, e) > 0 && std::find(out.begin(), out.end(), e) == out.end()) out.push_back(e);
+        }
+    }
+    return out;
+}
+// -2 (the right arrow, a swipe to the left) board -> equipment -> skills -> board; -3 the other way
+// (0x96 either way; the lists keep where they were)
+void campStatusTurn(App& app, int dir) {
+    App::Camp& c = app.camp;
+    menuSound(app, se::kPage);
+    c.viewTop[c.statusView] = c.listTop;
+    c.statusView = (c.statusView + dir + 3) % 3;
+    c.list = campStatusItems(app, c.statusView);
+    c.listTop = std::clamp(c.viewTop[c.statusView], 0, std::max(0, int(c.list.size()) - campui::kRows));
+    c.listCursor = c.listTop;
 }
 
 void campRefreshList(App& app) {
@@ -6255,16 +6337,17 @@ void campCloseEntries(App& app) {
     campRefreshList(app);
 }
 
-void campOpenPage(App& app, int i) {
+void campOpenPage(App& app, int i, bool sound = true) {
     App::Camp& c = app.camp;
     c.cursor = i;
     if (i < 5 && !campui::kReady[i]) {
         menuSound(app, se::kBuzzer);
         return;
     }
-    menuSound(app, se::kChoose);
+    if (sound) menuSound(app, se::kChoose);
     c.anim = 0;
     c.member = 0;
+    c.statusView = 0;
     c.message.clear();
     switch (i) {
     case 0:
@@ -6286,15 +6369,21 @@ void campOpenPage(App& app, int i) {
     }
 }
 
+void campChoose(App& app);
+// The Camp busy: a once-only message up, the Emergency Exit under way
+bool campBusy(const App& app) { return app.camp.notice != 0 || app.camp.phase == App::Camp::Exit; }
+
 void campBack(App& app) {
     App::Camp& c = app.camp;
+    if (campBusy(app)) return;
+    if (c.page == App::Camp::Items && c.phase == App::Camp::Ask) return; // (no Back during the Yes / No: window 4 is off, CampMainPrc 4 -> 5)
+    if (c.page == App::Camp::Items && c.phase == App::Camp::Result) { campChoose(app); return; } // (any tap: CampMainPrc 9)
     menuSound(app, se::kBack);
     c.message.clear();
     switch (c.page) {
     case App::Camp::Main: app.campOpen = false; menuSound(app, se::kCampClose); return;
     case App::Camp::Items:
-        if (c.phase == App::Camp::Ask) c.phase = App::Camp::Member;
-        else if (c.phase == App::Camp::Member) c.phase = App::Camp::List;
+        if (c.phase == App::Camp::Member) c.phase = App::Camp::List; // (CampMainPrc 4's -1: the list again)
         else { c.page = App::Camp::Main; c.anim = 0; }
         return;
     case App::Camp::Equip:
@@ -6305,7 +6394,11 @@ void campBack(App& app) {
         c.anim = 0;
         return;
     case App::Camp::Status:
-        if (c.phase == App::Camp::Slot) { c.phase = App::Camp::Member; return; } // Slot = the detail
+        if (c.phase == App::Camp::Slot) { // Slot = the details: any view's -1 is the member choice (__MuState_ReturnCharChoice)
+            c.phase = App::Camp::Member;
+            c.statusView = 0;
+            return;
+        }
         c.page = App::Camp::Main;
         c.anim = 0;
         return;
@@ -6317,47 +6410,71 @@ void campBack(App& app) {
     }
 }
 
-// Items: use the chosen item on member c (use_item); false when it does nothing
+// Items, Yes (CampMainPrc 6): the chosen item on member c, del_item for each one used; false (0x95,
+// the Yes / No staying up) when it does nothing: a seed's stat at 9999 already - each seed is
+// use_item'd in turn, so a stat that fills up part way stops it there, the seeds before used -, an
+// MP item on full MP
 bool campUseItem(App& app, int character, int item, int count) {
     cr::PartyMember& pm = app.game.party[size_t(character)];
-    if (ownedCount(app, item) < count || count < 1) return false;
+    if (count < 1) return false;
+    auto used = [&] { if (--app.game.items[item] <= 0) app.game.items.erase(item); };
     if (item >= 3 && item <= 6) {
-        int& points = pm.seeds[item - 3];
         const cr::Stat stat = cr::Stat(cr::kAttack + item - 3);
-        count = std::min(count, cr::seedRoom(pm, stat));
-        if (count <= 0) return false;
-        points += count * cr::kSeedPoints; // use_item: 10 a seed (statBonus caps the bonus at 9999)
-    } else if (item >= 24 && item <= 27) {
+        for (int k = 0; k < count; ++k) {
+            if (ownedCount(app, item) <= 0 || cr::statBonus(pm, stat) >= cr::kMaxStatBonus) return false;
+            pm.seeds[item - 3] += cr::kSeedPoints; // use_item: 10 a seed (statBonus caps the bonus at 9999)
+            used();
+        }
+        return true;
+    }
+    if (item >= 24 && item <= 27) {
         const int most = cr::memberStat(app.game, character, cr::kMp, app.itemTable);
         const int mp = pm.mp < 0 ? most : std::min(pm.mp, most);
-        if (mp >= most) return false;
+        if (mp >= most || ownedCount(app, item) <= 0) return false;
         static const int kGain[3] = {100, 250, 500};
         pm.mp = item == 27 ? most : std::min(most, mp + kGain[item - 24]);
-        count = 1;
-    } else
-        return false;
-    if ((app.game.items[item] -= count) <= 0) app.game.items.erase(item);
-    return true;
+        used();
+        return true;
+    }
+    return false;
 }
 
+// CampMainPrc 5: how many seeds the count goes to - MuCom_GetUsedItemLimitNum ((9999 - the bonus)
+// / 10 + 1, none at 9999) or the bag's, the fewer, kept within 1..999
 int campSeedLimit(const App& app, int character, int item) {
     const cr::PartyMember& pm = app.game.party[size_t(character)];
-    return std::max(0, std::min({ownedCount(app, item), cr::kMaxItemCount, cr::seedRoom(pm, cr::Stat(cr::kAttack + item - 3))}));
+    return std::clamp(std::min(cr::seedRoom(pm, cr::Stat(cr::kAttack + item - 3)), ownedCount(app, item)), 1, 999);
+}
+
+// CampMainSet: on the Ark's maps 0xa9..0xd6 (DAT_000ec5ac) whatever __ChangeEquipItem wears (not
+// Remove) refills the pair's HP and MP (pcparam_hpmp_recovery)
+void campEquipRefill(App& app) {
+    if (app.mapNumber >= 0xa9 && app.mapNumber <= 0xd6) ViewerHost(app).recoverPair();
 }
 
 void campChoose(App& app) {
     App::Camp& c = app.camp;
+    if (campBusy(app)) return;
     const int item = c.list.empty() ? -1 : c.list[size_t(c.listCursor)];
     switch (c.page) {
-    case App::Camp::Main: campOpenPage(app, c.cursor); return;
+    case App::Camp::Main:
+        if (c.cursor == 0 && !app.game.flag(0x39)) { // CampMain 5: the first Items tap (flag 0x39) - the windows
+            menuSound(app, se::kChoose);              // go, message 56016, then the Items page (CampMain 2 -> 6)
+            app.game.setFlag(0x39, true);
+            campNotice(app, 56016);
+            return;
+        }
+        campOpenPage(app, c.cursor);
+        return;
     case App::Camp::Items:
         if (c.phase == App::Camp::List) {
-            if (item <= 0 || !campUsable(item)) { menuSound(app, se::kBuzzer); return; }
+            if (item <= 0 || !campUsable(app, item)) { menuSound(app, se::kBuzzer); return; }
             menuSound(app, se::kChoose);
-            c.phase = App::Camp::Member;
-        } else if (c.phase == App::Camp::Member) {
-            const int ch = campCharacter(app, c.member);
-            if (item >= 3 && item <= 6 && campSeedLimit(app, ch, item) <= 0) { menuSound(app, se::kBuzzer); return; }
+            if (item == 1) { // the Emergency Exit: straight to its Yes / No (CampMainPrc 2 -> 5, text 57014)
+                c.phase = App::Camp::Ask;
+                c.count = 1, c.confirm = 0;
+            } else c.phase = App::Camp::Member;
+        } else if (c.phase == App::Camp::Member) { // (CampMainPrc 4 -> 5: no member refused here)
             menuSound(app, se::kChoose);
             c.phase = App::Camp::Ask;
             c.count = 1;
@@ -6368,8 +6485,21 @@ void campChoose(App& app) {
                 c.phase = App::Camp::List;
                 return;
             }
-            if (campUseItem(app, campCharacter(app, c.member), item, c.count)) menuSound(app, campui::kSoundUse);
-            else menuSound(app, se::kBuzzer); // full already (the original's buzzer, effgo 4)
+            if (item == 1) { // Yes to the Emergency Exit: DAT_000ec698 / ec5ae, del_item, 0x93, state 7 -> 0xf
+                if (!campExitUsable(app) || ownedCount(app, 1) <= 0) { menuSound(app, se::kBuzzer); return; }
+                if (--app.game.items[1] <= 0) app.game.items.erase(1);
+                menuSound(app, se::kChoose);
+                c.phase = App::Camp::Exit;
+                c.exitT = 0;
+                return;
+            }
+            if (!campUseItem(app, campCharacter(app, c.member), item, c.count)) { menuSound(app, se::kBuzzer); return; }
+            menuSound(app, campui::kSoundUse); // 0xa5, then the board (window 0x12) until a tap (CampMainPrc 8, 9)
+            c.resultItem = item;
+            c.resultCount = item >= 3 && item <= 6 ? c.count : 0;
+            c.phase = App::Camp::Result;
+        } else if (c.phase == App::Camp::Result) { // the tap (0x93): the list again (10 -> 1)
+            menuSound(app, se::kChoose);
             c.phase = App::Camp::List;
             campRefreshList(app);
             if (c.list.empty()) campNextCategory(app, 0);
@@ -6399,17 +6529,28 @@ void campChoose(App& app) {
             if (campWears(app, campCharacter(app, c.member), c.plate)) { menuSound(app, se::kBuzzer); return; }
             pm.genes[c.slot - 3] = c.plate;
             menuSound(app, campui::kSoundEquip);
+            campEquipRefill(app);
             c.plate = 0;
             c.phase = App::Camp::Slot;
         } else if (c.phase == App::Camp::List && !c.list.empty()) {
+            // (kind 5: what the member wears already is refused, MuScrList_IsNowEquip -4)
+            if (item != campui::kRemove && pm.equip[c.slot] == item) { menuSound(app, se::kBuzzer); return; }
             pm.equip[c.slot] = item == campui::kRemove ? 0 : item; // (the bag as it was: __ChangeEquipItem)
             menuSound(app, campui::kSoundEquip);
+            if (item != campui::kRemove) campEquipRefill(app);
             c.phase = App::Camp::Slot;
         }
         return;
     }
     case App::Camp::Status:
-        if (c.phase == App::Camp::Member) { menuSound(app, se::kChoose); c.phase = App::Camp::Slot; }
+        if (c.phase == App::Camp::Member) { // CampMainPrc 3's 2: the board first, the lists made
+            menuSound(app, se::kChoose);
+            c.phase = App::Camp::Slot;
+            c.statusView = 0;
+            c.viewTop[0] = c.viewTop[1] = c.viewTop[2] = 0;
+            c.list.clear();
+            c.listCursor = c.listTop = 0;
+        }
         return;
     case App::Camp::Genes: // browsing: a plate opens its known entries (Genes 3 -> 4), a plate with none is refused (kind 0xb)
         if (c.phase == App::Camp::List && !c.list.empty()) {
@@ -6421,15 +6562,73 @@ void campChoose(App& app) {
     }
 }
 
+// The Emergency Exit's frames after Yes: the Items page stays through CampMainPrc 7, 0xf - 0x12 and
+// CampMain 9; CampMain 0xd takes every window off (the mask cleared), 0xe four frames on fades to
+// white over 500 ms with sound 0x128 and bgmgo(0x8000000), and 12 frames later the Camp closes
+// (0xf, 0x10) - CampMainClr: pcparam_hpmp_recovery, then the scenario's Ark (area 9, map 0xa9 -
+// 0xbc once flag 0x4f4 is set -; the second scenario area 10, map 0xc0) at (0, 7.5, 15) facing 0,
+// load flags 0x26: the area's script 0 runs (InitFieldScene, bit 0x20) and no room script (bit 8)
+constexpr int kCampExitHide = 10, kCampExitFade = 16, kCampExitWarp = 30;
+void campExitWarp(App& app) {
+    App::Camp& c = app.camp;
+    app.campOpen = false;
+    app.campPointer = App::CampPointer();
+    c.phase = App::Camp::List;
+    c.page = App::Camp::Main;
+    c.exitT = 0;
+    ViewerHost(app).recoverPair();
+    const bool second = app.game.scenario == 1;
+    cr::WarpRequest w;
+    w.valid = true;
+    w.area = second ? 10 : 9;
+    w.map = second ? 0xc0 : app.game.flag(0x4f4) ? 0xbc : 0xa9;
+    w.pos[0] = 0, w.pos[1] = 7.5f, w.pos[2] = 15;
+    w.angleDegrees = 0;
+    performWarp(app, w, -1); // (its field fades in from the white: SetMask2 keeps the colour)
+    app.lastEvent = "Emergency Exit: back to the Ark";
+}
+
+// A Camp frame (20 a second): a once-only message read, the Emergency Exit's frames
+void stepCamp(App& app) {
+    App::Camp& c = app.camp;
+    if (!app.campOpen) return;
+    if (c.notice && app.dialogue.empty()) { // the message closed: on to what was asked (CampMain 2)
+        const int id = c.notice;
+        c.notice = 0;
+        c.anim = 0;
+        if (id == 56016) campOpenPage(app, 0, false);
+    }
+    if (c.phase != App::Camp::Exit) return;
+    ++c.exitT;
+    if (c.exitT == kCampExitFade) {
+        app.fadeGrey = 1, app.fadeFrom = 0, app.fadeTo = 1, app.fadeFrames = 10, app.fadeT = 0; // SetFade(white, 0, 255, 500 ms)
+        menuSound(app, 0x128);
+        playBgm(app, 0x8000000u);
+    }
+    if (c.exitT >= kCampExitWarp) campExitWarp(app);
+}
+
 void campKey(App& app, SDL_Keycode key) {
     App::Camp& c = app.camp;
     const bool back = key == SDLK_ESCAPE || key == SDLK_BACKSPACE || key == SDLK_AC_BACK || (key == SDLK_K && c.page == App::Camp::Main);
     const bool enter = key == SDLK_RETURN || key == SDLK_KP_ENTER || key == SDLK_SPACE || key == SDLK_E;
     const bool up = key == SDLK_UP || key == SDLK_W, down = key == SDLK_DOWN || key == SDLK_S;
     const bool left = key == SDLK_LEFT || key == SDLK_A, right = key == SDLK_RIGHT || key == SDLK_D;
+    if (c.notice) { if (enter || back) tapDialogue(app); return; } // (the message's page turned, as a tap)
+    if (c.phase == App::Camp::Exit) return;
+    if (c.phase == App::Camp::Result) { if (enter || back) campChoose(app); return; } // (pad_chk_updw_box: the whole screen)
     if (back) { campBack(app); return; }
     if (enter) { campChoose(app); return; }
     const int step = up ? -1 : down ? 1 : 0;
+    if (c.page == App::Camp::Status && c.phase == App::Camp::Slot) { // the details: the arrows turn, the lists scroll
+        if (left || right) campStatusTurn(app, right ? 1 : -1);
+        else if (step && c.statusView != 0) campScrollBy(app, step);
+        return;
+    }
+    if (c.page == App::Camp::Equip && c.phase == App::Camp::Slot && (left || right)) { // CampMainPrc 1's 4 -> 7..10: the
+        if (campMembers(app) > 1) { c.member ^= 1; menuSound(app, se::kPage); } // other member's slots (arrows with two)
+        return;
+    }
     switch (c.page) {
     case App::Camp::Main:
         if (step) { c.cursor = (c.cursor + step + campEntries(app)) % campEntries(app); menuSound(app, se::kCursor); }
@@ -6472,14 +6671,31 @@ void campKey(App& app, SDL_Keycode key) {
         [[fallthrough]];
     case App::Camp::Status:
         if (c.phase == App::Camp::Member && (step || left || right)) { if (campMembers(app) > 1) c.member ^= 1; menuSound(app, se::kCursor); }
-        else if (c.phase == App::Camp::Slot && c.page == App::Camp::Status && (left || right)) { if (campMembers(app) > 1) c.member ^= 1; menuSound(app, se::kPage); }
         return;
     }
+}
+
+// ComUty_BackButtonProc's mode for the Back bar: 2 (the < > arrows: -3 at 0xc0, Back at 0xf8, -2 at
+// 0x175, each 0x22 high at 0x11e) on the Items list (MuScrList's, SetIdInfo(10, .., 2)), the
+// equipment slots with two members (__MuCampScrListEquipInit(.., 4, ..)) and the Status details
+// (DAT_000ec58c = 2); none during the Items Yes / No, its board and the Emergency Exit; else 1
+bool campArrows(const App& app) {
+    const App::Camp& c = app.camp;
+    return (c.page == App::Camp::Items && c.phase == App::Camp::List) ||
+           (c.page == App::Camp::Equip && c.phase == App::Camp::Slot && campMembers(app) > 1) ||
+           (c.page == App::Camp::Status && c.phase == App::Camp::Slot);
+}
+bool campBackShown(const App& app) {
+    const App::Camp& c = app.camp;
+    return !(c.page == App::Camp::Items && (c.phase == App::Camp::Ask || c.phase == App::Camp::Result || c.phase == App::Camp::Exit));
 }
 
 void campClick(App& app, float px, float py) {
     using namespace campui;
     App::Camp& c = app.camp;
+    if (c.notice) { tapDialogue(app); return; }
+    if (c.phase == App::Camp::Exit) return;
+    if (c.phase == App::Camp::Result) { campChoose(app); return; } // (a tap anywhere)
     float lx, ly;
     app.renderer.toLogical(px, py, lx, ly);
     // (widescreen: Back centred, the section's box on the left, the rest on the right - drawCamp)
@@ -6490,30 +6706,48 @@ void campClick(App& app, float px, float py) {
     float mx = rx;
     auto in = [&](float x, float y, float w, float h) { return mx >= x && mx < x + w && my >= y && my < y + h; };
     auto inAt = [&](float at, float x, float y, float w, float h) { return at >= x && at < x + w && my >= y && my < y + h; };
-    if (inAt(cx, kBackX, campBackY(app), 232, 24)) { campBack(app); return; }
+    if (campBackShown(app)) {
+        if (!campArrows(app) && inAt(cx, kBackX, campBackY(app), 256, 34)) { campBack(app); return; }
+        if (campArrows(app)) {
+            if (inAt(cx, 0xc0, campBackY(app), 0x33, 34)) { campKey(app, SDLK_LEFT); return; }
+            if (inAt(cx, 0xf8, campBackY(app), 0x78, 34)) { campBack(app); return; }
+            if (inAt(cx, 0x175, campBackY(app), 0x33, 34)) { campKey(app, SDLK_RIGHT); return; }
+        }
+    }
     switch (c.page) {
     case App::Camp::Main: {
         for (int i = 0; i < campEntries(app); ++i)
             if (in(kPlateX + 360 * (1 - campEase(app)), kPlateY + kPlateStep * float(i), 136, 40)) { c.cursor = i; campChoose(app); return; }
         const short* sp = cr::kMenuPicture[162]; // __menuu_CampMainPut's Scenarios picture (CampMainPrc case 5)
-        if (inAt(lx0, 12 - 240 * (1 - campEase(app)), 236, sp[2], sp[3])) { menuSound(app, se::kChoose); openScenarios(app, 1); }
+        if (inAt(lx0, 12 - 240 * (1 - campEase(app)), 236, sp[2], sp[3])) { menuSound(app, se::kChoose); openScenarios(app, 1); return; }
         const short* cp = cr::kMenuPicture[161]; // ... and Collection (case 6; the second scenario's only)
-        if (app.game.scenario != 0 && inAt(lx0, 84 - 240 * (1 - campEase(app)), 236, cp[2], cp[3])) { menuSound(app, se::kChoose); openCollection(app); }
+        if (app.game.scenario != 0 && inAt(lx0, 84 - 240 * (1 - campEase(app)), 236, cp[2], cp[3])) { menuSound(app, se::kChoose); openCollection(app); return; }
+        // CampMain 5: in the second scenario with flag 0x636 or 0x637 a face board's box (0, 0x30 + 0x58k,
+        // 0x104 x 0x50) makes that member the leader (0x93, Set_Prtyno) unless it leads already
+        if (app.game.scenario == 1 && (app.game.flag(0x636) || app.game.flag(0x637)))
+            for (int k = 0; k < campMembers(app); ++k)
+                if (inAt(lx0, 0, 48 + 88.0f * float(k), 260, 80)) {
+                    const int ch = campCharacter(app, k);
+                    if (app.game.leaders[1] != ch) { menuSound(app, se::kChoose); ViewerHost(app).setLeader(ch); }
+                    return;
+                }
         return;
     }
     default: break;
     }
-    if (c.phase == App::Camp::Member || (c.page == App::Camp::Status && c.phase == App::Camp::Slot)) {
+    if (c.phase == App::Camp::Member) { // __MuCommon_CharChoiceProc: a member's plate (0x148, 0xb0 + 0x38k) or face board (8, 0x30 + 0x58k)
         for (int k = 0; k < campMembers(app); ++k)
-            if (in(kPlateX + 200 * (1 - campEase(app)), kMemberY + kMemberStep * float(k), 136, 40)) { c.member = k; if (c.phase == App::Camp::Member) campChoose(app); return; }
+            if (in(kPlateX + 200 * (1 - campEase(app)), kMemberY + kMemberStep * float(k), 136, 40) ||
+                inAt(lx0, 8, 48 + 88.0f * float(k), 252, 80)) { c.member = k; campChoose(app); return; }
         return;
     }
+    if (c.page == App::Camp::Status && c.phase == App::Camp::Slot && c.statusView == 0) return; // (the board: arrows and swipes)
     if (campScrollable(app) && campScrollCount(app) > kRows) {
         if (in(454, kRowY - 18, 28, 20)) { campScrollBy(app, -1); return; }
         if (in(454, kRowY + kRowH * kRows - 2, 28, 22)) { campScrollBy(app, 1); return; }
     }
-    if (c.phase == App::Camp::Slot) { // the slot list's rows, as the item lists'
-        if (in(campListX(app), kRowY, 256, kRowH * kRows)) {
+    if (c.phase == App::Camp::Slot) { // the slot list's rows, as the item lists' (the Status lists: none chosen)
+        if (c.page == App::Camp::Equip && in(campListX(app), kRowY, 256, kRowH * kRows)) {
             const int slot = c.slotTop + int((my - kRowY) / kRowH);
             if (slot < kEquipSlots) { c.slot = slot; campChoose(app); }
         }
@@ -6585,6 +6819,17 @@ void campPointerUp(App& app, float px, float py) {
     campPointerMove(app, px, py);
     const auto p = app.campPointer;
     app.campPointer = App::CampPointer();
+    if (p.down && p.dragging && app.campOpen && app.camp.page == App::Camp::Status && app.camp.phase == App::Camp::Slot &&
+        p.page == App::Camp::Status && p.phase == App::Camp::Slot && !p.bar) {
+        // The details flicked sideways (ComUty_GetSwipeX over (0, 0x4c, 0x1c8, 0xd0), or the list's
+        // own swipe): more than 30 to the left is -2, to the right -3
+        float mx, my;
+        campPointerPoint(app, px, py, mx, my);
+        const float dx = p.startX - mx;
+        if (std::fabs(dx) > 30 && std::fabs(dx) > std::fabs(my - p.startY) && p.startY >= 0x4c && p.startY < 0x4c + 0xd0)
+            campStatusTurn(app, dx > 0 ? 1 : -1);
+        return;
+    }
     if (p.down && !p.dragging && app.campOpen && app.camp.page == p.page && app.camp.phase == p.phase) {
         if (p.bar) {
             const float track = campui::kRowH * campui::kRows - 40;
@@ -8235,6 +8480,8 @@ void drawMapScreen(App& app) {
 void drawCamp(App& app) {
     using namespace campui;
     App::Camp& c = app.camp;
+    // A once-only message (the field's window) or the Emergency Exit past CampMain 0xd: no windows
+    if (c.notice || (c.phase == App::Camp::Exit && c.exitT >= kCampExitHide)) return;
     cr::Renderer& r = app.renderer;
     cr::MenuPainter& m = app.menu;
     m.begin(r, app.windowTex, &app.font); // (the scene under the menu mask: drawFrame's)
@@ -8250,11 +8497,14 @@ void drawCamp(App& app) {
     const bool main = c.page == App::Camp::Main;
     m.picture(81, 8, 4, 1); // "Camp"
     const float out = main ? 1 - ease : ease; // the main screen's pieces slide away on a page
+    // The face boards (window 2): the main screen's and every member choice's (CampMainPrc 0's 3,
+    // the Equip and Status pages keep them from the main screen); off once a member is chosen
+    const float faceOut = main ? 1 - ease : c.phase == App::Camp::Member ? 0.0f : ease;
     for (int k = 0; k < campMembers(app); ++k) {
         const int ch = campCharacter(app, k);
         int hp, hpMax, mp, mpMax;
         memberHpMp(app, ch, hp, hpMax, mp, mpMax);
-        drawFaceBoard(app, m, -240 * out, 24 + 88.0f * float(k), ch, hp, hpMax, mp, mpMax, 1 - out);
+        drawFaceBoard(app, m, -240 * faceOut, 24 + 88.0f * float(k), ch, hp, hpMax, mp, mpMax, 1 - faceOut);
     }
     right();
     for (int i = 0; i < campEntries(app); ++i) {
@@ -8263,13 +8513,12 @@ void drawCamp(App& app) {
                 main && c.cursor == i, 1 - out, !save && !kReady[i], save ? "Save" : "");
     }
     centre();
-    // ComUty_BackButtonDraw: the arrows (mode 2) where the page turns - the item and equipment lists
-    // (MuScrList's own) and a member's status (__MuCamp_NextProc); plain on the main screen, the gene
-    // list and the member choice
-    const bool arrows = c.page == App::Camp::Items || ((c.page == App::Camp::Equip || c.page == App::Camp::Status) &&
-                                                       c.phase != App::Camp::Member);
-    if (arrows) m.backButton(kBackX, campBackY(app), false, 0, 1);
-    else m.backBar(kBackX, campBackY(app), false, 1);
+    // ComUty_BackButtonDraw: the arrows (mode 2) where the page turns (campArrows), else the plain
+    // bar; none during the Items Yes / No, its board and the Emergency Exit
+    if (campBackShown(app)) {
+        if (campArrows(app)) m.backButton(kBackX, campBackY(app), false, 0, 1);
+        else m.backBar(kBackX, campBackY(app), false, 1);
+    }
     left();
     if (main) { // __menuu_CampMainPut: Scenarios (162; 128 "new" over it while no cell is open) and, in the
         // second scenario only (window 0x15), Collection (161) under the boards
@@ -8277,7 +8526,9 @@ void drawCamp(App& app) {
         if (campScenariosNew(app)) m.picture(128, 12 - 240 * out, 236, 1 - out);
         if (app.game.scenario != 0) m.picture(161, 84 - 240 * out, 236, 1 - out);
     }
-    if (!main) {
+    // The Items page's title and section (windows 9, 0x10 / 0x11) are its list's: off from the member
+    // choice to the list again (CampMainPrc 0's 2 -> 3 .. 10 -> 1)
+    if (!main && !(c.page == App::Camp::Items && c.phase != App::Camp::List)) {
         static const int kTitle[5] = {0, 58070, 58059, 58087, 58077};
         const float pa = ease;
         m.picture(15, 0 - 140 * (1 - ease), 56, pa);
@@ -8286,10 +8537,10 @@ void drawCamp(App& app) {
         if (c.page == App::Camp::Items) section = sysText(app, kCategoryLabel[c.category]);
         else if (c.page == App::Camp::Equip) section = c.phase == App::Camp::Member ? sysText(app, 58060) : sysText(app, 58061 + c.slot);
         else if (c.page == App::Camp::Genes) section = sysText(app, 58079);
-        else section = sysText(app, 58087);
+        else if (c.phase == App::Camp::Slot && c.statusView) section = sysText(app, 58099 + c.statusView); // (windows 0x10 / 0xf: 0x64, 0x65)
         if (!section.empty() && section[0] != '>') section = ">" + section;
-        if (c.page != App::Camp::Equip) { // (Omega's equipment pages have none: __MuEquip_CategoryChoiceInit
-            // registers the title, 58059, and the character's name)
+        if (c.page != App::Camp::Equip && !section.empty()) { // (Omega's equipment pages have none: __MuEquip_CategoryChoiceInit
+            // registers the title, 58059, and the character's name; the Status page's only on its lists)
             m.picture(16, 24 - 140 * (1 - ease), 72, pa);
             m.textCentred(section, 40 - 140 * (1 - ease), 65, false, pa, 15);
         }
@@ -8332,34 +8583,31 @@ void drawCamp(App& app) {
             if (c.list.empty()) m.text("Nothing here.", kRowX + 56, kRowY + 16, false, ease, 15);
             for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
                 const int index = c.listTop + k, it = c.list[size_t(index)];
-                const bool usable = campUsable(it);
+                const bool usable = campUsable(app, it);
                 drawCampRow(app, m, kRowX + 160 * (1 - ease), kRowY + kRowH * float(k), it, ownedCount(app, it),
                             index == c.listCursor, usable || c.category != 0 ? ease : ease * 0.6f);
             }
             drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
             left();
-        } else {
-            drawShopBoard(app, 12, 92, ch, 0, ease);
-            if (c.phase == App::Camp::Member) memberPlates(true);
-            else {
-                const bool seed = item >= 3 && item <= 6;
-                right();
-                if (seed) drawNumCount(m, c.count, campSeedLimit(app, ch, item));
-                m.plate(336, 104, plateIcon(0), 0, c.confirm == 0, 1, false); // Yes
-                m.plate(336, 160, plateIcon(1), 1, c.confirm == 1, 1, false); // No
-                centre();
-                m.picture(12, 0, 220, 1);
-                m.text(sysText(app, seed ? 57077 : 57014, itemName(app, item)), 24, 234, false, 1, 15);
-                left();
-            }
+        } else if (c.phase == App::Camp::Member) memberPlates(true); // (the face boards above; no state board)
+        else if (c.phase == App::Camp::Result) // window 0x12: StateBoardDraw(12, 92, .., item, count, 0, 1)
+            drawShopBoard(app, 12, 92, ch, c.resultItem, 1, true, c.resultCount);
+        else if (c.phase == App::Camp::Ask) { // (the Yes / No alone: windows 10 and 0xb, the count on 10)
+            const bool seed = item >= 3 && item <= 6;
+            right();
+            if (seed) drawNumCount(m, c.count, campSeedLimit(app, ch, item));
+            m.plate(336, 104, plateIcon(0), 0, c.confirm == 0, 1, false); // Yes
+            m.plate(336, 160, plateIcon(1), 1, c.confirm == 1, 1, false); // No
+            centre();
+            m.picture(12, 0, 220, 1);
+            m.text(sysText(app, seed ? 57077 : 57014, itemName(app, item)), 24, 234, false, 1, 15);
+            left();
         }
         break;
     case App::Camp::Equip: {
         const cr::PartyMember& pm = app.game.party[size_t(ch)];
-        if (c.phase == App::Camp::Member) {
-            drawShopBoard(app, 12, 92, ch, 0, ease);
-            memberPlates(true);
-        } else if (c.phase == App::Camp::Slot) {
+        if (c.phase == App::Camp::Member) memberPlates(true); // (the face boards; the state board comes with the slots)
+        else if (c.phase == App::Camp::Slot) {
             drawShopBoard(app, 12, 92, ch, 0, ease);
             right();
             // __MuCampScrListEquipInit: a scrolling list of the seven - weapon, armor, jewel (else item
@@ -8432,11 +8680,10 @@ void drawCamp(App& app) {
         drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
         break;
     case App::Camp::Status:
-        if (c.phase == App::Camp::Member) {
-            drawShopBoard(app, 12, 92, ch, 0, ease);
-            memberPlates(true);
-        } else { // CampMainPut case 3: the record's portrait (texture 8 / 9, group-1 picture 4) at
-            // (0, 64), its state board at (308, 68)
+        if (c.phase == App::Camp::Member) memberPlates(true); // (the face boards; no state board)
+        else { // CampMainPut case 3: the record's portrait (texture 8 / 9, group-1 picture 4) at (0, 64),
+            // then its state board at (308, 68), the seven it wears (window 0xe) or its plates' known
+            // entries (0xd); the face boards and the members' plates are off (CampMainPrc 3's 2)
             static const char* const kFaceImage[11] = {"j039_L01.mct", "j040_L01.mct", "j041_L01.mct", "j001_L01.mct",
                                                        "j002_L01.mct", "j003_L01.mct", "j004_L01.mct", "j005_L01.mct",
                                                        "j006_L01.mct", "j007_L01.mct", "j008_L01.mct"};
@@ -8447,9 +8694,17 @@ void drawCamp(App& app) {
             }
             left();
             outPicture(m, art, 4, 0 - 140 * (1 - ease), 64, ease);
-            memberPlates(false); // (__CampCommon_CharChoice with DAT_000ec590 = -1: the plates stay, none lit)
             right();
-            drawShopBoard(app, 308 + 200 * (1 - ease), 68, ch, 0, ease, false); // (StateBoardDraw param_11 = 0)
+            if (c.statusView == 0) drawShopBoard(app, 308 + 200 * (1 - ease), 68, ch, 0, ease, false); // (StateBoardDraw param_11 = 0)
+            else {
+                for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
+                    const int it = c.list[size_t(c.listTop + k)];
+                    drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, 0, false, ease,
+                                c.statusView == 2 ? (cr::isSkill(it) ? "Skill" : "Gene") : std::string());
+                }
+                if (c.list.empty()) m.text("-", kRowX + 120, kRowY + 16, false, ease, 15);
+                drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
+            }
             left();
         }
         break;
@@ -8468,9 +8723,12 @@ void drawCamp(App& app) {
     left();
     const char* help = main ? "Up/Down  Enter  Esc or K: back"
                        : c.page == App::Camp::Items && c.phase == App::Camp::List ? "Up/Down  Left/Right: category  Enter  Esc: back"
-                       : c.phase == App::Camp::Ask ? "Left/Right: how many  Up/Down  Enter  Esc: back"
-                       : c.page == App::Camp::Status && c.phase == App::Camp::Slot ? "Left/Right: the other member  Esc: back"
-                                                                                   : "Up/Down  Enter  Esc: back";
+                       : c.phase == App::Camp::Ask ? "Left/Right: how many  Up/Down  Enter"
+                       : c.phase == App::Camp::Result ? "Enter: on"
+                       : c.page == App::Camp::Status && c.phase == App::Camp::Slot ? "Left/Right: status, equipment, skills  Esc: back"
+                       : c.page == App::Camp::Equip && c.phase == App::Camp::Slot && campMembers(app) > 1
+                           ? "Up/Down  Left/Right: the other member  Enter  Esc: back"
+                           : "Up/Down  Enter  Esc: back";
     if (keyHints(app)) // (our key hints)
         m.text(help, 20, 372, false, 0.8f, 9);
     centre();
@@ -15817,8 +16075,12 @@ int menuMaskWanted(const App& app, bool& atOnce) {
     if (app.mode != Mode::Maps) return -1;
     if (app.saveScreen.open) { atOnce = true; return 0; }
     if (app.tutoTex.on) return 0;
-    if (app.campOpen) // __menuu_CampMainPrc: the Status page's member's details on the right's (type 2)
+    if (app.campOpen) { // __menuu_CampMainPrc: the Status page's member's details on the right's (type 2); none
+        // while a once-only message is up (set after 56010, cleared for 56016) or the Emergency Exit has
+        // taken the windows off (CampMain 0xd: MuCom_MenuClrMask)
+        if (app.camp.notice || (app.camp.phase == App::Camp::Exit && app.camp.exitT >= kCampExitHide)) return -1;
         return app.camp.page == App::Camp::Status && app.camp.phase == App::Camp::Slot ? 2 : 1;
+    }
     if (app.optionsOpen || app.shop.open || app.worldChoiceOpen || app.lastBattle.open) return 1;
     if (app.battle.active && app.battle.phase == App::Battle::Results && app.battle.result.stage != 3) return 1; // (MbResultPrc 0 .. 10)
     return -1;
@@ -16252,8 +16514,10 @@ void drawFrame(App& app, bool present = true) {
         if (app.collection.open) drawCollection(app);
     }
     if (app.campOpen && !app.optionsOpen && !app.scc.open && !app.collection.open) {
+        for (app.campClock += dt; app.campClock >= 1.0f / kFramesPerSecond && app.campOpen; app.campClock -= 1.0f / kFramesPerSecond)
+            stepCamp(app);
         ++app.camp.anim;
-        drawCamp(app);
+        if (app.campOpen) drawCamp(app);
     }
     if (app.mapScreen.open) {
         for (app.mapScreen.clock += dt; app.mapScreen.clock >= 1.0f / kFramesPerSecond; app.mapScreen.clock -= 1.0f / kFramesPerSecond)
@@ -19750,42 +20014,94 @@ int runSelfTest(App& app) {
         bootTitle(app);
         app.runner.stop();
     }
-    { // The Camp menu's pages: seeds and an MP item used on a member, a weapon worn, drawn without errors
+    { // The Camp menu's pages (CampMainPrc, read in the 3.1.0 code): the first Items tap shows 56016
+      // once; seeds and an MP item used on a member, each followed by the board until a tap (a
+      // seed's stat marked); no Back during the Yes / No, a full MP or a stat at 9999 refused there
+      // with it staying up; a weapon worn (on the Ark's maps refilling the pair), the worn one
+      // refused, the slot list's arrows taking the other member; the Status page's board ->
+      // equipment -> skills, drawn without errors
         int problems = 0;
+        auto chk = [&](bool bad, const char* what) { if (bad) { ++problems; std::printf("camp: not as expected: %s\n", what); } };
         app.game = cr::GameState();
         app.playerChar = 0;
-        app.game.items = {{3, 3}, {24, 1}, {21, 1}, {202, 1}};
+        app.game.items = {{3, 3}, {24, 2}, {21, 1}, {202, 1}, {4, 2}};
         app.game.party[0].mp = 10;
+        app.dialogue.clear();
         openCamp(app);
         auto key = [&](SDL_Keycode k) { campKey(app, k); };
+        auto lastSound = [&] { return app.menuSoundLog.empty() ? 0u : app.menuSoundLog.back(); };
         App::Camp& c = app.camp;
+        chk(c.notice != 0, "a message at open without a plate 481..");
         const int atk0 = cr::maxStat(app.game.party[0], 0, cr::kAttack, app.itemTable);
-        c.cursor = 0, key(SDLK_RETURN);                       // Items: Power Seed first
-        problems += c.page != App::Camp::Items || c.list.empty() || c.list[0] != 3;
+        c.cursor = 0, key(SDLK_RETURN);                       // Items, the first time: 56016 (flag 0x39) first
+        chk(c.notice != 56016 || !app.game.flag(0x39) || c.page != App::Camp::Main || app.dialogue.empty(), "56016 before Items");
+        for (int k = 0; k < 40 && !app.dialogue.empty(); ++k) key(SDLK_RETURN); // (read: taps)
+        stepCamp(app);
+        chk(c.notice != 0 || c.page != App::Camp::Items || c.list.empty() || c.list[0] != 3, "Items after 56016: Power Seed first");
+        key(SDLK_ESCAPE), c.cursor = 0, key(SDLK_RETURN);     // (once only)
+        chk(c.notice != 0 || c.page != App::Camp::Items, "56016 once only");
         key(SDLK_RETURN), key(SDLK_RETURN);                   // on Escher: how many?
+        chk(c.phase != App::Camp::Ask, "the Yes / No");
+        key(SDLK_ESCAPE);                                     // (no Back here)
+        chk(c.phase != App::Camp::Ask, "Esc during the Yes / No");
         key(SDLK_RIGHT), key(SDLK_RIGHT), key(SDLK_RIGHT);    // 3 (the bag's all)
-        problems += c.count != 3;
-        key(SDLK_RETURN);                                     // Yes
+        chk(c.count != 3, "count 3");
+        key(SDLK_RETURN);                                     // Yes: 0xa5, then the board
         const int atk1 = cr::maxStat(app.game.party[0], 0, cr::kAttack, app.itemTable);
-        problems += atk1 != atk0 + 30 || app.game.party[0].seeds[0] != 30 || ownedCount(app, 3) != 0; // 10 a seed
-        const auto plum = std::find(c.list.begin(), c.list.end(), 24); // Plum: MP + 100
-        problems += plum == c.list.end();
-        if (plum != c.list.end()) c.listCursor = int(plum - c.list.begin());
-        key(SDLK_RETURN), key(SDLK_RETURN), key(SDLK_RETURN);
-        problems += app.game.party[0].mp != std::min(110, cr::memberStat(app.game, 0, cr::kMp, app.itemTable)) ||
-                    ownedCount(app, 24) != 0; // 10 + 100, capped at the most
-        const auto choc = std::find(c.list.begin(), c.list.end(), 21); // HP items do nothing on the field
-        if (choc != c.list.end()) c.listCursor = int(choc - c.list.begin()), key(SDLK_RETURN);
-        problems += c.phase != App::Camp::List || ownedCount(app, 21) != 1;
+        chk(atk1 != atk0 + 30 || app.game.party[0].seeds[0] != 30 || ownedCount(app, 3) != 0, "3 seeds: +30"); // 10 a seed
+        chk(c.phase != App::Camp::Result || c.resultItem != 3 || c.resultCount != 3 || lastSound() != campui::kSoundUse, "the board after the seeds");
         int frames = 0;
+        for (int f = 0; f < 2; ++f) { app.lastTicks = 0; drawFrame(app, false); ++frames; }
+        key(SDLK_RETURN);                                     // the tap (0x93): the list again
+        chk(c.phase != App::Camp::List || lastSound() != se::kChoose, "the list after the board");
+        auto pick = [&](int it) {
+            const auto at = std::find(c.list.begin(), c.list.end(), it);
+            if (at != c.list.end()) c.listCursor = int(at - c.list.begin());
+            return at != c.list.end();
+        };
+        chk(!pick(24), "Plum listed");                        // Plum: MP + 100
+        key(SDLK_RETURN), key(SDLK_RETURN), key(SDLK_RETURN);
+        chk(app.game.party[0].mp != std::min(110, cr::memberStat(app.game, 0, cr::kMp, app.itemTable)) ||
+                ownedCount(app, 24) != 1 || c.phase != App::Camp::Result, "Plum: MP 10 + 100, capped at the most"); // 10 + 100, capped at the most
+        key(SDLK_RETURN);
+        const int mpAfterPlum = app.game.party[0].mp;
+        app.game.party[0].mp = -1;                            // full: refused at Yes (0x95), the Yes / No staying
+        chk(!pick(24), "Plum listed again");
+        key(SDLK_RETURN), key(SDLK_RETURN), key(SDLK_RETURN);
+        chk(c.phase != App::Camp::Ask || ownedCount(app, 24) != 1 || lastSound() != se::kBuzzer, "Plum refused on full MP");
+        key(SDLK_DOWN), key(SDLK_RETURN);                     // No: the list
+        chk(c.phase != App::Camp::List, "No: the list");
+        app.game.party[0].seeds[1] = cr::kMaxStatBonus;       // Defense at 9999: the count still 1, refused at Yes
+        chk(!pick(4), "the Defense seed listed");
+        key(SDLK_RETURN), key(SDLK_RETURN);
+        chk(c.phase != App::Camp::Ask || campSeedLimit(app, 0, 4) != 1, "a full stat's count");
+        key(SDLK_RETURN);
+        chk(c.phase != App::Camp::Ask || ownedCount(app, 4) != 2 || lastSound() != se::kBuzzer, "a seed refused at 9999");
+        key(SDLK_DOWN), key(SDLK_RETURN);
+        app.game.party[0].seeds[1] = 0;
+        chk(!pick(21), "Chocolate listed");                   // HP items do nothing on the field
+        key(SDLK_RETURN);
+        chk(c.phase != App::Camp::List || ownedCount(app, 21) != 1, "an HP item refused");
         for (int f = 0; f < 3; ++f) { app.lastTicks = 0; drawFrame(app, false); ++frames; }
         key(SDLK_ESCAPE);
+        const int keepMap = app.mapNumber;
+        app.mapNumber = 0xa9;                                 // the Ark: a change refills the pair
+        app.game.party[0].mp = 5, app.game.party[size_t(campCharacter(app, 1))].mp = 5;
         c.cursor = 1, key(SDLK_RETURN), key(SDLK_RETURN);   // Equip: Escher's weapon
         key(SDLK_RETURN);
-        problems += c.phase != App::Camp::List || c.list.empty() || c.list[0] != 202;
+        chk(c.phase != App::Camp::List || c.list.empty() || c.list[0] != 202, "Escher's weapons");
         for (int f = 0; f < 3; ++f) { app.lastTicks = 0; drawFrame(app, false); ++frames; }
         key(SDLK_RETURN);                                     // wear the Bastard Sword (the bag as it was)
-        problems += app.game.party[0].equip[0] != 202 || ownedCount(app, 201) != 0 || ownedCount(app, 202) != 1;
+        chk(app.game.party[0].equip[0] != 202 || ownedCount(app, 201) != 0 || ownedCount(app, 202) != 1, "the Bastard Sword worn");
+        chk(app.game.party[0].mp != -1 || app.game.party[size_t(campCharacter(app, 1))].mp != -1, "refilled on the Ark");
+        app.mapNumber = keepMap;
+        key(SDLK_RETURN), key(SDLK_RETURN);                   // the weapon again: the one worn refused (kind 5)
+        chk(c.phase != App::Camp::List || app.game.party[0].equip[0] != 202 || lastSound() != se::kBuzzer, "the worn one refused");
+        key(SDLK_ESCAPE);
+        key(SDLK_RIGHT);                                      // the slot list's arrow: Musiea's slots
+        chk(c.phase != App::Camp::Slot || c.member != 1 || lastSound() != se::kPage, "the slots' arrow");
+        key(SDLK_LEFT);
+        chk(c.member != 0, "the slots' arrow back");
         app.shop.selling = true;                              // worn: none of it to sell
         problems += shopMaxCount(app, 202) != 0;
         app.shop.selling = false;
@@ -19798,15 +20114,36 @@ int runSelfTest(App& app) {
             cr::putWornInBag(old, app.itemTable);
             problems += old.items[201] != 1 || old.otherBag[229] != 1 || old.items.count(229) || !old.wornInBag;
         }
-        key(SDLK_ESCAPE), key(SDLK_ESCAPE), key(SDLK_ESCAPE);
-        c.cursor = 3, key(SDLK_RETURN), key(SDLK_RETURN), key(SDLK_RIGHT); // Status: Musiea's
-        problems += c.page != App::Camp::Status || c.member != 1;
+        key(SDLK_ESCAPE), key(SDLK_ESCAPE);                   // the members, the Camp's front
+        chk(c.page != App::Camp::Main, "back to the front");
+        c.cursor = 3, key(SDLK_RETURN), key(SDLK_RETURN);    // Status: Escher's board
+        chk(c.page != App::Camp::Status || c.phase != App::Camp::Slot || c.statusView != 0 || c.member != 0, "Escher's board");
+        key(SDLK_RIGHT);                                      // -2: the equipment (58100), the seven worn
+        chk(c.statusView != 1 || c.list.size() != 7 || c.list[0] != 202 || c.list[2] != 0x1c6 || lastSound() != se::kPage, "the equipment list");
+        for (int f = 0; f < 2; ++f) { app.lastTicks = 0; drawFrame(app, false); ++frames; }
+        key(SDLK_RIGHT);                                      // the skills: the worn plates' known entries
+        std::vector<int> known;
+        for (int g : app.game.party[0].genes)
+            if (g > 0)
+                for (int e : cr::plateContents(g))
+                    if (e > 0 && ownedCount(app, e) > 0 && std::find(known.begin(), known.end(), e) == known.end()) known.push_back(e);
+        chk(c.statusView != 2 || c.list != known, "the skill list");
+        for (int f = 0; f < 2; ++f) { app.lastTicks = 0; drawFrame(app, false); ++frames; }
+        key(SDLK_RIGHT);                                      // ... and the board again
+        chk(c.statusView != 0, "the board after the skills");
+        key(SDLK_LEFT);                                       // -3 the other way: the skills
+        chk(c.statusView != 2, "-3 from the board");
+        key(SDLK_ESCAPE);                                     // Back: the member choice
+        chk(c.phase != App::Camp::Member || c.statusView != 0, "Back to the member choice");
+        key(SDLK_RIGHT), key(SDLK_RETURN);                    // Musiea's
+        chk(c.page != App::Camp::Status || c.member != 1 || c.phase != App::Camp::Slot, "Musiea's board");
         for (int f = 0; f < 3; ++f) { app.lastTicks = 0; drawFrame(app, false); ++frames; }
         const int errs = app.renderer.takeErrors();
         key(SDLK_ESCAPE), key(SDLK_ESCAPE), key(SDLK_ESCAPE);
         problems += app.campOpen + errs;
-        std::printf("camp: 3 seeds +%d attack, Plum to MP %d, Bastard Sword worn, status page; %d frames, %d render API "
-                    "errors; %d problems\n", atk1 - atk0, app.game.party[0].mp, frames, errs, problems);
+        std::printf("camp: 56016 first, 3 seeds +%d attack, Plum to MP %d, full MP / 9999 refused, Bastard Sword worn (refilled "
+                    "on the Ark), the slots' arrows, status board / \"%s\" / \"%s\"; %d frames, %d render API errors; %d problems\n",
+                    atk1 - atk0, mpAfterPlum, sysText(app, 58100).c_str(), sysText(app, 58101).c_str(), frames, errs, problems);
         mapErrors += problems;
         glErrors += errs;
         app.game = cr::GameState();
@@ -19840,9 +20177,21 @@ int runSelfTest(App& app) {
         for (auto& pm : app.game.party) pm.genes[0] = pm.genes[1] = pm.genes[2] = pm.genes[3] = 0;
         app.game.party[0].genes[0] = 474;                      // Escher's Human Genes (scenario 0: 474..476 are refused)
         app.game.party[1].genes[1] = 481;                      // Musiea wears 481: listed for Escher all the same
+        app.dialogue.clear();
         openCamp(app);
         auto key = [&](SDL_Keycode k) { campKey(app, k); };
         App::Camp& c = app.camp;
+        // CampMainSet: a plate 0x1e1.. in the bag the first time - 56010 (flag 0x38) before the Camp
+        chk(c.notice != 56010 || !app.game.flag(0x38) || app.dialogue.empty(), "56010 at the first open with a plate");
+        app.lastTicks = 0;
+        drawFrame(app, false);
+        bool maskAtOnce = false;
+        chk(menuMaskWanted(app, maskAtOnce) != -1, "no mask under 56010");
+        for (int k = 0; k < 40 && !app.dialogue.empty(); ++k) key(SDLK_RETURN);
+        stepCamp(app);
+        chk(c.notice != 0 || c.page != App::Camp::Main, "the Camp after 56010");
+        openCamp(app);
+        chk(c.notice != 0, "56010 once only");
         c.cursor = 1, key(SDLK_RETURN), key(SDLK_RETURN);     // Equip, Escher: the slot list
         chk(c.phase != App::Camp::Slot, "c.phase != App::Camp::Slot");
         c.slot = 3, key(SDLK_RETURN);                         // Human Genes 474 in the first scenario: refused
@@ -19909,6 +20258,106 @@ int runSelfTest(App& app) {
         mapErrors += problems;
         glErrors += errs;
         app.game = cr::GameState();
+    }
+    { // The Emergency Exit (item 1, read in the 3.1.0 code): __ChkCampItem passes it while
+      // MuCom_CheckExitItem does - the scenario's flag (0x43e / 0x632) clear, the area not 1, 9 or 10 -,
+      // else 0x95. Chosen it goes straight to its Yes / No; Yes (0x93, del_item) leaves the windows up
+      // through CampMainPrc 7, 0xf-0x12 and CampMain 9, takes them off (0xd), fades to white with
+      // 0x128 (0xe) and closes (0x10): CampMainClr refills the pair and warps to the scenario's Ark
+      // (area 9 map 0xa9, 0xbc after flag 0x4f4; area 10 map 0xc0) at (0, 7.5, 15), whose area
+      // script runs (load flags 0x26)
+        int problems = 0;
+        auto chk = [&](bool bad, const char* what) { if (bad) { ++problems; std::printf("camp exit: not as expected: %s\n", what); } };
+        auto lastSound = [&] { return app.menuSoundLog.empty() ? 0u : app.menuSoundLog.back(); };
+        const cr::GameState keepGame = app.game;
+        const int keepChar = app.playerChar, keepIndex = int(app.mapIndex), keepMap = app.mapNumber, keepArea = app.area;
+        app.game = cr::GameState();
+        cr::giveStartingItems(app.game, app.itemTable);
+        app.game.setFlag(0x38, true), app.game.setFlag(0x39, true);
+        app.game.items[1] = 2;
+        app.playerChar = 0;
+        showMap(app, 0, 0, 2);
+        app.pendingEntry = App::Entry::None;
+        app.runner.stop();
+        app.dialogue.clear();
+        const int fromArea = app.area;
+        chk(!campUsable(app, 1), "usable in area 2");
+        app.game.setFlag(0x43e, true);
+        chk(campUsable(app, 1), "refused with flag 0x43e");
+        app.game.setFlag(0x43e, false);
+        for (int a : {1, 9, 10}) {
+            const int keep = app.area;
+            app.area = a;
+            chk(campUsable(app, 1), "refused in areas 1, 9, 10");
+            app.area = keep;
+        }
+        app.game.scenario = 1;
+        app.game.setFlag(0x632, true);
+        chk(campUsable(app, 1), "refused with flag 0x632 in the second scenario");
+        app.game.setFlag(0x632, false);
+        app.game.scenario = 0;
+        openCamp(app);
+        App::Camp& c = app.camp;
+        auto key = [&](SDL_Keycode k) { campKey(app, k); };
+        c.cursor = 0, key(SDLK_RETURN);
+        chk(c.page != App::Camp::Items || c.list.empty() || c.list[0] != 1, "the Exit first in Standard");
+        app.game.setFlag(0x43e, true);
+        key(SDLK_RETURN);
+        chk(c.phase != App::Camp::List || lastSound() != se::kBuzzer, "the Exit refused (0x95) with flag 0x43e");
+        app.game.setFlag(0x43e, false);
+        key(SDLK_RETURN);                                      // straight to its Yes / No
+        chk(c.phase != App::Camp::Ask, "the Exit's Yes / No");
+        int frames = 0;
+        app.lastTicks = 0, drawFrame(app, false), ++frames;
+        key(SDLK_DOWN), key(SDLK_RETURN);                      // No: kept
+        chk(c.phase != App::Camp::List || ownedCount(app, 1) != 2, "No to the Exit");
+        app.game.party[0].hp = app.game.party[0].mp = 1;
+        key(SDLK_RETURN), key(SDLK_RETURN);                    // Yes
+        chk(c.phase != App::Camp::Exit || ownedCount(app, 1) != 1 || lastSound() != se::kChoose, "Yes to the Exit");
+        key(SDLK_ESCAPE);
+        chk(!app.campOpen || c.phase != App::Camp::Exit, "Esc during the Exit");
+        bool shown = false, hidden = false, white = false;
+        int t = 0;
+        for (; t < 60 && app.campOpen; ++t) {
+            stepCamp(app);
+            bool atOnce = false;
+            if (app.campOpen && c.exitT == kCampExitHide - 1) shown = menuMaskWanted(app, atOnce) == 1, app.lastTicks = 0, drawFrame(app, false), ++frames;
+            if (app.campOpen && c.exitT == kCampExitHide) hidden = menuMaskWanted(app, atOnce) == -1, app.lastTicks = 0, drawFrame(app, false), ++frames;
+            if (app.campOpen && c.exitT == kCampExitFade) white = app.fadeGrey == 1 && app.fadeFrom == 0 && app.fadeTo == 1 && lastSound() == 0x128;
+        }
+        const bool ark = !app.campOpen && app.area == 9 && app.mapNumber == 0xa9 && fromArea != 9 && t == kCampExitWarp;
+        chk(!shown || !hidden || !white, "the windows, then none, then white with 0x128");
+        chk(!ark, "the Ark (area 9, map 0xa9) after 30 frames");
+        chk(app.game.party[0].hp != -1 || app.game.party[0].mp != -1, "the pair refilled");
+        chk(app.pendingEntry != App::Entry::Area, "the area's script next");
+        chk(app.fadeGrey != 1 || app.fadeFrom != 1 || app.fadeTo != 0, "the field from the white");
+        const int arkArea = app.area, arkMap = app.mapNumber;
+        auto exitTo = [&](int scenario, bool flag4f4) { // the other two Arks (CampMainClr's table)
+            app.game.scenario = scenario;
+            app.game.setFlag(0x4f4, flag4f4);
+            app.campOpen = true, c.phase = App::Camp::Exit;
+            campExitWarp(app);
+            return std::make_pair(app.area, app.mapNumber);
+        };
+        const auto later = exitTo(0, true), second = exitTo(1, false);
+        chk(later != std::make_pair(9, 0xbc) || second != std::make_pair(10, 0xc0), "the Ark after flag 0x4f4, the second scenario's");
+        const int errs = app.renderer.takeErrors();
+        std::printf("camp exit: refused by flag / area, Yes -> area %d map %d (flag 0x4f4: %d %d, second scenario: %d %d) after %d "
+                    "frames; %d drawn, %d render API errors; %d problems\n", arkArea, arkMap, later.first, later.second,
+                    second.first, second.second, t, frames, errs, problems + errs);
+        mapErrors += problems + errs;
+        glErrors += errs;
+        app.campOpen = false;
+        app.runner.stop();
+        app.pendingEntry = App::Entry::None;
+        app.fadeGrey = app.fadeFrom = app.fadeTo = 0, app.fadeT = app.fadeFrames;
+        app.game = keepGame;
+        app.playerChar = keepChar;
+        if (keepMap >= 0) { // (the field the tests before left)
+            showMap(app, keepIndex, keepMap, keepArea);
+            app.pendingEntry = App::Entry::None;
+            app.runner.stop();
+        }
     }
     { // The field menu (menuf_mainPrc): the corner button slides the bar out and back in 4 frames;
       // skill 170 known adds the encounter switch (per pair, refused under flag 4076), and while
@@ -21062,12 +21511,46 @@ int runSelfTest(App& app) {
         app.fieldMenu = App::FieldMenu();
         openCamp(app);
         app.camp.anim = 100;
+        app.game.setFlag(0x39, true); // (Items' once-only message seen)
         tap(wideRight(app), campui::kPlateX + 60, campui::kPlateY + 20, px, py); // Items
         campClick(app, px, py);
-        const bool camp = app.camp.page == App::Camp::Items;
+        bool camp = app.camp.page == App::Camp::Items;
         app.lastTicks = 0;
         drawFrame(app, false);
         int errs = r.takeErrors();
+        { // the Camp's other boxes: a face board in a member choice (the left's), the Back bar's
+          // arrows (centred: 0xc0 / 0x175), the leader's face board in the second scenario
+            App::Camp& c = app.camp;
+            campOpenPage(app, 1); // Equip: the second member's face board (8, 0x30 + 0x58, 0xfc x 0x50)
+            c.anim = 100;
+            tap(wideLeft(app), 8 + 120, 48 + 88 + 40, px, py);
+            campClick(app, px, py);
+            const bool face = c.phase == App::Camp::Slot && c.member == 1;
+            tap(ux, 0x175 + 20, 286 + 17, px, py); // -2: the other member's slots
+            campClick(app, px, py);
+            const bool swapArrow = c.phase == App::Camp::Slot && c.member == 0;
+            campOpenPage(app, 3), c.anim = 100;
+            campKey(app, SDLK_RETURN);
+            tap(ux, 0xc0 + 20, 286 + 17, px, py); // -3 on the Status board: the skills
+            campClick(app, px, py);
+            const bool statusArrow = c.page == App::Camp::Status && c.phase == App::Camp::Slot && c.statusView == 2;
+            openCamp(app), c.anim = 100; // the main screen, the second scenario after flag 0x636
+            const cr::GameState keepLeader = app.game;
+            const int keepChar = app.playerChar;
+            app.game.scenario = 1;
+            app.game.setFlag(0x636, true);
+            const int second = campCharacter(app, 1);
+            app.game.leaders[1] = campCharacter(app, 0);
+            tap(wideLeft(app), 120, 48 + 88 + 40, px, py);
+            campClick(app, px, py);
+            const bool leader = campMembers(app) < 2 || (app.game.leaders[1] == second && app.playerChar == second);
+            app.game = keepLeader;
+            if (app.playerChar != keepChar) app.playerChar = keepChar, placePlayer(app);
+            camp = camp && face && swapArrow && statusArrow && leader;
+            if (!camp)
+                std::printf("widescreen: Camp taps: a face board %s, the slots' arrow %s, the Status arrow %s, the leader %s\n",
+                            face ? "yes" : "NO", swapArrow ? "yes" : "NO", statusArrow ? "yes" : "NO", leader ? "yes" : "NO");
+        }
         app.campOpen = false;
         openSaveScreen(app, false);
         tap(wideRight(app), 328 + 60, 136 + 48.0f * float(savePlates(app).empty() ? 0 : savePlates(app)[0]) + 20, px, py);
@@ -21177,6 +21660,7 @@ int runSelfTest(App& app) {
             padButton(app, SDL_GAMEPAD_BUTTON_DPAD_UP);
             const bool moved = app.camp.cursor != c0;
             app.camp.cursor = 0;
+            app.game.setFlag(0x39, true); // (Items' once-only message seen)
             padButton(app, SDL_GAMEPAD_BUTTON_EAST); // ○: Items
             const bool confirmed = app.camp.page == App::Camp::Items;
             padButton(app, SDL_GAMEPAD_BUTTON_SOUTH); // ×: back to the plates
@@ -22921,9 +23405,12 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
     if (app.captureMenu == 1) {
         openCamp(app);
         app.camp.anim = 100;
-        // --camp-view items|use|equip|slots|wear|status: a page, with a bag to show
+        // --camp-view items|use|result|equip|slots|wear|status|status-equip|status-skills: a page, with a bag to show
         const std::string& v = app.captureCampView;
         if (!v.empty()) {
+            app.game.setFlag(0x38, true), app.game.setFlag(0x39, true); // (the once-only messages seen)
+            app.camp.notice = 0;
+            app.dialogue.clear();
             app.game.items[3] = 4, app.game.items[24] = 2, app.game.items[21] = 3, app.game.items[27] = 1;
             app.game.items[202] = 1, app.game.items[216] = 1, app.game.items[427] = 1;
             app.game.party[size_t(campCharacter(app, 0))].mp = 10;
@@ -22933,7 +23420,10 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             if (v == "equip" || v == "slots" || v == "wear") app.camp.cursor = 1, key(SDLK_RETURN);
             if (v == "slots" || v == "wear") key(SDLK_RETURN);
             if (v == "wear") key(SDLK_RETURN);
-            if (v == "status") app.camp.cursor = 3, key(SDLK_RETURN), key(SDLK_RETURN);
+            if (v == "result") app.camp.cursor = 0, key(SDLK_RETURN), key(SDLK_RETURN), key(SDLK_RETURN), key(SDLK_RIGHT), key(SDLK_RETURN);
+            if (v == "status" || v == "status-equip" || v == "status-skills") app.camp.cursor = 3, key(SDLK_RETURN), key(SDLK_RETURN);
+            if (v == "status-equip") key(SDLK_RIGHT);
+            if (v == "status-skills") key(SDLK_LEFT);
             if (v == "genes" || v == "plate") app.game.items[481] = 1, app.game.items[108] = 1, app.game.items[94] = 1;
             if (v == "genes") app.camp.cursor = 2, key(SDLK_RETURN), key(SDLK_DOWN), key(SDLK_DOWN);
             if (v == "plate") {
@@ -23792,7 +24282,7 @@ void padButton(App& app, int b) {
     case SDL_GAMEPAD_BUTTON_DPAD_LEFT: if (padMenus(app)) padKey(app, SDLK_LEFT); return;
     case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: if (padMenus(app)) padKey(app, SDLK_RIGHT); return;
     case SDL_GAMEPAD_BUTTON_NORTH: // △: the menu
-        if (app.campOpen) { app.campOpen = false; menuSound(app, se::kCampClose); }
+        if (app.campOpen) { if (!campBusy(app)) app.campOpen = false, menuSound(app, se::kCampClose); } // (not while a message / the Exit runs)
         else if (padField(app)) padKey(app, SDLK_K);
         return;
     case SDL_GAMEPAD_BUTTON_WEST: // □: text skipped; in a puzzle room, the ability

@@ -246,6 +246,23 @@ Thanks to [metastigma](https://github.com/metastigma) for the report, those fixe
 - **The save date board:** the Load screen's date and play-time board shows the original's labels,
   months and slash. It had been drawing the title's store pictures and the wrong months in their
   place.
+- **The Camp's Status page and Items, as the original's** (CampMainPrc read in the 3.1.0 code): on a
+  member's status the arrows (the left / right keys, or a sideways swipe) now turn from the board to
+  the equipment the member wears, then to every skill and gene known on its plates, and back, instead
+  of switching members; Back returns to the member choice, and the details no longer show the member
+  plates. After a seed or an MP item is used, the member's board stays up - a seed's stat marked with
+  how much it rose - until a tap. The Yes / No has no Back; a full MP or a stat already at 9999 is
+  refused there with the buzzer, and the seed count reaches as many as the stat can still take. The
+  Items list's Back bar has its two arrows for the previous and next category.
+- **The Emergency Exit works:** used from the Camp outside the Ark (and before the story closes it),
+  the Camp fades to white and the pair is back on the Ark with HP and MP refilled; on the Ark itself
+  it is refused.
+- **The Camp, the rest:** the face boards show (and take taps) while you choose a member, and no
+  status board covers them; the equipment slots' arrows switch to the other member; the item the member
+  already wears is refused; changing equipment on the Ark refills the pair; in the second scenario,
+  once the story allows it, tapping a face board on the Camp's front makes that character the leader;
+  the two one-time help messages (the first gene plate, the first visit to Items) show as in the
+  original.
 
 ## Downloads
 
