@@ -297,7 +297,7 @@ void MusicPlayer::command(uint32_t v) {
     const int fadeFrames = (v & 0x02000000) ? 40 : (v & 0x04000000) ? 10 : (v & 0x08000000) ? 20 : 0;
     if (fadeFrames) { fadeStep_ = -1.0f / float(fadeFrames); return; } // update() stops at 0
     const int t = int(v & 0xff);
-    if (t >= kBgmTracks || (t == track_ && impl_->stream)) return;
+    if (t >= kBgmTracks) return; // (_setbgm_caf: any play request starts the track over at full gain - the same one too)
     std::string err;
 #ifdef CR_HAVE_ATRAC9
     { // the Vita's cr_mNN.at9 for bgmNN - Omega's own tracks (bgm41..49, the title's among them) are its cr2_mNN.at9

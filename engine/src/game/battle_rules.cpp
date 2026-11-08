@@ -1118,7 +1118,10 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             Fighter& tf = f[size_t(t)];
             const int before = tf.hp;
             if (h.type == kHitKill) h.amount = tf.hp;
-            if (h.amount > 0 && invincible(t)) h.amount = 0, h.type = kHitNoEffect; // Is_invincible (a pair's either member)
+            if (h.amount > 0 && invincible(t)) { // Is_invincible (a pair's either member): the damage 0, the label as it was ("0")
+                h.amount = 0;
+                if (h.type == kHitKill) h.type = kHitNormal;
+            }
             if (scenario == 0 && group == 693 && e.actors[0] < 2 && e.actors[1] < 0 && h.amount > 0) // btlcalc_dmg_hp: 0x2b5's
                 h.amount = 0, h.type = 0, nullHit = true;                                         // solo blows don't land (+0xa78)
             h.amount = floored(t, h.amount); // chk_karaok_dmg_hp

@@ -11,7 +11,7 @@ constexpr float kStepUp = 5.0f;       // searchNode probe height in checkHit
 constexpr float kBodyHeight = 10.0f;  // party models are 9-12 units tall
 constexpr float kPi = 3.14159265f;
 
-bool isWall(const CollisionPolygon& p) { return !p.isFloor() && p.normal[1] > -0.7f; }
+bool isWall(const CollisionPolygon& p) { return p.isWall(); }
 
 Vec3 vertex(const Collision& col, int i) {
     const float* v = &col.vertices[size_t(i) * 3];

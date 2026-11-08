@@ -55,7 +55,8 @@ bool parseCollision(const std::vector<uint8_t>& f, Collision& out, std::string* 
         p += kPolySize;
     }
 
-    // Nodes: each owns sum(4 counts at +4..+10) polygon indices stored after the node array
+    // Nodes: each owns sum(4 counts at +4..+10) polygon indices stored after the node array, in node
+    // order - its floors (+4) first, then its walls (+6), then the rest
     size_t lists = 0;
     for (int i = 0; i < nNodes; ++i) {
         const size_t n = p + size_t(i) * nodeSize;
@@ -65,6 +66,23 @@ bool parseCollision(const std::vector<uint8_t>& f, Collision& out, std::string* 
     }
     const size_t end = fixedEnd + lists * 2;
     if (end > f.size() || f.size() - end >= 16) return fail("layout does not match file size");
+    bool listed = false;
+    for (int i = 0, at = 0; i < nNodes; ++i) {
+        const size_t n = p + size_t(i) * nodeSize;
+        int count[4];
+        for (int k = 0; k < 4; ++k) count[k] = std::max(0, int(rd<int16_t>(f, n + 4 + 2 * k)));
+        for (int k = 0; k < 4; ++k)
+            for (int j = 0; j < count[k]; ++j, ++at) {
+                const int poly = rd<int16_t>(f, fixedEnd + size_t(at) * 2);
+                if (poly < 0 || poly >= nPolys || k > 1) continue;
+                CollisionPolygon& q = out.polygons[size_t(poly)];
+                if (k == 1) q.wall = true;
+                else if (q.normal[1] > 0) q.floor = true; // (d0406's one ceiling, listed as a floor, is no ground)
+                listed = true;
+            }
+    }
+    if (!listed) // (no lists: by the normal, as before)
+        for (auto& poly : out.polygons) poly.floor = poly.normal[1] > 0.7f, poly.wall = !poly.floor && poly.normal[1] > -0.7f;
 
     for (int c = 0; c < 3; ++c) {
         out.boundsMin[c] = 1e30f;

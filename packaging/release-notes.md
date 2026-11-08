@@ -77,6 +77,29 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   its actors with the fighter's own counter action), and speeds are read afresh for every action
   of a round (a Speed Up or Down moves the rest of the round); the AI's fallback targets are the
   original's (a random living opponent).
+- **Music and sound, as 3.1.0 mixes and plays them:** a script that fades the music out, warps
+  and asks for the same track again now gets it from the start (it went silent); the balance is the
+  original's - music at 0.2 of its gauge, effects at 0.3, voices at 1.0 - so voices are no longer
+  drowned by the music, and the voice gauge starts at 80 as the others do; the gauges move in steps
+  of 10; moving a list's cursor plays the original's light tick (0x92), not the "refused" buzzer;
+  an area no longer starts a guessed track of its own before its entry script decides (some rooms
+  are meant to be quiet); after a random battle the field's last requested track comes back even
+  if the room had faded it out; the track a script reads back after a stop or fade is "none" (the
+  shop's music recovery); a sound marked as a stand-in for a muted voice plays only with voices
+  off.
+- **The field's floors:** a polygon is a floor or a wall by the collision file's own lists, as the
+  original reads them, not by its slope - four dungeon ramps (d0207, d0309, d0311, d0408) can be
+  climbed again, and the stray squares at some maps' origin are no longer ground.
+- **Scenarios and the Info Board:** completing a bingo card plays the original's sequence - the
+  card's pieces fly in and bob with the music muted, then a white flash - before it counts as done;
+  the Camp marks Scenarios "new" while no cell is open; Collection is offered only in the second
+  scenario, as the original's; the Info Board next to Piu-Piu shows the "Breaking the Limit" pages
+  (versionup_e / versionup_t), not the puzzle tutorials' pictures.
+- **Battles, as they look in 3.1.0:** an attack's camera is the original's side - a monster's blow
+  on the party frames the party, your blow on a monster frames the monster, with its random
+  variant; the party's HP and MP count down (or up) to the new value over a few frames instead of
+  jumping, and MP shows red at 0; the hit labels are the original's - "Miss!" where the port said
+  "Guard!", "Block!" where it said "Miss!" - and a hit on an invincible target shows "0".
 - **Checked against the newest release (3.1.0):** the game logic of the passes above was re-read in
   the 3.1.0 code; two rules changed there and the port now follows them - the Counter skill (154)
   answers every physical hit it survives (1.0.0 rolled 10 / 20 %), and a pair attack whose partner

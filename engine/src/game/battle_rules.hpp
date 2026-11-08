@@ -158,8 +158,9 @@ struct Fighter {
     bool alive() const { return present && hp > 0 && !gone; }
 };
 
-// What one target took: amount > 0 damage, < 0 healing. The types are __dmg_set's (its labels:
-// 1 Blowout!, 2 Critical!, 3 Weak!, 5 No Effect!, 6 Guard!, 7 Miss!; numbers with 0, 2, 3, 8);
+// What one target took: amount > 0 damage, < 0 healing. The types are __dmg_set's (its labels, by
+// __dmg_prc's sheet index - type - 1 for 1..3, the type itself from 4: 1 Blowout!, 2 Critical!,
+// 3 Weak!, 4 No Effect!, 5 Guard!, 6 Miss!, 7 Block!; numbers with 0, 2, 3, 8);
 // kHitQuiet shows nothing (statuses, the do-nothing actions)
 enum BattleHitType {
     kHitQuiet = -1, kHitNormal = 0, kHitKill = 1, kHitCritical = 2, kHitWeak = 3, kHitNoEffect = 5,

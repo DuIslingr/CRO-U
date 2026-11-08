@@ -203,7 +203,7 @@ struct App {
     int musicArea = -1;                    // area whose default track is playing
     // Mixer, 0..100 like the original's Options sliders (music and effects default to 80 there;
     // master and voice are additions - the original has no voice audio)
-    struct Mix { int master = 100, music = 80, effects = 80, voice = 100; } mix;
+    struct Mix { int master = 100, music = 80, effects = 80, voice = 80; } mix; // (the options' defaults 80 / 80 / 80)
     bool optionsOpen = false;              // V: the Options screen (__menuu_Option*, plus our pages)
     int optionsPage = 0;                   // Game, Sound, Display, Graphics
     int optionsRow = 0;                    // the cursor: a row, or kOptionsBackRow
@@ -448,6 +448,12 @@ struct App {
         cr::Texture sheet, cardTex, photo; // tex_scenario, tex_card_<colour>, present0N_hd
         int cardLoaded = -1;
         cr::GameState flags;               // the title's: every save's flags together
+        // SccnariosPrc 0x12..0x14, a card's sixteenth cell opened: tex_card_complete's seven pieces fly
+        // in and bob (eleven keyframe steps), the music muted, then white over 21 frames and back
+        int complete = 0;                  // 0 none, 1 the pieces, 2..5 the white (DAT_ed5dc's states)
+        int cStep = 0, cCount = 0;         // DAT_ed544 / ed548
+        std::array<std::array<int, 2>, 7> piece{}; // DAT_ed550: where each piece is
+        cr::Texture completeTex;
     } scc;
     struct Collection { // the Camp's Collection (__menuu_Collection*)
         bool open = false;
@@ -652,6 +658,7 @@ struct App {
         int bannerFrames = 0;
         std::vector<cr::BattleNotice> notices; // G+0xa14: the calcs' messages, one per free banner
         int shownHp[5] = {}, shownMp[5] = {}; // what the HUD shows (changes as the hits land)
+        int rollHp[2] = {}, rollMp[2] = {};   // the party board's numbers and bars (+0x60 / +0x68): a fifth of the way a frame
         int gaugeShown = 0;                // the badge's gauge, a step a frame toward the rules'
         float breakPop = 0;
         std::vector<int> levelled;
@@ -820,7 +827,8 @@ struct App {
     cr::Vec3 puzzleStart;                  // where the leader came into the puzzle room (FieldPCCtrl::reset)
     struct CrystalCam { int npc = -1; int phase = 0; } crystalCam; // Uty_WarpCrystalCamera: 0 to the crystal, 1 back
     bool puzzleStartPending = false;
-    int bgmNo = 0;                         // G+0x35530: the music last asked for (Uty_GetBgmNo)
+    int bgmNo = 255;                       // G+0x35530: the music last asked for (Uty_GetBgmNo); 255 none (-1)
+    int lastFieldBgm = 0;                  // G+0x8a97c: the field's last play request (the music after a battle)
     struct NowLoading { bool on = false; int frame = 0; } nowLoading; // NowLoadProc's spinner
     struct VitaLogo {                      // the Vita's boot opcodes 0x47..0x4a: a full-screen logo
         cr::Texture tex[2];                // by slot (0x47's slot + 16 in the original's Tex2d)
@@ -1013,7 +1021,7 @@ constexpr uint32_t kPaid = kMenuBase + 22;   // ShopPrc
 constexpr uint32_t kVolume = 0x131; // MuOptionSetInfo: __effgo(0x131) as the SE gauge is let go (the BGM gauge is silent)
 constexpr uint32_t kSlide = 0x12d;           // StartPrc: Select Scenario's page dragged over
 // The original is touch-only, so it has no cursor sound; keyboard cursor moves are the port's own
-constexpr uint32_t kCursor = kBuzzer;
+constexpr uint32_t kCursor = kMenuBase + 1; // 0x92: MuScrList_Draw's tick as a list's focus moves
 } // namespace se
 
 void menuSound(App& app, uint32_t id) {
@@ -1666,6 +1674,24 @@ void outPicture(cr::MenuPainter& m, const cr::Texture& tex, int pict, float x, f
 void openScenarios(App& app);
 void openScenarios(App& app, int mode);
 void openCollection(App& app);
+// __RenewalGetSccnariosState: the Camp's "new" mark on Scenarios - flag 0x642 and no cell open on
+// cards 0..3, or flag 0x665 and none open on all five
+bool campScenariosNew(const App& app) {
+    static const int kOpen[5] = {2101, 2117, 2133, 2149, 2165};
+    const cr::GameState& g = app.game;
+    int open = 0;
+    bool n = false;
+    if (g.flag(0x642)) {
+        for (int c = 0; c < 4; ++c)
+            for (int i = 0; i < 16; ++i) open += g.flag(kOpen[c] + i);
+        n = open == 0;
+    }
+    if (g.flag(0x665)) {
+        for (int i = 0; i < 16; ++i) open += g.flag(kOpen[4] + i);
+        if (open == 0) n = true;
+    }
+    return n;
+}
 void openShop(App& app);
 void startBattle(App& app, const cr::BattleStart& start, int flags);
 int partyLevel(const App& app);
@@ -1874,7 +1900,10 @@ bool npcDrawn(const App& app, size_t index) {
 // Loads the area's event file if needed, the map's NPC list, and the trigger-box overlay.
 // _bgmgo: the music command; a play request (no stop / fade bits) is the track Uty_GetBgmNo reports
 void playBgm(App& app, uint32_t v) {
-    if (!(v & 0x2e000000u)) app.bgmNo = int(v & 0xff);
+    if (!(v & 0x2e000000u)) {
+        app.bgmNo = int(v & 0xff);
+        if (!app.battle.active && !app.titleOpen && !app.booting) app.lastFieldBgm = int(v & 0xff); // (__bgmgo: on the field, 0x364 & 0x40)
+    } else app.bgmNo = 255; // (a stop or a fade: the current-track word goes to -1)
     app.music.command(v);
 }
 
@@ -1926,20 +1955,8 @@ void enterMap(App& app) {
     app.pendingEntry = app.area != app.entryArea ? App::Entry::Area : App::Entry::Room;
     if (app.area != app.entryArea) app.game.frmScene = app.game.frmRecord = 0; // offsets into the old file
     app.entryArea = app.area;
-    // Music: each area's usual track (what its entry script mostly plays: dungeons d01-d04 ->
-    // 2-5, d05 -> 17, towns -> 15, puzzle rooms -> 6; event 0 itself isn't run yet). Scripts
-    // change it with Bgm.
-    if (app.area != app.musicArea) {
-        app.musicArea = app.area;
-        const std::string ev = cr::kAreaEventFile[app.area];
-        int track = -1;
-        if (ev.compare(5, 2, "d0") == 0) track = ev[7] == '5' ? 17 : ev[7] - '1' + 2;
-        else if (ev.compare(5, 3, "t01") == 0) track = 15;
-        else if (ev.compare(5, 3, "p01") == 0) track = 6;
-        else if (ev.compare(5, 3, "t91") == 0) track = 1;
-        else if (ev.compare(5, 3, "d91") == 0) track = 4;
-        if (track >= 0) playBgm(app, uint32_t(track));
-    }
+    // Music: none here - _fldread_prc never plays a track on a map or area change; the area's entry
+    // script does (its Bgm, by its flags)
     // Treasure boxes (TreasureBoxManager): the first four worlds' (areas 2..5) are drawn again each
     // time the World Select leads into one (fldread_evt_init2 -> _InitDungeon -> randomSelect), the
     // draw kept with the scenario (the save) and its boxes taken there; flags set per map (setup).
@@ -3177,6 +3194,7 @@ struct ViewerHost : cr::EventHost {
     bool screenFading(bool back) override { return back ? app.fadeBackT < app.fadeBackFrames : app.fadeT < app.fadeFrames; }
     void warp(const cr::WarpRequest& w) override { performWarp(app, w, app.runner.eventNo()); }
     void playSound(uint32_t id) override {
+        if ((id & 0x10000) && app.mix.voice > 0 && app.sound.hasVoices()) return; // (__effgo: a stand-in for a muted voice)
         const bool speech = (id & 0x400000) || app.sound.isVoice(int(id & 0xfff));
         const bool control = id & (0x20000000u | 0xe000000u | 0xe0000u);
         if (speech && !control && !app.battle.active) {
@@ -3505,18 +3523,22 @@ struct ViewerHost : cr::EventHost {
         App::TutoTex& t = app.tutoTex;
         app.renderer.destroy(t.tex);
         t = App::TutoTex();
-        // The table at 0xcd540 (24 bytes a name): the puzzles' (0..7), the battles' (8..11, 13, 20 -
-        // the deck's first-battle picture), the field's and the rest
-        static const char* const kTuto[26] = {
+        // 3.1.0's table (0xd5230, 24 bytes a name): the puzzles' (0..7), the battles' (8..11, 13, 20 -
+        // the deck's first-battle picture), the field's and the rest, then the Info Board's
+        // versionup_e_2..7 / versionup_t_2..7 (22..33). MsgUty_TexDispInit counts var 1 from
+        // telepo_01, or - var 2 set, the Info Board's four-push form - from versionup_e_2
+        static const char* const kTuto[34] = {
             "telepo_01_hd.mct", "telepo_02_hd.mct", "psyco_01_hd.mct", "psyco_02_hd.mct", "tough_01_hd.mct",
             "tough_02_hd.mct",  "pyro_01_hd.mct",   "pyro_02_hd.mct",  "battle_01_hd.mct", "battle_02_hd.mct",
             "battle_03_hd.mct", "gene_01_hd.mct",   "puzzle_01_hd.mct", "battle_04_hd.mct", "puzzle_02_hd.mct",
             "encounter_hd.mct", "pheromone_hd.mct", "piupiucard_hd.mct", "collection_hd.mct", "labyrinth_hd.mct",
             "battle_start_hd.mct", "change_hd.mct", "versionup_e_2_hd.mct", "versionup_e_3_hd.mct", "versionup_e_4_hd.mct",
-            "versionup_e_5_hd.mct"};
-        const int pic = app.game.vars[1];
+            "versionup_e_5_hd.mct", "versionup_e_6_hd.mct", "versionup_e_7_hd.mct", "versionup_t_2_hd.mct",
+            "versionup_t_3_hd.mct", "versionup_t_4_hd.mct", "versionup_t_5_hd.mct", "versionup_t_6_hd.mct",
+            "versionup_t_7_hd.mct"};
+        const int pic = app.game.vars[1] + (app.game.vars[2] != 0 ? 22 : 0);
         cr::Image img;
-        if (pic >= 0 && pic < 26) { // the iPad's _hd sheet, else the iPhone's
+        if (pic >= 0 && pic < 34) { // the iPad's _hd sheet, else the iPhone's
             std::string name = kTuto[pic];
             if (loadImage(app, name, img) || loadImage(app, name.replace(name.find("_hd"), 3, ""), img)) t.tex = app.renderer.upload(img);
         }
@@ -3615,6 +3637,7 @@ struct ViewerHost : cr::EventHost {
     }
     void battle(int group, int stage, int flags) override { // starts when this frame's script step ends
         app.battle.requested = true;
+        app.lastFieldBgm = 0; // (__EvtBattle: G+0x8a97c = 0)
         app.battle.request = {group, stage, -1, 0};
         app.battle.requestFlags = flags;
     }
@@ -3668,9 +3691,12 @@ void drawWinPiece(App& app, const float* piece, float x, float y, float w, float
 
 // Mixer: master scales the three channels; saved to settings.ini in the user's save folder
 void applyMix(App& app) {
-    const float m = app.mix.master / 100.0f;
-    app.music.setVolume(m * app.mix.music / 100.0f);
-    app.sound.setVolumes(m * app.mix.effects / 100.0f, m * app.mix.voice / 100.0f);
+    // _sound_init: the BGM plays at 0.2 of its option, sound effects at 0.3, voices at 1.0 - the
+    // original's balance. Scaled up together so the loudest channel the data has (voices when it
+    // has them, else the effects) reaches full gain
+    const float m = app.mix.master / 100.0f, k = app.sound.hasVoices() ? 1.0f : 1.0f / 0.3f;
+    app.music.setVolume(m * k * 0.2f * app.mix.music / 100.0f);
+    app.sound.setVolumes(m * k * 0.3f * app.mix.effects / 100.0f, m * k * app.mix.voice / 100.0f);
 }
 
 // The user's folder - or CR_SAVE_DIR's (tests and captures keep everything of theirs there)
@@ -4093,7 +4119,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
         r.value = *v;
         r.sound = sound; // hear the new level
         r.act = [&app, v](int dir) {
-            *v = std::clamp(*v + dir * 5, 0, 100);
+            *v = std::clamp((*v + 5) / 10 * 10 + dir * 10, 0, 100); // (ComUty_SideGuageProc: steps of 10)
             applyMix(app);
             saveMix(app);
         };
@@ -6351,7 +6377,7 @@ void campKey(App& app, SDL_Keycode key) {
     case App::Camp::Main:
         if (step) { c.cursor = (c.cursor + step + campEntries(app)) % campEntries(app); menuSound(app, se::kCursor); }
         else if (key == SDLK_Q || key == SDLK_PAGEUP) { menuSound(app, se::kChoose); openScenarios(app, 1); } // (keys, L: the Scenarios picture)
-        else if (key == SDLK_C || key == SDLK_PAGEDOWN) { menuSound(app, se::kChoose); openCollection(app); } // (R: Collection)
+        else if ((key == SDLK_C || key == SDLK_PAGEDOWN) && app.game.scenario != 0) { menuSound(app, se::kChoose); openCollection(app); } // (R: Collection)
         return;
     case App::Camp::Items:
     case App::Camp::Equip:
@@ -6414,8 +6440,8 @@ void campClick(App& app, float px, float py) {
             if (in(kPlateX + 360 * (1 - campEase(app)), kPlateY + kPlateStep * float(i), 136, 40)) { c.cursor = i; campChoose(app); return; }
         const short* sp = cr::kMenuPicture[162]; // __menuu_CampMainPut's Scenarios picture (CampMainPrc case 5)
         if (inAt(lx0, 12 - 240 * (1 - campEase(app)), 236, sp[2], sp[3])) { menuSound(app, se::kChoose); openScenarios(app, 1); }
-        const short* cp = cr::kMenuPicture[161]; // ... and Collection (case 6)
-        if (inAt(lx0, 84 - 240 * (1 - campEase(app)), 236, cp[2], cp[3])) { menuSound(app, se::kChoose); openCollection(app); }
+        const short* cp = cr::kMenuPicture[161]; // ... and Collection (case 6; the second scenario's only)
+        if (app.game.scenario != 0 && inAt(lx0, 84 - 240 * (1 - campEase(app)), 236, cp[2], cp[3])) { menuSound(app, se::kChoose); openCollection(app); }
         return;
     }
     default: break;
@@ -8188,9 +8214,11 @@ void drawCamp(App& app) {
     if (arrows) m.backButton(kBackX, campBackY(app), false, 0, 1);
     else m.backBar(kBackX, campBackY(app), false, 1);
     left();
-    if (main) { // __menuu_CampMainPut: Scenarios (162) and Collection (161) under the boards
+    if (main) { // __menuu_CampMainPut: Scenarios (162; 128 "new" over it while no cell is open) and, in the
+        // second scenario only (window 0x15), Collection (161) under the boards
         m.picture(162, 12 - 240 * out, 236, 1 - out);
-        m.picture(161, 84 - 240 * out, 236, 1 - out);
+        if (campScenariosNew(app)) m.picture(128, 12 - 240 * out, 236, 1 - out);
+        if (app.game.scenario != 0) m.picture(161, 84 - 240 * out, 236, 1 - out);
     }
     if (!main) {
         static const int kTitle[5] = {0, 58070, 58059, 58087, 58077};
@@ -8592,6 +8620,17 @@ constexpr short kBirthday[15][2] = { // {flag, points}: the first rate
 constexpr short kFestival[14][2] = { // the second, with a point per open cell
     {1693, 3}, {1695, 3}, {1692, 6}, {1694, 6}, {1696, 6}, {1691, 0}, {1697, 6},
     {1698, 6}, {1700, 1}, {1701, 1}, {1702, 1}, {1703, 1}, {1704, 1}, {1699, 4}};
+// tex_card_complete (group 5): the seven pieces; their keyframes (0xd5f10: four a piece), the steps'
+// from-keyframes (0xd5eb0) and lengths (0xd5ee0): in from off-screen over 10, a bob, then held 30
+constexpr short kCompletePict[7][4] = {{0, 141, 194, 192}, {194, 141, 188, 192}, {0, 333, 512, 293}, {0, 626, 512, 293},
+                                       {382, 162, 130, 171}, {382, 0, 130, 162}, {0, 0, 382, 141}};
+constexpr int kCompletePoint[7][4][2] = {
+    {{-132, 246}, {-4, 107}, {-4, 110}, {-4, 104}},  {{437, 251}, {296, 107}, {296, 110}, {296, 104}},
+    {{-31, 295}, {-31, 30}, {-31, 33}, {-31, 27}},   {{-31, 296}, {-31, 31}, {-31, 34}, {-31, 28}},
+    {{-136, 265}, {-4, 149}, {-4, 152}, {-4, 146}},  {{482, 277}, {352, 154}, {352, 157}, {352, 151}},
+    {{56, -115}, {56, 84}, {56, 87}, {56, 81}}};
+constexpr int kCompleteFrom[12] = {0, 1, 2, 3, 2, 3, 2, 3, 2, 3, 1, 1};
+constexpr int kCompleteLen[11] = {10, 2, 2, 2, 2, 2, 2, 2, 2, 2, 30};
 constexpr const char* kCardFile[5] = {"tex_card_red.mct", "tex_card_blue.mct", "tex_card_yellow.mct",
                                       "tex_card_green.mct", "tex_card_violet.mct"};
 // The cells (_kgnBingoWindowPosXY) and their PUSH! marks (_kgnBingoPushPosXY)
@@ -8714,6 +8753,8 @@ void closeScenarios(App& app) {
     app.renderer.destroy(s.sheet);
     app.renderer.destroy(s.cardTex);
     app.renderer.destroy(s.photo);
+    app.renderer.destroy(s.completeTex);
+    if (s.complete) applyMix(app), s.complete = 0;
     s.cardLoaded = -1;
 }
 
@@ -8742,12 +8783,40 @@ void stepScenarios(App& app) {
             for (int k = 0; k < 5; ++k)
                 if (!g.flag(kPushFlag[k] + s.pushing)) { g.setFlag(kPushFlag[k] + s.pushing, true); break; }
             s.pushing = -1;
-            if (done(app, s.card) && !g.flag(kCardFlag + s.card)) { // 0x12..0x14 (the card's own flourish: ours a flash)
-                g.setFlag(kCardFlag + s.card, true);
-                g.vars[kDoneVar] = (g.vars.count(kDoneVar) ? g.vars[kDoneVar] : 0) + 1;
-                menuSound(app, 0x128);
-                s.anim = 0;
+            if (done(app, s.card) && !g.flag(kCardFlag + s.card)) { // 0x12: the completion begins
+                app.renderer.destroy(s.completeTex);
+                cr::Image img;
+                if (loadImage(app, "tex_card_complete_hd.mct", img) || loadImage(app, "tex_card_complete.mct", img))
+                    s.completeTex = app.renderer.upload(img);
+                for (int p = 0; p < 7; ++p) s.piece[size_t(p)] = {kCompletePoint[p][0][0], kCompletePoint[p][0][1]};
+                s.complete = 1, s.cStep = 0, s.cCount = 0;
+                app.music.setVolume(0); // (the BGM volume byte saved and zeroed: __bgm_vol)
+                app.sound.play(0xb0);
             }
+            refresh(app);
+        }
+    }
+    if (s.complete == 1) { // 0x13 / 1: each piece from keyframe to keyframe, (to - from) / len a frame
+        const int from = kCompleteFrom[s.cStep], to = kCompleteFrom[s.cStep + 1], len = kCompleteLen[s.cStep];
+        for (int p = 0; p < 7; ++p)
+            for (int k = 0; k < 2; ++k)
+                s.piece[size_t(p)][size_t(k)] = (kCompletePoint[p][to][k] - kCompletePoint[p][from][k]) / len * s.cCount + kCompletePoint[p][from][k];
+        if (len < s.cCount) {
+            s.cCount = 0;
+            if (++s.cStep > 10) { s.complete = 2, s.cCount = 0; app.sound.play(0x128); return; }
+        }
+        ++s.cCount;
+    } else if (s.complete == 2) { // white over 1000 ms; 21 frames on, the card's windows go
+        if (++s.cCount >= 21) s.complete = 3, s.cCount = 0;
+    } else if (s.complete == 3) { // back from white over 21 frames, then the card's done
+        if (++s.cCount > 20) {
+            cr::GameState& g = flags(app);
+            g.setFlag(kCardFlag + s.card, true);
+            g.vars[kDoneVar] = (g.vars.count(kDoneVar) ? g.vars[kDoneVar] : 0) + 1;
+            applyMix(app); // (0x14: the BGM volume back)
+            app.renderer.destroy(s.completeTex);
+            s.complete = 0;
+            s.anim = 20;
             refresh(app);
         }
     }
@@ -8828,8 +8897,8 @@ void drawScenarios(App& app) {
         const float cx = 240 + s.panX / 2, cy = 48 + 160 + s.panY / 2;
         m.imagePieceTo(s.photo, cx - w / 2, cy - h / 2, w, 256 * s.zoom, 0, 0, 960, 512, a);
     }
-    const bool whole = done(app, s.card);
-    if (!whole && s.cardTex.id) { // window 7: the frame and the cells
+    const bool whole = done(app, s.card) && s.complete == 0; // (the photo only once the card's done: ed274)
+    if (!whole && s.cardTex.id && s.complete < 3) { // window 7: the frame and the cells (off at the white's peak)
         card(1, 0, 48, a);
         card(2, 0, 276, a);
         card(3, 0, 55, a);
@@ -8858,10 +8927,19 @@ void drawScenarios(App& app) {
     }
     if (s.cardTex.id) card(0, 0, 0, a); // window 6: the card's name
     drawClockAndOz(app, m, a);         // window 1: BattryAndRealTimeAndOzDraw, the list's and the card's alike
-    if (whole && s.anim < 20) { // (the port's: the card done)
-        const float f = 1 - float(s.anim) / 20.0f;
-        const float wc[4] = {1, 1, 1, f};
-        m.quad(0, 48, 480, 236, wc, wc);
+    if (s.complete && s.complete < 3 && s.completeTex.id) { // window 9: the pieces (picture i at the i-th place)
+        const float k = s.completeTex.width >= 1024 ? 2.0f : 1.0f;
+        for (int p = 0; p < 7; ++p) {
+            const short* q = kCompletePict[p];
+            m.imagePieceTo(s.completeTex, float(s.piece[size_t(p)][0]), float(s.piece[size_t(p)][1]), q[2], q[3], q[0] * k, q[1] * k,
+                           q[2] * k, q[3] * k, 1);
+        }
+    }
+    if (s.complete >= 2) { // SetFade(white, 0 -> 255 / 255 -> 0, 1000 ms)
+        const float w = s.complete == 2 ? std::min(1.0f, float(s.cCount) / 20.0f) : std::max(0.0f, 1 - float(s.cCount) / 20.0f);
+        r.setOrigin(0);
+        r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 1, 1, 1, w);
+        r.setOrigin(r.uiX());
     }
     m.backButton(192, 288, false, s.bob, a); // window 10: < Back >
     drawShopNumber(m, presentsUsed(app), 0, 296, 2, 12, a); // window 11: presents used / all
@@ -8910,6 +8988,7 @@ void scenariosChoose(App& app) {
 
 void scenariosKey(App& app, SDL_Keycode key) {
     App::Scenarios& s = app.scc;
+    if (s.complete) return; // (no input while a card completes)
     const bool zoomed = s.card >= 0 && s.zoom > bingo::kZoomMin;
     switch (key) {
     case SDLK_ESCAPE: case SDLK_BACKSPACE: case SDLK_AC_BACK: scenariosBack(app); return;
@@ -8943,6 +9022,7 @@ void scenariosKey(App& app, SDL_Keycode key) {
 void scenariosClick(App& app, float mx, float my) {
     using namespace bingo;
     App::Scenarios& s = app.scc;
+    if (s.complete) return;
     auto in = [&](float x, float y, float w, float h) { return mx >= x && mx < x + w && my >= y && my < y + h; };
     if (s.card < 0) {
         if (shown(app))
@@ -11279,6 +11359,7 @@ void buildWalkCollision(App& app) {
             poly.normal[0] = nrm.x; poly.normal[1] = nrm.y; poly.normal[2] = nrm.z;
             poly.count = 4;
             poly.attr1 = 1;
+            poly.wall = true; // (an NPC body's side: RectWrapper::checkHitWallToSphere)
             for (int q = 0; q < 4; ++q) {
                 poly.index[q] = int16_t(c.vertices.size() / 3);
                 c.vertices.insert(c.vertices.end(), {v[q].x, v[q].y, v[q].z});
@@ -11911,9 +11992,18 @@ void cameraForTurn(App& app, const cr::BattleTurn& t) {
     const int user = t.actors[0], target = t.hits.empty() ? -1 : t.hits[0].target;
     const bool userPair = t.actors[1] >= 0;
     if (t.kind == cr::kCmdAttack && target >= 0 && (user < 2) != (target < 2)) {
-        if (user < 2) setBattleCamera(app, enemyCameraSlot(app, target) * 3 + 0x1b0 + (userPair ? 2 : user));
-        else if (!userPair) setBattleCamera(app, b.rules.random(3) + enemyCameraSlot(app, user) * 4 + (target == 0 ? 0x78 : 0xe0));
-        else setBattleCamera(app, b.rules.random(3) + enemyCameraSlot(app, user) * 4 + 0x148);
+        // _btlact_attack_init: a variant drawn for every attack (groups 0x22d / 0x292: random(2) -> 0 / 2);
+        // the target one of the party - the attacking monster's slot x 3 + 0x1b0 / 0x1b1 by the member hit
+        // (0x1b2 the pair; an enemy pair's slot 0x19); a monster hit - its slot x 4 + the variant + 0x78
+        // for member 0's blow, 0xe0 for member 1's, 0x148 the pair's
+        int r = b.rules.random(3);
+        if (b.rules.group == 0x22d || b.rules.group == 0x292) { r = b.rules.random(2); r += r == 1; }
+        (void)userPair;
+        if (target < 2) {
+            const int slot = b.rules.enemyPair ? 0x19 : enemyCameraSlot(app, user);
+            setBattleCamera(app, slot * 3 + (b.rules.pair ? 0x1b2 : target == 0 ? 0x1b0 : 0x1b1));
+        } else
+            setBattleCamera(app, enemyCameraSlot(app, target) * 4 + r + (b.rules.pair ? 0x148 : user == 0 ? 0x78 : 0xe0));
         return;
     }
     if (t.kind == cr::kCmdGene || t.kind == cr::kCmdItem || t.kind == cr::kCmdAttack) castCamera(app, t.kind, user, userPair);
@@ -12475,6 +12565,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     for (int i = 0; i < 5; ++i) {
         b.shownHp[i] = rules.f[size_t(i)].hp;
         b.shownMp[i] = rules.f[size_t(i)].mp;
+        if (i < 2) b.rollHp[i] = b.shownHp[i], b.rollMp[i] = b.shownMp[i];
     }
     setBattleCamera(app, std::max(0, b.formation - 2)); // btl_main 200: the opening turn
     // btl_main 0: var 58 names the battle's track (_BGM_FILE index); 38 and over - a random
@@ -12482,7 +12573,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     const auto v58 = app.game.vars.find(58);
     const int want = v58 != app.game.vars.end() ? v58->second : 999;
     const int track = want == 997 ? -1 : want >= 0 && want < cr::kBgmTracks ? want : 31;
-    b.fieldTrack = app.music.current();
+    b.fieldTrack = app.lastFieldBgm; // (G+0x8a97c: the field's last play request, playing or not)
     if (track >= 0) playBgm(app, uint32_t(track));
     app.dialogue.clear();
     ++app.battlesFought;
@@ -14219,7 +14310,19 @@ void endRound(App& app) {
 void stepResults(App& app);
 void resultsTap(App& app);
 
+// FUN_00036c80 / 36d54 (from __menub_mainPut, every frame): the party's shown HP / MP step toward the
+// value by a fifth of the gap, or by 1 within 4
+void rollPartyNumbers(App::Battle& b) {
+    auto roll = [](int& shown, int want) {
+        const int d = want - shown;
+        if (d == 0) return;
+        shown += std::abs(d) <= 4 ? (d > 0 ? 1 : -1) : d / 5;
+    };
+    for (int k = 0; k < 2; ++k) roll(b.rollHp[k], b.shownHp[k]), roll(b.rollMp[k], b.shownMp[k]);
+}
+
 void stepBattle(App& app) {
+    rollPartyNumbers(app.battle);
     App::Battle& b = app.battle;
     ++b.frames;
     ++b.phaseFrames;
@@ -14641,10 +14744,10 @@ void drawBattleRow(App& app, cr::MenuPainter& m, int k, bool dimmed, float a) {
     m.piece((k == 0 ? 52 : 0) + (phone ? 16 : 0), 328 + dy, float(face * 48), 440, 48, 48, a, c, c, c);
     m.piece(2 + dx, 370 + dy, 0, 14, 22, 10, a); // "HP"
     m.piece(86 + dx, 370 + dy, 22, 14, 22, 10, a); // "MP"
-    drawBattleNumber(m, b.shownHp[k], 24 + dx, 364 + dy, 5, b.shownHp[k] <= f.hpMax / 4, a);
-    drawBattleNumber(m, b.shownMp[k], 108 + dx, 364 + dy, 4, false, a);
-    drawBattleHpBar(m, 20 + dx, 376 + dy, 59, b.shownHp[k], f.hpMax, false, a);
-    drawBattleHpBar(m, 100 + dx, 376 + dy, 49, b.shownMp[k], f.mpMax, true, a);
+    drawBattleNumber(m, b.rollHp[k], 24 + dx, 364 + dy, 5, b.rollHp[k] <= f.hpMax / 4, a);
+    drawBattleNumber(m, b.rollMp[k], 108 + dx, 364 + dy, 4, b.rollMp[k] <= 0, a); // (cmd_number(mp, mp, 4): red at 0)
+    drawBattleHpBar(m, 20 + dx, 376 + dy, 59, b.rollHp[k], f.hpMax, false, a);
+    drawBattleHpBar(m, 100 + dx, 376 + dy, 49, b.rollMp[k], f.mpMax, true, a);
     drawBattleStatus(m, f, 152 + dx, 364 + dy, a);
 }
 
@@ -14813,9 +14916,9 @@ void drawBattleHud(App& app, float W, float H) {
         r.screenToLayout(px, py); // (the iPhone layout draws 2D scaled; the projection is the screen's)
         const float x = px / 2, y = py / 2;
         const int step = (kPopupTime - p.timer) >> 4;
-        if (p.type >= 1 && p.type <= 7) { // the label: Blowout! Critical! Weak! / No Effect! Guard! Miss!
+        if (p.type >= 1 && p.type <= 7) { // the label: Blowout! Critical! Weak! / No Effect! Guard! Miss! Block!
             float lx = x - 72, ly = y - 24, la = 1;
-            const int idx = p.type - 1;
+            const int idx = p.type < 4 ? p.type - 1 : p.type; // (__dmg_prc: idx 4 No Effect, 5 Guard, 6 Miss, 7 Block)
             if (p.type < 4) { // __dmg_prc: Blowout / Critical / Weak slide in from the right and out to the left (x += 18k in, -= 18k out)
                 if (p.timer >= 320) { const int k = 4 - (step); lx += 18.0f * float(std::max(0, k)); la = 1 - 0.25f * float(std::max(0, k)); }
                 else if (p.timer < 64) { const int k = 4 - (p.timer >> 4); lx -= 18.0f * float(k); la = 1 - 0.25f * float(k); }
@@ -18439,12 +18542,12 @@ int runSelfTest(App& app) {
         optionsKey(app, SDLK_DOWN);  // BGM
         const int music = app.mix.music;
         optionsKey(app, SDLK_LEFT);
-        problems += app.mix.music != std::max(0, music - 5);
+        problems += app.mix.music != std::max(0, (music + 5) / 10 * 10 - 10);
         optionsKey(app, SDLK_DOWN);  // Sound Effects
         const int effects = app.mix.effects;
         optionsKey(app, SDLK_LEFT);
-        problems += app.mix.effects != std::max(0, effects - 5);
-        problems += expectSounds("options gauges", {4, 4, 0x131 - se::kMenuBase}); // the BGM's is silent; the SE gauge's test is __effgo(0x131)
+        problems += app.mix.effects != std::max(0, (effects + 5) / 10 * 10 - 10);
+        problems += expectSounds("options gauges", {1, 1, 0x131 - se::kMenuBase}); // the cursor's tick (0x92); the SE gauge's test is __effgo(0x131)
         openOptions(app, 0);         // Game: Language
         optionsKey(app, SDLK_LEFT);  // Japanese
         problems += app.language != 0;
@@ -18454,7 +18557,7 @@ int runSelfTest(App& app) {
         problems += app.optionsPage != kOptionPages - 1;
         optionsKey(app, SDLK_UP);    // from row 0 to Back
         problems += app.optionsRow != kOptionsBackRow;
-        problems += expectSounds("options buttons, page", {2, 2, 3, 4});
+        problems += expectSounds("options buttons, page", {2, 2, 3, 1});
         // Graphics: Anti-aliasing steps through MSAA to FSR Native AA and DLAA (the upscaler at
         // native size), the Upscaler row on to its other modes
         if (app.renderer.scalable()) { // (OpenGL: the row is off)
@@ -18873,7 +18976,7 @@ int runSelfTest(App& app) {
             problems += app.manualOpen;
             app.game = keepGame;
         }
-        problems += expectSounds("manual", {3, 4, 4, 5, 3});
+        problems += expectSounds("manual", {3, 1, 1, 5, 3});
         // Scenarios: the title's (mode 0, to look at) then the Camp's, a cell opened with a present
         openScenarios(app);
         problems += !app.scc.open || !app.scc.sheet.id;
@@ -18912,10 +19015,14 @@ int runSelfTest(App& app) {
             bingoProblems += app.scc.card != -1 || !app.scc.open;
             scenariosKey(app, SDLK_ESCAPE);
             bingoProblems += app.scc.open;
-            // The Collection: R on the Camp's first page; the rate over _anItemFlagTb's 171
+            // The Collection: R on the Camp's first page - the second scenario's only (window 0x15);
+            // the rate over _anItemFlagTb's 171
             app.game.items.clear();
             for (int i = 201; i <= 224; ++i) app.game.items[i] = 1; // Vieg's weapons: 24 of 171
             openCamp(app);
+            campKey(app, SDLK_PAGEDOWN);
+            bingoProblems += app.collection.open; // (not in the first scenario)
+            app.game.scenario = 1;
             campKey(app, SDLK_PAGEDOWN);
             bingoProblems += !app.collection.open || !app.collection.tex.id || collection::percent(app) != 14 ||
                              collection::have(app, 0) != 24 || collection::have(app, 1) != 0;
@@ -19809,8 +19916,9 @@ int runSelfTest(App& app) {
         const bool pair = host.pairNo() == 1;
         host.playMusic(7);
         const bool bgm = host.bgmNo() == 7;
-        host.playMusic(1u << 27 | 7); // a fade-out isn't a track
-        const bool fadeKept = host.bgmNo() == 7;
+        host.playMusic(1u << 27 | 7); // a fade-out leaves no track (Uty_GetBgmNo: 255)
+        const bool fadeKept = host.bgmNo() == 255;
+        host.playMusic(7);
         app.game.vars[0] = 7;
         openShop(app);
         const bool shopTune = host.bgmNo() == 0x13 && app.shop.bgmBack == 7;

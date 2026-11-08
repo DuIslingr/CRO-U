@@ -400,11 +400,15 @@ multiple of 16 bytes); every vertex index is in range. `tools/cmp.py`.
         s16    attr2  always 7
         4 bytes padding (0xAFAFAFFF)
      nNodes × node (KD 32 bytes, QUAD 40): +0 index-list pointer slot,
-        +4..+10 four s16 counts, +24 s16 (child/leaf marker)
-     per node: sum(counts) × s16 polygon index
+        +4..+10 four s16 counts (+4 floors, +6 walls), +24 s16 (child/leaf marker)
+     per node, in node order: sum(counts) × s16 polygon index - its floors first, then its walls
 ```
 
-Data: 2,716 floor polygons (normal.y > 0.7), 3,860 walls, 1 ceiling.
+What is ground and what is a wall comes from these lists (`Cmp::CmpBasic::getFloor` /
+`checkHitWallToSphere` never read the normal): seven ramps with normal.y 0.66..0.68 (d0207 49/50,
+d0309 16, d0311 29/30, d0408 97/98) are floors, eight maps' 10 × 10 squares at the origin (polygon
+0) are in neither list, and d0406's one downward polygon sits in a floor list (the port leaves it
+out). Data: 2,716 floor polygons (normal.y > 0.7), 3,860 walls, 1 ceiling.
 
 ## Event files (`.evt`)
 

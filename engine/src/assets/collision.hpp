@@ -15,8 +15,13 @@ struct CollisionPolygon {
     int16_t attr1 = 0;      // 1 = wall; floors use 0/256/512/768/1024 (surface type?)
     int16_t attr2 = 0;      // always 7 in shipped data
     uint8_t color[4] = {0, 0, 0, 0}; // +28: surface colour; picks the footstep sounds (PlayFootstepSE)
+    // What the original takes it for: a KD node's floor list (node +4 count, listed first) or its wall
+    // list (+6) - Cmp::CmpBasic::getFloor / checkHitWallToSphere read those, never the normal (seven
+    // ramps with normal.y 0.66..0.68 are floors; the origin squares some maps have are neither)
+    bool floor = false, wall = false;
 
-    bool isFloor() const { return normal[1] > 0.7f; }
+    bool isFloor() const { return floor; }
+    bool isWall() const { return wall; }
 };
 
 struct Collision {
