@@ -5604,7 +5604,8 @@ void drawSaveScreen(App& app) {
     // Widescreen: the heading, face boards, emblems to the screen's left; the date, the plates to
     // its right; Back and the message centred (as the shop)
     r.setOrigin(wideLeft(app));
-    if (!ss.load) m.picture(81, 8, 4, a); // "Camp"
+    // (no heading: SaveLoadPut draws none - Part 6 1130.3 s, the field's "Save data?" - the port had
+    // the Camp's)
     // The slot (__menuu_SaveLoadPut): the pair's face boards (ComUty_FaceBoardDraw) at (0, 24) and
     // (0, 112) - the save's on the title, the party's when saving -, on the title the save's date
     // and play time (ComUty_GameTimeAndPlayTimeDraw) top right and the pair's emblems (pictures
