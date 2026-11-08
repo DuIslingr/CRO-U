@@ -1090,6 +1090,7 @@ struct App {
         int anim = 0;                      // the bar's 4 frames of sliding (in or out)
         int fade = 0;                      // +32 a frame (to 320) on the field, -32 while a scene runs
         float clock = 0;
+        int cursor = 0;                    // the Vita's: the bar's button under the buttons' cursor (DAT_8112189c)
     } fieldMenu;
     struct TouchPad {                      // CrossKey: the field's touch pad, where a finger went down
         bool down = false;                 // a finger (or the mouse) holds it
@@ -8874,6 +8875,8 @@ void drawItemWindow(App& app) {
 
 void drawTouchPad(App& app, float alpha);
 void drawEasyButton(App& app);
+bool fieldBarPad(const App& app);
+std::vector<int> fieldBarEntries(const App& app);
 struct KeyIcon { float x, y, u, v; bool lit; }; // (tex2d top-left, its piece, the key's flag set)
 std::vector<KeyIcon> fieldKeyIcons(const App& app);
 int fieldLowBattery();
@@ -8909,7 +8912,11 @@ void drawFieldMenu(App& app) {
         float x, y;
         fieldButtonPos(app, k, x, y);
         const float* src = k == 3 && fieldEncountersOff(app) ? kEncountersOff : kPiece[k];
-        m.piece(x + 16, y + 32, src[0], src[1], kSize[k], kSize[k], a);
+        // (the Vita's menuf_mainPut: the button under the cursor in 0xffff00 - A B G R, cyan)
+        const std::vector<int> e = fieldBarPad(app) ? fieldBarEntries(app) : std::vector<int>();
+        const bool lit = f.open && !e.empty() && e[size_t(std::clamp(f.cursor, 0, int(e.size()) - 1))] == k;
+        if (lit) m.piece(x + 16, y + 32, src[0], src[1], kSize[k], kSize[k], a, 0.0f, 1.0f, 1.0f);
+        else m.piece(x + 16, y + 32, src[0], src[1], kSize[k], kSize[k], a);
     }
     r.setOrigin(r.uiX());
     if (app.puzzle.stage >= 0) drawPuzzleHud(app, a);
@@ -8922,12 +8929,49 @@ void drawFieldMenu(App& app) {
     r.setOrigin(r.uiX());
 }
 
+void pressFieldButton(App& app, int k);
+
+// The Vita's bar under the buttons (its menuf_mainPrc / Put): the entries in its order - the encounters'
+// switch (once skill 170 is known), the map (its worlds), Save, Camp (_ComUty_GetBattryState's list,
+// misnamed) - as this file's buttons (0 Camp, 1 Save, 2 Map, 3 encounters)
+bool fieldBarPad(const App& app) { return app.renderer.vitaScreen(); }
+std::vector<int> fieldBarEntries(const App& app) {
+    std::vector<int> e;
+    for (int k : {3, 2, 1, 0})
+        if (fieldButtonShown(app, k)) e.push_back(k);
+    return e;
+}
+
 void toggleFieldMenu(App& app) {
     App::FieldMenu& f = app.fieldMenu; // (__menuf_mainPrc: the corner button waits only for the bar's slide - not the pad lock)
     if (f.anim > 0) return;
     f.open = !f.open;
     f.anim = 4;
+    if (f.open) f.cursor = int(fieldBarEntries(app).size()) - 1; // (the Vita's: the last - Camp - under the cursor)
     menuSound(app, f.open ? se::kCampOpen : se::kCampClose);
+}
+
+// The Vita's buttons on the bar (menuf_mainPrc): ← ↑ / → ↓ move the cursor round the entries (SE 0x92),
+// ○ presses the one under it, ✕ shuts the bar; true when the bar took the button
+bool fieldBarButton(App& app, int b, bool confirm, bool cancel) {
+    App::FieldMenu& f = app.fieldMenu;
+    if (!fieldBarPad(app) || !f.open || f.anim > 0 || !fieldMenuWanted(app) || fieldSceneRunning(app)) return false;
+    const std::vector<int> e = fieldBarEntries(app);
+    if (e.empty()) return false;
+    const int step = b == SDL_GAMEPAD_BUTTON_DPAD_LEFT || b == SDL_GAMEPAD_BUTTON_DPAD_UP      ? -1
+                     : b == SDL_GAMEPAD_BUTTON_DPAD_RIGHT || b == SDL_GAMEPAD_BUTTON_DPAD_DOWN ? 1
+                                                                                                : 0;
+    const int n = int(e.size());
+    f.cursor = std::clamp(f.cursor, 0, n - 1);
+    if (step) {
+        const int was = f.cursor;
+        f.cursor = (f.cursor + step + n) % n;
+        if (f.cursor != was) menuSound(app, se::kCursor);
+        return true;
+    }
+    if (confirm) { pressFieldButton(app, e[size_t(f.cursor)]); return true; }
+    if (cancel) { toggleFieldMenu(app); return true; }
+    return false;
 }
 
 // The bar's buttons (the bar open and still): 0 Camp, 1 Save, 2 Map, 3 encounters
@@ -13293,8 +13337,10 @@ void updatePlayer(App& app, float dt, float camYaw) {
         const float mag = std::sqrt(lx * lx + ly * ly);
         if (mag < 0.25f) lx = ly = 0; // (the dead zone)
         else run = run || mag > 0.8f;
-        lx += float(SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) - float(SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_LEFT));
-        ly += float(SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_DOWN)) - float(SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_UP));
+        if (!(fieldBarPad(app) && app.fieldMenu.open)) { // (the Vita's bar takes the D-pad while it is open)
+            lx += float(SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) - float(SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_LEFT));
+            ly += float(SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_DOWN)) - float(SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_UP));
+        }
         sx = std::clamp(lx, -1.0f, 1.0f), sy = std::clamp(ly, -1.0f, 1.0f);
     }
     if (!talking && sx == 0 && sy == 0) { // the touch pad (CrossKey): its offset steers, far out runs
@@ -21046,6 +21092,13 @@ int sessionUiSelfTest(App& app) {
     cr::SaveData save = captureSave(app);
     save.game.oz = 54321;
     const std::string path = slotPath(app, 1);
+    { // an opened box is kept once, however often a save lists it (SetOpenedTresureBox once a box)
+        cr::SaveData boxes = save;
+        boxes.game.openedBoxes = {6012, 3004, 6012, 6012, 3004};
+        cr::SaveData got;
+        check(cr::writeSave(path, boxes) && cr::readSave(path, got) && got.game.openedBoxes == std::vector<int>{3004, 6012},
+              "opened boxes saved once each");
+    }
     check(cr::writeSave(path, save), "synthetic save created");
     { // a save cut short is refused, here and in the Vita import's order (the party last, no boxes)
         std::vector<uint8_t> whole;
@@ -25367,6 +25420,38 @@ int runSelfTest(App& app) {
                         repeated ? "yes" : "NO", repeatStopped ? "yes" : "NO", repeatFresh ? "yes" : "NO");
             padButton(app, SDL_GAMEPAD_BUTTON_NORTH); // △ again: closed, from any page
             const bool closed = !app.campOpen;
+            { // The Vita's screen (its menuf_mainPrc / Put): △ the bar, the cursor on its last entry (Camp),
+              // ← ↑ / → ↓ round the entries, ○ the one under it, × the bar shut
+                const int keepLayout = app.video.layout;
+                app.video.layout = 3;
+                applyVideo(app);
+                app.fieldMenu = App::FieldMenu();
+                stepFieldMenu(app);
+                const std::vector<int> e = fieldBarEntries(app);
+                padButton(app, SDL_GAMEPAD_BUTTON_NORTH);
+                while (app.fieldMenu.anim > 0) stepFieldMenu(app);
+                const bool barOpen = app.fieldMenu.open && !app.campOpen && !e.empty() && e.back() == 0 &&
+                                     app.fieldMenu.cursor == int(e.size()) - 1;
+                padButton(app, SDL_GAMEPAD_BUTTON_DPAD_LEFT);
+                const bool stepped = e.size() > 1 && e[size_t(app.fieldMenu.cursor)] == e[e.size() - 2];
+                padButton(app, SDL_GAMEPAD_BUTTON_DPAD_DOWN), padButton(app, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+                const bool wrapped = app.fieldMenu.cursor == (e.size() > 1 ? 0 : -1);
+                padButton(app, SDL_GAMEPAD_BUTTON_SOUTH); // × (○ confirms on the Vita)
+                while (app.fieldMenu.anim > 0) stepFieldMenu(app);
+                const bool shut = !app.fieldMenu.open;
+                padButton(app, SDL_GAMEPAD_BUTTON_NORTH);
+                while (app.fieldMenu.anim > 0) stepFieldMenu(app);
+                padButton(app, SDL_GAMEPAD_BUTTON_EAST); // ○ on Camp
+                const bool camp = app.campOpen;
+                padButton(app, SDL_GAMEPAD_BUTTON_NORTH);
+                app.fieldMenu = App::FieldMenu();
+                app.video.layout = keepLayout;
+                applyVideo(app);
+                const bool ok = barOpen && stepped && wrapped && shut && camp && !app.campOpen;
+                problems += !ok;
+                std::printf("controller, the Vita's bar: △ opens it on Camp %s, the cursor steps %s and wraps %s, × shuts it %s, ○ opens Camp %s\n",
+                            barOpen ? "yes" : "NO", stepped ? "yes" : "NO", wrapped ? "yes" : "NO", shut ? "yes" : "NO", camp ? "yes" : "NO");
+            }
             app.runner.stop();
             app.dialogue.clear();
             app.pendingEntry = App::Entry::None;
@@ -27364,6 +27449,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         if (v == "known" || v == "off") app.game.items[170] = 1;
         if (v == "off") app.game.noEncounters[size_t(fieldRoute(app))] = true;
         app.fieldMenu.fade = 320;
+        app.fieldMenu.cursor = int(fieldBarEntries(app).size()) - 1; // (as the bar opens: the Vita's cursor on Camp)
         if (v.rfind("map", 0) == 0) { // map[step][:page]: the map screen, the story at that step
             if (v.size() > 3) app.game.setFlag(mapui::kFlagBase + mapui::kFlagStride * fieldRoute(app) + SDL_atoi(v.c_str() + 3), true);
             openMapScreen(app);
@@ -28329,6 +28415,7 @@ void padButton(App& app, int b) {
     const bool confirm = app.padConfirmEast ? east : south, cancel = app.padConfirmEast ? south : east;
     const bool puzzle = app.puzzle.stage >= 0 && fieldMenuWanted(app) && !fieldSceneRunning(app);
     if (app.vitaLogo.phase) { if (confirm && app.vitaLogo.phase == 2) app.vitaLogo.skip = true; return; }
+    if (fieldBarButton(app, b, confirm, cancel)) return;
     switch (b) {
     case SDL_GAMEPAD_BUTTON_DPAD_UP: if (padMenus(app)) padKey(app, SDLK_UP); return;
     case SDL_GAMEPAD_BUTTON_DPAD_DOWN: if (padMenus(app)) padKey(app, SDLK_DOWN); return;
@@ -28336,7 +28423,9 @@ void padButton(App& app, int b) {
     case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: if (padMenus(app)) padKey(app, SDLK_RIGHT); return;
     case SDL_GAMEPAD_BUTTON_NORTH: // △: the menu
         if (app.campOpen) { if (!app.camp.notice && app.camp.phase != App::Camp::Exit) app.campOpen = false, menuSound(app, se::kCampClose); } // (not while a message / the Exit runs)
-        else if (padField(app)) padKey(app, SDLK_K);
+        else if (padField(app) && fieldBarPad(app)) { // (the Vita's △: the bar, as the corner button)
+            if (fieldMenuWanted(app) && !fieldSceneRunning(app) && app.fieldMenu.fade > 0) toggleFieldMenu(app);
+        } else if (padField(app)) padKey(app, SDLK_K);
         return;
     case SDL_GAMEPAD_BUTTON_WEST: // □: text skipped; in a puzzle room, the ability
         if (padField(app) && puzzle) padKey(app, SDLK_T);
