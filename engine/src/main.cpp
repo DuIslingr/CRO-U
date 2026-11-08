@@ -6380,11 +6380,16 @@ void drawScrGauge(cr::MenuPainter& m, float x, float y, float len, int n, float 
 void drawShop(App& app) {
     using namespace shopui;
     App::Shop& s = app.shop;
-    if (s.phase == App::Shop::Talk) return; // the shopkeeper's scene is up instead
     cr::Renderer& r = app.renderer;
     cr::MenuPainter& m = app.menu;
     m.begin(r, app.windowTex, &app.font);
     const PhoneMenu phoneMenu(app, m); // the iPhone layout: its screen's menu coordinates
+    if (s.phase == App::Shop::Talk) { // the shopkeeper's scene: ShopPrc 2 takes windows 1 - 5 off, "Shop" (window 0)
+        r.setOrigin(wideLeft(app));      // stays over it (Part 12 2142-2184 s: "Shop" over Piu-Piu's talk)
+        m.picture(97, 8, 4, 1);
+        r.setOrigin(r.uiX());
+        return;
+    }
     const float a = std::min(1.0f, float(s.anim + 1) / 6.0f), slide = (1 - a) * (1 - a);
     const float leftEdge = wideLeft(app), centre = r.uiX(), rightEdge = wideRight(app); // origins (the screen's edges inside the safe area)
     const bool list = s.phase == App::Shop::List;
@@ -27136,9 +27141,19 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         App::Shop& s = app.shop;
         // main category member buy items[@n] sell count equip talk (items@n: the cursor on row n, scrolled to it)
         const std::string p = app.captureShop.substr(0, app.captureShop.find('@'));
-        if (p == "talk") {
+        if (p == "talk") { // (talk@n: n frames on, 40 by default; the area's EvrStart 4 - --area 7 / 13 / 19 / 25)
             shopChooseMain(app, 0);
-            for (int f = 0; f < 40; ++f) { stepShop(app); stepEvents(app); }
+            const size_t at = app.captureShop.find('@');
+            const int frames = at == std::string::npos ? 40 : SDL_atoi(app.captureShop.c_str() + at + 1);
+            for (int f = 0; f < frames; ++f) {
+                stepShop(app);
+                stepEvents(app);
+                if (SDL_getenv("CR_CAPTURE_TRACE"))
+                    std::printf("shop talk frame %d: phase %d running %d runner %d pages %zu\n", f, int(s.phase), int(s.talkRunning),
+                                int(app.runner.running()), app.dialogue.size());
+            }
+            std::printf("shop talk: entry %u, phase %d, running %d, %zu pages up\n", unsigned(app.events.returnEntry(4)), int(s.phase),
+                        int(s.talkRunning), app.dialogue.size());
         } else if (p != "main") {
             shopChooseMain(app, p == "sell" ? 2 : 1);
             if (p != "category") shopChooseCategory(app, p == "sell" || p == "items" ? 0 : 1);

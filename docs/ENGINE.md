@@ -326,6 +326,7 @@ c101/c102/c104/m207a, 2026-10-12).
       from selling and battles; the 10% gene-skill
       discount and the seeds' and genes' stat bonuses wait for skills.
       `--capture t0108_10.cmp <out> --shop main|category|member|buy|items|sell|count|equip|talk`
+      (`talk@n`: n frames into Talk; `--area 7 / 13 / 19 / 25` gives the area's EvrStart 4)
       (`items@n`: the cursor on row n, the list scrolled to it)
 - [x] Message windows as the script's `Open` picks them (`__EvtOpen` / `PutWin` / `PutMsg`: its
       style byte and lines choose a rect from 0xd3d30 and the look): style 2, the speech, on the
