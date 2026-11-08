@@ -25,7 +25,10 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   script's warp within its area no longer runs the room's entry script a second time; a script
   waiting for a tap with `Rept` isn't cut off after 45 s; a `Util` menu call takes its frame. On the deck and in the first dungeon:
   `FrmAdjc2` turns an actor to its record's facing (at once, or over the move) as the original
-  does; a `FrmPlayEff` effect faces the camera on the field too; a camera slide, a move, a scroll
+  does; a scene's effects face the camera on the field too - `FrmPlayEff2`'s turn their Y that way
+  and keep their X / Z angles, as do the NPC-effect native's and the fire walls (every effect the
+  original starts through `eff3d_set_with_pos`; `mdl_put` puts the camera's direction in the Y
+  rotation whenever its byte is set); a camera slide, a move, a scroll
   and a quake take their first step on the frame the script starts them; the original's one-pixel
   tremors show (the view's corner is rounded after the shake is added); `CameraPlayer` leaves a
   room without a painting on its last shot, as the original's camera does.

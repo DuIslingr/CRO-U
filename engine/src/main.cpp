@@ -3185,7 +3185,10 @@ struct ViewerHost : cr::EventHost {
         const int k = npc == 0x1c6 ? 0 : npc == 0x1c5 ? 1 : -1;
         cr::Vec3 p;
         if (k < 0 || app.game.flag(kClear[k][std::clamp(app.game.scenario, 0, 1)]) || !actorPos(app, npc, p)) return;
-        startEffect(app, app.fieldEffects, 0x98 + k, p, true, 1.0f, 0.0f);
+        const int h = startEffect(app, app.fieldEffects, 0x98 + k, p, true, 1.0f, 0.0f);
+        if (h) // (Uty_FireWall_Init: eff3d_set_with_pos - facing the camera)
+            for (Effect& fx : app.fieldEffects)
+                if (fx.handle == h) fx.faceCamera = true;
     }
     int bgmNo() override { return app.bgmNo; }
     void endMenu(int kind) override { // 2: the shop - SetShopBgmNoRecovery, __mc_SetMenuStat(7, 4)
@@ -3485,21 +3488,20 @@ struct ViewerHost : cr::EventHost {
             std::printf("  frame effect %d actor %d%s scale %d%s at (%.1f %.1f %.1f) angles (%.1f %.1f %.1f)\n", effect, actor, v ? "" : " (no record)", scale,
                         angled ? " angled" : "", v ? v[0] : 0.0f, v ? v[1] : 0.0f, v ? v[2] : 0.0f, v ? v[3] : 0.0f, v ? v[4] : 0.0f,
                         v ? v[5] : 0.0f);
-        float yaw = 0, pitch = 0, roll = 0;
-        bool faceCamera = false;
+        float pitch = 0, roll = 0;
         if (!actorPos(app, actor, p)) { // not an NPC: where the scene's record has it
             if (!v) return;
             p = {v[0], v[1], v[2]};
-            // FrmPlayEff2 (eff3d_set_with_pos_and_ang) takes its angles too; FrmPlayEff
-            // (eff3d_set_with_pos) sets the model's camera-facing flag (+0xfc7) itself, so
-            // mdl_put turns it to the camera every frame, on the field too
-            if (angled) yaw = v[4] * kDeg, pitch = v[3] * kDeg, roll = v[5] * kDeg;
-            else faceCamera = true;
+            // FrmPlayEff2 (eff3d_set_with_pos_and_ang) takes its angles too: X and Z stand, the Y
+            // one gives way to the camera - eff3d_set_with_pos and the _and_ang variant both set the
+            // model's camera-facing byte (+0xfc7), and mdl_put puts atan2(camera) in the Y rotation
+            // whenever it is set (an NPC's effect goes through eff3d_set to the same)
+            if (angled) pitch = v[3] * kDeg, roll = v[5] * kDeg;
         }
-        const int h = startEffect(app, app.fieldEffects, effect, p, true, float(scale) / 100.0f, yaw);
+        const int h = startEffect(app, app.fieldEffects, effect, p, true, float(scale) / 100.0f, 0.0f);
         if (h)
             for (Effect& fx : app.fieldEffects)
-                if (fx.handle == h) fx.pitch = pitch, fx.roll = roll, fx.faceCamera = faceCamera;
+                if (fx.handle == h) fx.pitch = pitch, fx.roll = roll, fx.faceCamera = true;
         if (h && app.frameEffects.size() < 16) app.frameEffects.push_back({(effect + 1) * (actor + 1), effect, h});
     }
     void stopFrameEffect(int effect, int actor) override {
@@ -3512,7 +3514,11 @@ struct ViewerHost : cr::EventHost {
     void npcEffect(int effect, int npc, int dy) override {
         ++app.scriptEffectCalls;
         cr::Vec3 p;
-        if (actorPos(app, npc, p)) startEffect(app, app.fieldEffects, effect, p + cr::Vec3{0, float(dy), 0}, false, 1.0f, 0.0f);
+        if (!actorPos(app, npc, p)) return;
+        const int h = startEffect(app, app.fieldEffects, effect, p + cr::Vec3{0, float(dy), 0}, false, 1.0f, 0.0f);
+        if (h) // (Uty_eff3d_set_fld goes through eff3d_set_with_pos: the camera-facing byte set)
+            for (Effect& fx : app.fieldEffects)
+                if (fx.handle == h) fx.faceCamera = true;
     }
     void mapScroll(int npc, float x, float y, float rate) override {
         ++app.scroll.mapScrolls;
