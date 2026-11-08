@@ -118,6 +118,7 @@ struct Effect {
     float scale = 1, yaw = 0;
     float pitch = 0, roll = 0; // FrmPlayEff2: the record's X and Z angles (radians)
     bool faceCamera = false;   // FrmPlayEff at a record's point: turned to the camera each frame (mdl + 0xfc7, as a battle's)
+    bool keepDepthWrite = false; // eff3d_set_with_pos_and_ang (FrmPlayEff2 at a record's point): its materials' depth writes kept
     int handle = 0;  // for stopping it
     int key = 0;     // FrmPlayEff's (effect + 1) x (actor + 1)
 };
@@ -167,6 +168,19 @@ struct App {
     int mapIndex = 0;
     cr::GpuMesh collision;
     int collisionPolys = 0;
+    cr::GpuMesh fieldShadows;            // the field's shadow fans (drawShadowFans)
+    std::vector<float> fieldShadowTris; // ... this frame's triangles (xyz x 3 each)
+    std::vector<uint8_t> fieldShadowAlpha; // and their vertices' alpha
+    int shadowsDrawn = 0;               // (tests: field shadows drawn so far)
+    int effectDepthWrites = 0;          // (tests: effect materials drawn writing depth)
+    // (tests: the last frame's 2D order - the sequence numbers of its portraits, its front fade and
+    // its message text, 0 none)
+    struct Order2D { int seq = 0, portrait = 0, frontFade = 0, text = 0; } order2d;
+    int frontFadeDrawnAt = -1;          // drawFrontFade: the frame it last drew (once a frame)
+    int frameNo = 0;
+    cr::Texture charSheet;              // tex2d slot 0x30: window_char (3.1.0: the languages' names, the boards' names)
+    bool charSheetTried = false;
+    float nearPlane = 10, farPlane = 4000; // setCamera3D's, the last field frame's (tests)
     std::string mapProps;               // prop model shown with the current map, if any
     bool showCollision = false;            // C: the collision and trigger meshes over the field (a debugging aid)
     bool showBackground = false;        // B: show the field's pre-rendered background
@@ -859,6 +873,7 @@ struct App {
         int loopFrom = 0, loopTo = 0; // Anim: loop frames a..b after the first play (0, 0 = whole)
         float alpha = 1, alphaFrom = 1, alphaTo = 1; // NpcFade / mdl_fadein / mdl_fadeout
         int fadeFrames = 0, fadeLeft = 0;
+        bool faded = false;  // mdl_set_alpha has run on it: alpha-blended for good (fadedMaterial)
         cr::MotionBlend blend; // the 2-frame cross-fade into a new action
     };
     std::vector<NpcDraw> npcDraws;         // this map's visible NPCs
@@ -931,6 +946,7 @@ struct App {
     float puzzleStartHeading = 0;          // ... and its heading (FieldPCCtrl::reset)
     float playerAlpha = 1, playerAlphaFrom = 1, playerAlphaTo = 1; // mdl_set_alpha on the leader
     int playerFadeFrames = 0, playerFadeLeft = 0;
+    bool playerFaded = false;              // mdl_set_alpha has run on the leader's model (until it is read again)
     cr::Vec3 puzzleStart;                  // where the leader came into the puzzle room (FieldPCCtrl::reset)
     struct CrystalCam { int npc = -1; int phase = 0; } crystalCam; // Uty_WarpCrystalCamera: 0 to the crystal, 1 back
     bool puzzleStartPending = false;
@@ -981,6 +997,9 @@ struct App {
     bool messageSkip = false;              // Uty_Chg_MsgSkip
     LoadedModel player;
     std::string playerName;
+    // the leader's model read by Set_Prtyno (read_mdl: colour 1 white) rather than with the map
+    // (fldread_prc's read_mdl_set: as the file has it - f011's 0.8)
+    bool playerByReadMdl = false, playerLoadedByReadMdl = false;
     cr::FieldWalker walker;
     bool havePlayer = false;
     float walkClock = 0;                   // movement runs in fixed 20 Hz steps like the original
@@ -1603,6 +1622,7 @@ void unloadModel(App& app) {
     app.renderer.destroy(app.triggerMesh);
     app.renderer.destroy(app.puzzleBeams);
     app.renderer.destroy(app.battleShadows);
+    app.renderer.destroy(app.fieldShadows);
     app.collisionPolys = 0;
     unloadLoaded(app, app.model);
 }
@@ -1739,6 +1759,45 @@ void loadModelFile(App& app, const std::string& name, LoadedModel& out, bool cha
     out.radius = std::max(0.5f * std::sqrt(cr::dot(ext, ext)), 0.01f);
 }
 
+// What the loaders do to a model's Appearances, by the path that reads it (3.1.0):
+// read_mdl_mem_mcm (fldread_prc's read_mdl_set: the alpha model, and the leader on a map's load) and
+// read_mdl_hd clear property bit 1 (and _hd bit 0): lit by nothing, glColor is colour 1 as the file has it
+void mdlMemRules(LoadedModel& lm) {
+    for (cr::Material& mt : lm.cpu.materials) mt.unlit = 1;
+}
+
+// read_mdl (npc_setup, Set_Prtyno, EvtNpcMdlRead): bits 0 and 1 cleared and colour 1 white and opaque
+// (setColor(1, 0xffffffff)); d0552bt's draw order 900 -> 0, others above 0 less 2000; d0451bt's 400
+// -> -400; c302..c306 alpha-blended (blend mode 0), no alpha test, no depth writes; a texture in pixel
+// format 1 or 6 (RGB888, PAL8_RGB8: no alpha) no alpha test; c321's textured ones no depth writes
+void readMdlRules(LoadedModel& lm, const std::string& name) {
+    cr::Model& m = lm.cpu;
+    const bool glass = name == "c302.bin" || name == "c303.bin" || name == "c304.bin" || name == "c305.bin" || name == "c306.bin";
+    for (cr::Material& mt : m.materials) {
+        mt.unlit = 1;
+        for (float& c : mt.diffuse) c = 1.0f;
+        if (name == "d0552bt.bin") mt.drawOrder = mt.drawOrder == 900 ? 0 : mt.drawOrder > 0 ? int16_t(mt.drawOrder - 2000) : mt.drawOrder;
+        else if (name == "d0451bt.bin") mt.drawOrder = mt.drawOrder == 400 ? -400 : mt.drawOrder;
+        else if (glass) mt.alphaThreshold = 0, mt.blendSrc = 4, mt.blendDst = 5, mt.properties &= ~16u;
+        if (mt.textureRef < 0) continue; // (mceAppearance_getTexture: unit 0's)
+        for (size_t k = 0; k < m.textureIds.size() && k < m.textures.size(); ++k)
+            if (m.textureIds[k] == mt.textureRef && (m.textures[k].format == 1 || m.textures[k].format == 6)) mt.alphaThreshold = 0;
+        if (name == "c321.bin") mt.properties &= ~16u;
+    }
+}
+
+// An NPC table model as npc_setup / EvtNpcMdlRead read it (read_mdl), cached by file
+LoadedModel& npcModel(App& app, const std::string& file) {
+    auto it = app.npcModels.find(file);
+    if (it == app.npcModels.end()) {
+        LoadedModel lm;
+        loadModelFile(app, file, lm, true);
+        readMdlRules(lm, file);
+        it = app.npcModels.emplace(file, std::move(lm)).first;
+    }
+    return it->second;
+}
+
 void showModel(App& app, int index) {
     app.renderer.resetHistory(); // a cut: the upscaler starts over
     if (app.models.empty()) return;
@@ -1852,11 +1911,7 @@ void showMap(App& app, int index, int forcedMap, int forcedArea) {
     SDL_Log("%s layers: background %dx%d (id %u), foreground %dx%d", field.c_str(), app.background.width,
             app.background.height, app.background.id, app.foreground.width, app.foreground.height);
 
-    app.mapProps.clear();
-    if (std::find(app.models.begin(), app.models.end(), field + ".bin") != app.models.end()) {
-        app.mapProps = field + ".bin";
-        loadModelFile(app, app.mapProps, app.model, false);
-    }
+    app.mapProps.clear(); // (the alpha model: once the stage record is known, below)
 
     cr::Mesh mesh;
     const float light[3] = {0.37f, 0.86f, 0.35f};
@@ -1940,6 +1995,19 @@ void showMap(App& app, int index, int forcedMap, int forcedArea) {
         if (app.background.id) { app.renderer.destroy(keep[0]); app.renderer.destroy(keep[1]); }
         else { app.renderer.destroy(app.foreground); app.background = keep[0], app.foreground = keep[1]; }
     }
+    // fldread_prc: the alpha model (the occluders, model slot 0) the stage record's +0x40 names
+    // (_stgalphaname) - t0110 / t0113 / t0142 share t0112's, t0131 / t0140 t0101's, d0301 / d0302 and
+    // c101_d07's d0601 / 3 / 4 / 5 have none -; a room without a record of its own: the field's namesake
+    if (app.haveStageCam && !app.stageCamBorrowed) {
+        if (app.stageCam.alphaModel >= 0 && app.stageCam.alphaModel < cr::kNumStageAlphaModels)
+            app.mapProps = cr::kStageAlphaModel[app.stageCam.alphaModel];
+    } else if (std::find(app.models.begin(), app.models.end(), field + ".bin") != app.models.end()) {
+        app.mapProps = field + ".bin";
+    }
+    if (!app.mapProps.empty()) {
+        loadModelFile(app, app.mapProps, app.model, false);
+        mdlMemRules(app.model); // (read_mdl_set -> mdl_mdl_init -> read_mdl_mem_mcm)
+    }
     if (app.haveStageCam && app.stageCam.scripted) {
         // its own FOV and view, the script's eye and target - until the script sets them, the best
         // framing among the maps sharing its collision's name (as a room with no record borrows)
@@ -1975,6 +2043,7 @@ void showMap(App& app, int index, int forcedMap, int forcedArea) {
     app.area = app.haveStageCam ? app.stageCam.area : cr::areaForMap(app.mapNumber, forcedArea);
     if (forcedMap >= 0) { app.mapNumber = forcedMap; app.area = forcedArea >= 0 ? forcedArea : app.area; }
     enterMap(app);
+    app.playerByReadMdl = false; // (fldread_prc's read_mdl_set)
     placePlayer(app);
     updateTitle(app);
 }
@@ -2067,6 +2136,7 @@ void endFieldTasks(App& app) {
     app.puzzleStartPending = false;
     app.playerAlpha = app.playerAlphaFrom = app.playerAlphaTo = 1;
     app.playerFadeFrames = app.playerFadeLeft = 0;
+    app.playerFaded = false; // (fldread_prc reads the leader's model again)
 }
 
 void enterMap(App& app) {
@@ -2129,6 +2199,7 @@ void enterMap(App& app) {
     npcSetup(app); // (FieldScene::onLoading: TreasureBoxManager::setup, RectWrapper::init, then PuzzleScene::init)
     puzzle::enter(app); // PuzzleScene::init in a puzzle room (stage -1 elsewhere)
     app.puzzleStartPending = app.puzzle.stage >= 0;
+    app.npcDraws.clear(); // (npc_setup reads their models again: no fade carried over from the last room)
     buildNpcDraws(app);
     cr::Mesh mesh;
     for (const cr::FieldNpc& n : app.npcs) {
@@ -2704,10 +2775,13 @@ void placePlayer(App& app) {
     app.havePlayer = false;
     if (!app.showPlayer || app.collisionData.polygons.empty()) return;
     const std::string name = playerModelName(app);
-    if (app.playerName != name) {
+    if (app.playerName != name || app.playerLoadedByReadMdl != app.playerByReadMdl) {
         unloadLoaded(app, app.player);
         loadModelFile(app, name, app.player, true);
+        if (app.playerByReadMdl) readMdlRules(app.player, name);
+        else mdlMemRules(app.player);
         app.playerName = name;
+        app.playerLoadedByReadMdl = app.playerByReadMdl;
     }
     if (app.player.meshes.empty()) return;
     const cr::Collision& col = app.collisionData;
@@ -3344,13 +3418,7 @@ struct ViewerHost : cr::EventHost {
         const cr::FieldNpc* n = findNpc(app, id);
         if (!n || n->model < 0 || n->model >= cr::kNumNpcModels || action < 0 || action >= cr::kNumActionFiles) return;
         const std::string file = cr::kNpcModelFile[n->model];
-        auto it = app.npcModels.find(file);
-        if (it == app.npcModels.end()) {
-            LoadedModel lm;
-            loadModelFile(app, file, lm, true);
-            it = app.npcModels.emplace(file, std::move(lm)).first;
-        }
-        LoadedModel& lm = it->second;
+        LoadedModel& lm = npcModel(app, file);
         const std::string mca = cr::kActionFile[action];
         auto known = lm.loaded.find(mca);
         if (known == lm.loaded.end()) {
@@ -3413,15 +3481,21 @@ struct ViewerHost : cr::EventHost {
         const float v[3] = {x, p.y, z};
         moveNpc(id, v, 0, Facing::Keep, int(std::hypot(p.x - x, p.z - z) / speed), 0);
     }
+    // mdl_set_alpha: from -> to over `frames` (mdl_put's steps); 0 frames leaves the alpha as it is -
+    // either way the model is alpha-blended from now on (fadedMaterial)
     void fadeNpc(int id, float from, float to, int frames) override {
         if (id == 0) { // the player's model (NpcFade 0: the field's slot 1), as mdl_set_alpha
+            app.playerFaded = true;
+            if (frames <= 0) { app.playerFadeLeft = 0; return; }
             app.playerAlphaFrom = from, app.playerAlphaTo = to, app.playerAlpha = from;
-            app.playerFadeFrames = app.playerFadeLeft = std::max(frames, 1);
+            app.playerFadeFrames = app.playerFadeLeft = frames;
             return;
         }
         for (auto* d : npc(id)) {
+            d->faded = true;
+            if (frames <= 0) { d->fadeLeft = 0; continue; }
             d->alphaFrom = from; d->alphaTo = to; d->alpha = from;
-            d->fadeFrames = d->fadeLeft = std::max(frames, 1);
+            d->fadeFrames = d->fadeLeft = frames;
         }
     }
     void jointNpc(int npc, int parent, int node) override {
@@ -3497,6 +3571,7 @@ struct ViewerHost : cr::EventHost {
         if (lead == c) return;
         lead = c;
         app.playerChar = c;
+        app.playerByReadMdl = true; // (Set_Prtyno: read_mdl)
         placePlayer(app);
     }
     int omuItemValue() override {
@@ -3861,6 +3936,7 @@ struct ViewerHost : cr::EventHost {
                         angled ? " angled" : "", v ? v[0] : 0.0f, v ? v[1] : 0.0f, v ? v[2] : 0.0f, v ? v[3] : 0.0f, v ? v[4] : 0.0f,
                         v ? v[5] : 0.0f);
         float pitch = 0, roll = 0;
+        bool withAngles = false; // (eff3d_set_with_pos_and_ang: FrmPlayEff2 at a record's point - an NPC's goes through eff3d_set)
         if (!actorPos(app, actor, p)) { // not an NPC: where the scene's record has it
             if (!v) return;
             p = {v[0], v[1], v[2]};
@@ -3868,12 +3944,12 @@ struct ViewerHost : cr::EventHost {
             // one gives way to the camera - eff3d_set_with_pos and the _and_ang variant both set the
             // model's camera-facing byte (+0xfc7), and mdl_put puts atan2(camera) in the Y rotation
             // whenever it is set (an NPC's effect goes through eff3d_set to the same)
-            if (angled) pitch = v[3] * kDeg, roll = v[5] * kDeg;
+            if (angled) pitch = v[3] * kDeg, roll = v[5] * kDeg, withAngles = true;
         }
         const int h = startEffect(app, app.fieldEffects, effect, p, true, float(scale) / 100.0f, 0.0f);
         if (h)
             for (Effect& fx : app.fieldEffects)
-                if (fx.handle == h) fx.pitch = pitch, fx.roll = roll, fx.faceCamera = true;
+                if (fx.handle == h) fx.pitch = pitch, fx.roll = roll, fx.faceCamera = true, fx.keepDepthWrite = withAngles;
         if (h && app.frameEffects.size() < 16) app.frameEffects.push_back({(effect + 1) * (actor + 1), effect, h});
     }
     void stopFrameEffect(int effect, int actor) override {
@@ -4345,6 +4421,8 @@ struct OptRow {
     int* gauge = nullptr;        // Gauge: the 0..100 setting
     int value = 0;
     std::string valueText;       // Value
+    const cr::Texture* valueTex = nullptr; // Value: a picture in place of the text (3.1.0's language name)
+    float valueUv[4] = {0, 0, 0, 0};
     bool enabled = true;
     std::string hint;             // shown under the rows while the cursor is on this one
     std::function<void(int)> act; // Gauge / Value: -1 / +1 (Value: 0 = Enter); Pair: 0 / 1; Check: 0
@@ -4378,6 +4456,8 @@ void saveImportAnswer(App& app, bool yes) {
         bootTitle(app);
     }
 }
+
+bool languageSheet(App& app);
 
 std::vector<OptRow> optionRows(App& app, int page) {
     std::vector<OptRow> rows;
@@ -4430,6 +4510,23 @@ std::vector<OptRow> optionRows(App& app, int page) {
     App::Video& v = app.video;
     switch (page) {
     case 0: { // Game
+        if (languageSheet(app)) { // 3.1.0 (__menuu_OptionPrc 5): one Language row, its arrows through the eight
+            // languages (left: 0 -> 7), the name window_char's (88 x 24 at u = language x 88)
+            value(sysLabel(app, 58082, "Language"), cr::kLanguageName[app.language], [&app](int dir) {
+                for (int k = 1; k <= cr::kLanguages; ++k) { // (only those the data has)
+                    const int l = ((app.language + (dir < 0 ? -1 : 1) * k) % cr::kLanguages + cr::kLanguages) % cr::kLanguages;
+                    if (languageUsable(app, l)) {
+                        app.language = l;
+                        break;
+                    }
+                }
+                applyLanguage(app);
+                saveMix(app);
+            });
+            rows.back().valueTex = &app.charSheet;
+            const float uv[4] = {88.0f * float(app.language), 0, 88, 24};
+            std::memcpy(rows.back().valueUv, uv, sizeof uv);
+        } else {
         OptRow lang;
         lang.label = sysLabel(app, 58082, "Language");
         lang.kind = OptControl::Pair;
@@ -4454,6 +4551,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
             applyLanguage(app);
             saveMix(app);
         });
+        }
         onOff(sysLabel(app, 58108, "Environment Effects"), &app.environmentEffects, nullptr);
         onOff(sysLabel(app, 58109, "Lock Screen Orientation"), &app.lockOrientation,
               [&app] { applyOrientation(app, app.lockOrientation); });
@@ -4850,7 +4948,9 @@ void drawOptions(App& app, float, float) {
                 m.button(cx + 120 * k, y - 8, row.words[k], row.texts[k], row.selected == k, a, false);
             break;
         case OptControl::Value: // our picker: the value on a button with the Back arrows either side
-            m.button(cx + 60, y - 8, -1, row.valueText, false, dim, cursor && row.enabled);
+            m.button(cx + 60, y - 8, -1, row.valueTex ? std::string() : row.valueText, false, dim, cursor && row.enabled);
+            if (row.valueTex) // (where the button's word goes)
+                m.imagePieceTo(*row.valueTex, cx + 70, y, 88, 24, row.valueUv[0], row.valueUv[1], row.valueUv[2], row.valueUv[3], dim);
             m.piece(cx + 36, y + 4, 336, 880, 16, 16, dim);
             m.piece(cx + 180, y + 4, 352, 880, 16, 16, dim);
             break;
@@ -5153,6 +5253,23 @@ int facePicture(const App& app, int character) {
 }
 // __ComUty_FaceBoardBackDraw: whose name picture (45 / 53 + n) a record's board shows - record 1's
 // for record 0 while it is Olgar, record 3's (Dante) for record 1 in scenario 1
+// tex2d slot 0x30 (tex2d_setup_tex: window_char, the _ipad / _hd sheet 2048 x 1024 for 1024 x 512
+// tex2d units): 3.1.0's languages' names (88 x 24 at u = language x 88, v 0) and the face boards' names
+// (MuTex table 8: 92 x 20 at u = language x 92, v = 32 + row x 20). 1.0.0's data has no such sheet
+const cr::Texture* charSheet(App& app) {
+    if (!app.charSheetTried && app.rendererReady) {
+        app.charSheetTried = true;
+        cr::Image img;
+        if (loadImage(app, "window_char.mct", img) && img.width >= 1024 && img.height > 0) {
+            img.logicalW = 1024, img.logicalH = 1024 * img.height / img.width;
+            app.charSheet = app.renderer.upload(img);
+        }
+    }
+    return app.charSheet.id ? &app.charSheet : nullptr;
+}
+// 3.1.0's Options and boards: the data's eight languages and its window_char sheet
+bool languageSheet(App& app) { return app.systemText.hasLanguage(2) && charSheet(app); }
+
 int boardNameIndex(const App& app, int c) {
     if (c == 0 && viegIsOlgar(app)) return 1;
     if (c == 1 && olgarIsDante(app)) return 3;
@@ -6260,7 +6377,11 @@ void drawFaceBoard(App& app, cr::MenuPainter& m, float x, float y, int c, int hp
     const cr::PartyMember& pm = (gs ? *gs : app.game).party[size_t(c)];
     m.picture(28, x + 8, y + 24, a);
     m.picture(37 + c, x + 136, y + 24, a);
-    m.picture((app.language == 0 ? 45 : 53) + boardNameIndex(app, c), x + 96, y + 24, a);
+    if (languageSheet(app)) // 3.1.0 (FUN_000509fc): window_char's name, row c (Olgar's / Dante's for 0 / 1 when
+        // the story has made them so) in the language's column - MuComPictTexNoDraw(0x30, table 8, c + 9 x language)
+        m.imagePieceTo(app.charSheet, x + 96, y + 24, 92, 20, 92.0f * float(std::clamp(app.language, 0, 7)),
+                       32.0f + 20.0f * float(boardNameIndex(app, c)), 92, 20, a);
+    else m.picture((app.language == 0 ? 45 : 53) + boardNameIndex(app, c), x + 96, y + 24, a);
     m.picture(facePicture(app, c), x, y, a);
     const cr::GameState& g = gs ? *gs : app.game;
     if (g.scenario == 1 && c == g.leaders[1]) m.picture(164, x + 238, y + 26, a); // the leader's mark
@@ -10762,6 +10883,25 @@ float screenFadeBackAlpha(const App& app) { // op 58's quad (PutMask's second)
     return app.fadeBackFrom + (app.fadeBackTo - app.fadeBackFrom) * t;
 }
 
+// The 2D is one queue sorted by draw order: ScnEffect's layer-0 overlays -120, the back fade and the
+// menu mask -100 (50 on the title / save), Tex2d's portraits 50, the window texture 101, the front
+// fade (Screen, op 16) 189, the message text 200, the window texture while NowLoading 500. The front
+// fade: once a frame, over the portraits and the message panel, under the text (drawFrame decides
+// where - the message's lines and name call it first)
+void drawFrontFade(App& app) {
+    if (app.mode != Mode::Maps || app.frontFadeDrawnAt == app.frameNo) return;
+    app.frontFadeDrawnAt = app.frameNo;
+    const float a = screenFadeAlpha(app);
+    if (a <= 0.001f) return;
+    cr::Renderer& r = app.renderer;
+    const float keep = r.origin();
+    const int layer = r.layer();
+    r.setOrigin(0), r.setLayer(0);
+    r.fillRect(0, 0, r.screenW(), float(cr::Renderer::kLogicalH), app.fadeGrey, app.fadeGrey, app.fadeGrey, a);
+    r.setOrigin(keep), r.setLayer(layer);
+    app.order2d.frontFade = ++app.order2d.seq;
+}
+
 // One 20 Hz frame of the running script and of the things it set going.
 // Voiced builds: a page's clips start as the typing reaches their 0x1e (stepVoiceCue); a page turn
 // cuts the one still playing unless 0x1e 0xffff kept it, and so does the closing tap.
@@ -10891,6 +11031,7 @@ App::NpcDraw* drawOf(App& app, int npc) {
 
 void fade(App& app, int npc, float from, float to, int frames) { // mdl_set_alpha
     if (App::NpcDraw* d = drawOf(app, npc)) {
+        d->faded = true;
         d->alphaFrom = from, d->alphaTo = to, d->alpha = from;
         d->fadeFrames = d->fadeLeft = std::max(frames, 1);
     }
@@ -11112,7 +11253,7 @@ void teleportTo(App& app, int t) {
     if (pz.esp > 0) --pz.esp;
     o.pending = 8; // TeleportMessage(the player's cell, 4, 4, 6, 6)
     o.toRow = pr, o.toCol = pc, o.outFrames = 4, o.inFrames = 4, o.waitOut = 6, o.waitIn = 6;
-    app.playerAlphaFrom = 1, app.playerAlphaTo = 0, app.playerFadeFrames = app.playerFadeLeft = 4;
+    app.playerAlphaFrom = 1, app.playerAlphaTo = 0, app.playerFadeFrames = app.playerFadeLeft = 4, app.playerFaded = true;
     npcEffect(app, 0x8d, -1);
     npcEffect(app, 0x8e, -1);
     app.sound.play(0x134);
@@ -12445,13 +12586,7 @@ void buildNpcDraws(App& app) {
         if (!stageModel && (n.pos[1] >= 900.0f || (n.id >= 400 && n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) &&
             !app.placedNpcs.count(n.id)) // (a table NPC below 400 may stand at a room's origin: c101_d07's 142)
             continue;
-        auto it = app.npcModels.find(file);
-        if (it == app.npcModels.end()) {
-            LoadedModel lm;
-            loadModelFile(app, file, lm, true);
-            it = app.npcModels.emplace(file, std::move(lm)).first;
-        }
-        if (it->second.meshes.empty()) continue;
+        if (npcModel(app, file).meshes.empty()) continue;
         const cr::Mat4 w = npcWorld(n);
         App::NpcDraw d;
         for (const App::NpcDraw& o : old) // the same NPC: keep its animation and fade
@@ -12584,7 +12719,7 @@ void updateNpcJoints(App& app) {
 }
 
 void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::Material* override = nullptr,
-                float alpha = 1.0f, float matTime = -1.0f, int pass = 0);
+                float alpha = 1.0f, float matTime = -1.0f, int pass = 0, bool faded = false);
 const cr::Action* effectMaterialAction(const LoadedModel& lm, const cr::Material* mt);
 bool effectUvMotion(const LoadedModel& lm, const cr::Material* mt, float time, float shift[2], float scale[2], int unit = 0);
 const cr::Texture* secondUnit(const LoadedModel& lm, size_t mesh, const cr::Material* mt, float time, float uv2[4]);
@@ -12625,15 +12760,29 @@ void drawNpcs(App& app, const cr::Mat4& vp) {
         cr::Mat4 world; // (as a frame between the game's steps shows it)
         float alpha;
         shownNpc(app, d, world, alpha);
-        drawLoaded(app, lm, vp * world, nullptr, alpha, matAnim ? d.time : -1.0f);
+        drawLoaded(app, lm, vp * world, nullptr, alpha, matAnim ? d.time : -1.0f, 0, d.faded);
         modelDrawn(app);
     }
 }
 
+// A model mdl_set_alpha has run on, as it stays for good (back at 255 too): every Appearance
+// alpha-blended (blend mode 0), property bit 6 cleared (no colour array: glColor), its alpha test at
+// most 1; mdl_put: texture unit 0 modulated, colour 1's alpha replaced by the model's
+cr::Material fadedMaterial(cr::Material mt, float alpha) {
+    mt.blendSrc = 4, mt.blendDst = 5;
+    mt.properties &= ~0x40u;
+    mt.alphaThreshold = std::min<uint8_t>(mt.alphaThreshold, 1);
+    mt.texBlend = 4;
+    mt.diffuse[3] = std::clamp(alpha, 0.0f, 1.0f);
+    return mt;
+}
+
 // Draws a model's visible meshes: opaque materials first, then blended ones by draw order.
-// `override`, if given, replaces every material (texture unbound); `alpha` < 1 fades it.
+// `override`, if given, replaces every material (texture unbound); `alpha` < 1 fades it - `faded`:
+// as mdl_set_alpha / mdl_put leave it (fadedMaterial), else the old way (the alpha multiplied in).
 // `pass` 1 draws those of draw order under 0 alone, 2 those of 0 and over (0 all)
-void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::Material* override, float alpha, float matTime, int pass) {
+void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::Material* override, float alpha, float matTime, int pass,
+                bool faded) {
     const cr::Model& cpu = m.cpu;
     static const cr::Material kDefaultMaterial;
     auto baseOf = [&](size_t i) -> const cr::Material& {
@@ -12673,6 +12822,8 @@ void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::M
             mesh.texture >= 0 && mesh.texture < int(m.textures.size()) ? &m.textures[mesh.texture] : nullptr;
         if (override) {
             app.renderer.drawMesh(mesh, nullptr, mvp, *override);
+        } else if (faded) {
+            app.renderer.drawMesh(mesh, tex, mvp, fadedMaterial(materialOf(i), alpha), app.smoothFilter);
         } else if (alpha < 0.999f) {
             // mdl_set_alpha: every Appearance alpha-blended (blend mode 0), its alpha test at most 1;
             // mdl_put: texture unit 0 modulated, colour 1's alpha the model's
@@ -12686,6 +12837,111 @@ void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::M
             app.renderer.drawMesh(mesh, tex, mvp, materialOf(i), app.smoothFilter);
         }
     }
+}
+
+// ---- Shadows (FUN_00016008: the field's npc_shodow; the battle's fan is FUN_0001628c) ----
+
+// A model's node by its record user id (findObject3D type 0x13: 1102 the head, 1101 the body), -1 none
+int nodeOfUser(const cr::Model& m, int user) {
+    for (const auto& t : m.records)
+        if (t.user == user)
+            for (const auto& [obj, n] : m.objectNodes)
+                if (obj == t.id) return n;
+    return -1;
+}
+
+// A shadow's fan (FUN_00016008 / FUN_0001628c, the field's and the battle's alike): 32 tex2d_add_tri
+// (centre, point i, point i + 1) of a black ellipse - the points i / 31 turns round, the last back to
+// 0 - with radii rx (the model's x) and rz (its z), turned by its yaw, at `at`, every vertex at alpha `a`
+void addShadowFan(std::vector<float>& tris, std::vector<uint8_t>& alpha, cr::Vec3 at, float yaw, float rx, float rz, float a) {
+    const float cy = std::cos(yaw), sy = std::sin(yaw);
+    auto point = [&](int i) {
+        const float t = float(i == 32 ? 0 : i) / 31.0f * 2.0f * 3.14159265f;
+        const float x = rx * std::sin(t), z = rz * std::cos(t);
+        return cr::Vec3{at.x + x * cy + z * sy, at.y, at.z + z * cy - sy * x};
+    };
+    tris.reserve(tris.size() + 32 * 9);
+    for (int i = 0; i < 32; ++i) {
+        const cr::Vec3 p0 = point(i), p1 = point(i + 1);
+        tris.insert(tris.end(), {at.x, at.y, at.z, p0.x, p0.y, p0.z, p1.x, p1.y, p1.z});
+    }
+    alpha.insert(alpha.end(), 32 * 3, uint8_t(std::lround(std::clamp(a, 0.0f, 1.0f) * 255.0f)));
+}
+
+// The fans into tex2d slot 0x5e (draw order 990: after the models): one dynamic mesh of black
+// vertices - untextured, double-sided, depth tested, not written. `mesh` grows to hold them all
+void drawShadowFans(App& app, cr::GpuMesh& mesh, const std::vector<float>& tris, const std::vector<uint8_t>& alpha, const cr::Mat4& vp) {
+    if (alpha.empty()) return;
+    const size_t verts = alpha.size(), room = std::max<size_t>(verts, 5 * 32 * 3);
+    if (!mesh.vao || size_t(mesh.indexCount) < verts) {
+        app.renderer.destroy(mesh);
+        cr::Mesh m;
+        m.positions.assign(room * 3, 0.0f);
+        m.uvs.assign(room * 2, 0.0f);
+        m.colors.assign(room * 4, 0);
+        for (uint32_t i = 0; i < room; ++i) m.indices.push_back(i);
+        mesh = app.renderer.upload(m);
+    }
+    const size_t cap = size_t(mesh.indexCount);
+    std::vector<float> pos = tris, uv(cap * 2, 0.0f);
+    pos.resize(cap * 3, 0.0f);
+    std::vector<uint8_t> col(cap * 4, 0);
+    for (size_t v = 0; v < verts && v < cap; ++v) col[v * 4 + 3] = alpha[v];
+    app.renderer.updatePositions(mesh, pos, uv, col);
+    cr::Material m; // (the battle's 9626: properties & ~0x10)
+    m.culling = 0;
+    m.properties = 8;
+    m.blendSrc = 4, m.blendDst = 5;
+    m.drawOrder = 990;
+    app.renderer.drawMesh(mesh, nullptr, vp, m);
+}
+
+// A shadow for a model whose colour's top byte is `a255` (0 none): percent < 0 at the model's
+// position (y - 0.3 + 0.1) at |percent|, else under its node 1102 (btlcamera_getpos2: that node's x and
+// z - the model's own place when it has none) at the model's height + 0.1
+void modelShadow(App& app, const LoadedModel& lm, const std::vector<cr::Mat4>& pose, const cr::Mat4& world,
+                 float rx, float rz, int percent, float modelAlpha) {
+    const int a255 = int(std::lround(std::clamp(modelAlpha, 0.0f, 1.0f) * 255.0f));
+    if (a255 == 0) return; // (+0xfb4 = 0: none)
+    cr::Vec3 at{world.m[12], world.m[13], world.m[14]};
+    if (percent < 0) at.y += -0.3f + 0.1f;
+    else {
+        const int node = nodeOfUser(lm.cpu, 1102);
+        if (node >= 0 && node < int(pose.size())) {
+            const cr::Mat4 nw = world * pose[size_t(node)];
+            at.x = nw.m[12], at.z = nw.m[14];
+        }
+        at.y += 0.1f;
+    }
+    const float yaw = std::atan2(world.m[8], world.m[10]);
+    const int alpha = std::abs(percent) * a255 / 100; // ((|percent| x alpha) / 100) << 24
+    if (alpha <= 0 || rx <= 0 || rz <= 0) return;
+    addShadowFan(app.fieldShadowTris, app.fieldShadowAlpha, at, yaw, rx, rz, float(std::min(alpha, 255)) / 255.0f);
+    ++app.shadowsDrawn;
+}
+
+// npc_shodow (draw3D, after mdl_put): the leader's (radii 3 / 3, 80%) whenever its model's colour is
+// not 0, then each NPC whose table row's +18 has bit 15 (+30..+36: radii and percent)
+void drawFieldShadows(App& app, const cr::Mat4& vp) {
+    app.fieldShadowTris.clear(), app.fieldShadowAlpha.clear();
+    if (app.havePlayer && playerShown(app) && !app.player.meshes.empty())
+        modelShadow(app, app.player, app.player.world, playerWorld(shownWalker(app)), 3, 3, 80, shownPlayerAlpha(app));
+    for (const App::NpcDraw& d : app.npcDraws) {
+        if (d.index < 0 || d.index >= int(app.npcs.size()) || !app.npcs[size_t(d.index)].hasShadow()) continue;
+        const cr::FieldNpc& n = app.npcs[size_t(d.index)];
+        auto it = app.npcModels.find(d.model);
+        if (it == app.npcModels.end() || it->second.meshes.empty()) continue;
+        LoadedModel& lm = it->second;
+        cr::Mat4 world;
+        float alpha;
+        shownNpc(app, d, world, alpha);
+        if (n.shadow[3] >= 0 && !lm.cpu.skeleton.nodes.empty()) { // (the head where this frame's pose has it)
+            const cr::Action* act = d.action >= 0 && d.action < int(lm.actions.size()) ? &lm.actions[size_t(d.action)] : nullptr;
+            poseWorld(lm.cpu.skeleton, lm.actions, act, d.time, d.blend, lm.world);
+        }
+        modelShadow(app, lm, lm.world, world, n.shadow[1], n.shadow[2], n.shadow[3], alpha);
+    }
+    drawShadowFans(app, app.fieldShadows, app.fieldShadowTris, app.fieldShadowAlpha, vp);
 }
 
 // Pieces of window_hd.mct (2048 x 2048), measured from its alpha
@@ -12716,6 +12972,8 @@ float messagePt(const App& app) { return multilingualData(app) || (app.msgStyle 
 // Japanese, Chinese and Korean, 17 for the rest (both releases)
 float namePt(const App& app) { return app.msgStyle & 0x20 ? (cjkLanguage(app.language) ? 16.0f : 17.0f) : 14.0f; }
 void drawMessageLines(App& app, const std::vector<std::string>& page, float x, float y, float scale, bool centreAll) {
+    drawFrontFade(app); // (the text at 200: over the front fade)
+    app.order2d.text = ++app.order2d.seq;
     cr::Renderer& r = app.renderer;
     bool any = centreAll;
     for (const std::string& l : page) any |= !l.empty() && l[0] == '\x01';
@@ -12821,6 +13079,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         } else if (style & 0x20) { // a black band across the bottom (tex2d y 252..352), the name on its edge
             r.fillRect(left, 2.0f * 252 + 64, width, 768 - (2.0f * 252 + 64), 0, 0, 0, wa);
             if (!speaker.empty() && textOn) { // PutMsg: drawfont_l at tex2d (16, 236), just above the band
+                drawFrontFade(app); // (the name: text, over the front fade)
                 const float nx = 2.0f * 16 + 32, ny = 2.0f * 236 + 64 - 11; // (the larger box's offset)
                 app.nameHud.setTint(0, 0, 0); // (an outline, so it reads over a bright scene too)
                 for (int k = 0; k < 4; ++k) app.nameHud.drawAt(r, {speaker}, nx + (k & 1 ? 2 : -2), ny + (k & 2 ? 2 : -2), kNameScale, 0, 0, 0.0f);
@@ -12842,6 +13101,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
             drawWinPiece(app, kWinMessagePanel, 32, wy, 960, 192, wa);
             if (!speaker.empty() && textOn) {
                 drawWinPiece(app, kWinSmallPanel, 32, wy - 36, 300, 40);
+                drawFrontFade(app); // (the name: text, over the front fade)
                 app.nameHud.setTint(1, 1, 1);
                 app.nameHud.drawAt(r, {speaker}, 62, wy - 34, 1.9f, 0, 0, 0.0f);
             }
@@ -12886,6 +13146,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
             drawWinPiece(app, kWinParchmentPhone, 32, 2.0f * (pr[0] + 16) + 64, 960, 256, wa);
         }
         if (!speaker.empty() && textOn) {
+            drawFrontFade(app); // (the name: text, over the front fade)
             app.nameHud.setTint(1, 1, 1);
             app.nameHud.drawAt(r, {speaker}, 2.0f * 24 + 32, 2.0f * 206 + 64 - 25, kNameScale, 0, 0, 0.0f);
         }
@@ -12898,6 +13159,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         const short* pr = kRect[app.msgLines == 1];
         app.renderer.drawQuadUV(app.cutinTex, left, 2.0f * (pr[0] + 32 - 32) + 128, width, 288, 0, 112, 512, 144, 1, 1, 1, wa);
         if (!speaker.empty() && textOn) {
+            drawFrontFade(app); // (the name: text, over the front fade)
             app.nameHud.setTint(1, 1, 1);
             app.nameHud.drawAt(r, {speaker}, 2.0f * 24 + 32, 2.0f * 222 + 64 - 25, kNameScale, 0, 0, 0.0f);
         }
@@ -12907,6 +13169,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
     } else if (true) { // the parchment (style 2, and the default)
         drawWinPiece(app, kWinParchment, left, H - 280, width, 280, wa);
         if (!speaker.empty() && textOn) {
+            drawFrontFade(app); // (the name: text, over the front fade)
             app.nameHud.setTint(1, 1, 1);
             app.nameHud.drawAt(r, {speaker}, left + 44, H - 285, kNameScale, 0, 0, 0.0f); // on the streak (piece y 14..52)
         }
@@ -13293,6 +13556,9 @@ LoadedModel* effectModel(App& app, int id) {
     const std::vector<uint8_t> part(app.effBin.begin() + off, app.effBin.begin() + off + size);
     cr::Model m;
     if (!cr::loadModelPackage(part, m)) return nullptr;
+    // eff3d_set_with_pos[_and_ang] (read_mdl_mem): property bits 0 and 1 cleared - glColor colour 1 -
+    // and no alpha test (threshold 0); the depth writes: drawEffects
+    for (cr::Material& mt : m.materials) mt.unlit = 1, mt.alphaThreshold = 0;
     for (const auto& img : m.textures) {
         cr::Image t = img;
         if (app.video.hdTextures) applyHd(app, t);
@@ -13487,7 +13753,8 @@ void drawEffects(App& app, const std::vector<Effect>& list, const cr::Mat4& vp, 
         world.m[8] = (cx * sy * cz + sx * sz) * k, world.m[9] = (cx * sy * sz - sx * cz) * k, world.m[10] = cx * cy * k;
         world.m[12] = e.pos.x, world.m[13] = e.pos.y, world.m[14] = e.pos.z;
         const cr::Mat4 mvp = vp * world;
-        // drawn last, depth tested but not written (draw order + 1000, eff3d_set_with_pos_and_ang)
+        // drawn last (draw order + 10000), depth tested; eff3d_set_with_pos clears the depth writes
+        // (property bit 4), eff3d_set_with_pos_and_ang keeps each material's
         std::vector<size_t> order(lm.meshes.size());
         for (size_t i = 0; i < order.size(); ++i) order[i] = i;
         std::stable_sort(order.begin(), order.end(), [&](size_t x, size_t y) {
@@ -13506,7 +13773,8 @@ void drawEffects(App& app, const std::vector<Effect>& list, const cr::Mat4& vp, 
                         for (int k = 0; k < 4; ++k) mat.diffuse[k] = std::clamp(v[k], 0.0f, 1.0f);
                 }
             if (mat.diffuse[3] <= 0.004f && mat.blended()) continue;
-            mat.properties &= ~16u; // no depth writes
+            if (!e.keepDepthWrite) mat.properties &= ~16u; // (eff3d_set_with_pos: no depth writes)
+            app.effectDepthWrites += mat.depthWrite();
             const cr::GpuMesh& mesh = lm.meshes[i];
             const cr::Texture* tex = mesh.texture >= 0 && mesh.texture < int(lm.textures.size()) ? &lm.textures[size_t(mesh.texture)] : nullptr;
             float uv2[4];
@@ -16129,44 +16397,12 @@ void addBattleShadow(App& app, const App::Battle::Actor& a) {
     const cr::Vec3 c = actorPoint(app, a, 1102); // (btlcamera_getpos2: node 1102)
     sh.at = {c.x, a.pos.y + 0.1f, c.z};
     sh.rx = float(rx), sh.rz = float(rz);
-    // the fan's triangles: (centre, point i, point i + 1), i / 31 turns round, the last back to 0
-    const float cy = std::cos(a.yaw), sy = std::sin(a.yaw);
-    auto point = [&](int i) {
-        const float t = float(i == 32 ? 0 : i) / 31.0f * 2.0f * 3.14159265f;
-        const float x = sh.rx * std::sin(t), z = sh.rz * std::cos(t);
-        return cr::Vec3{sh.at.x + x * cy + z * sy, sh.at.y, sh.at.z + z * cy - sy * x};
-    };
-    b.shadowTris.reserve(b.shadowTris.size() + 32 * 9);
-    for (int i = 0; i < 32; ++i) {
-        const cr::Vec3 p0 = point(i), p1 = point(i + 1);
-        b.shadowTris.insert(b.shadowTris.end(), {sh.at.x, sh.at.y, sh.at.z, p0.x, p0.y, p0.z, p1.x, p1.y, p1.z});
-    }
-    b.shadowAlpha.insert(b.shadowAlpha.end(), 32 * 3, uint8_t(std::lround(sh.alpha * 255.0f)));
+    addShadowFan(b.shadowTris, b.shadowAlpha, sh.at, a.yaw, sh.rx, sh.rz, sh.alpha); // (the field's fan)
     b.shadows.push_back(sh);
 }
 
 void drawBattleShadows(App& app, const cr::Mat4& vp) {
-    App::Battle& b = app.battle;
-    constexpr size_t kVerts = 5 * 32 * 3;
-    if (b.shadowAlpha.empty()) return;
-    if (!app.battleShadows.vao) {
-        cr::Mesh mesh;
-        mesh.positions.assign(kVerts * 3, 0.0f);
-        mesh.uvs.assign(kVerts * 2, 0.0f);
-        mesh.colors.assign(kVerts * 4, 0);
-        for (uint32_t i = 0; i < kVerts; ++i) mesh.indices.push_back(i);
-        app.battleShadows = app.renderer.upload(mesh);
-    }
-    std::vector<float> pos = b.shadowTris, uv(kVerts * 2, 0.0f);
-    pos.resize(kVerts * 3, 0.0f);
-    std::vector<uint8_t> col(kVerts * 4, 0);
-    for (size_t v = 0; v < b.shadowAlpha.size() && v < kVerts; ++v) col[v * 4 + 3] = b.shadowAlpha[v];
-    app.renderer.updatePositions(app.battleShadows, pos, uv, col);
-    cr::Material m; // untextured, double-sided, depth tested, not written (9626: properties & ~0x10)
-    m.culling = 0;
-    m.properties = 8;
-    m.blendSrc = 4, m.blendDst = 5;
-    app.renderer.drawMesh(app.battleShadows, nullptr, vp, m);
+    drawShadowFans(app, app.battleShadows, app.battle.shadowTris, app.battle.shadowAlpha, vp);
 }
 
 // btl_prc: the whole screen through the formation's camera (btl_main: camera formation - 2;
@@ -16921,6 +17157,31 @@ void drawCheckerboard(cr::Renderer& r) {
 // centred on the 1024 x 768 screen, moved by the quake) with aspect viewW / viewH in whole
 // numbers and the stage's FOV: a 1024 view is a 2048 x 2048 frame of which the screen shows the
 // middle. That frustum, mapped onto the whole screen (wider screens see past its sides)
+// FieldCamera::setCamera3D's near and far planes, from the live eye and target and the map (3.1.0):
+// near = 1 + an offset - eye y / 10 above 200, else the eye's distance / 10 when it is over 100 and
+// eye and target differ in height by over 25 (not on maps 46, 130, 86, 87), else 10; none on maps
+// 19, 28, 65, 97, 102, 138 and 13, 29, 47, 66, 71, 91, 152, 174, 185, 191, 197, 208, 214; eye y / 2 on
+// 15, 22, 34; 100 on 83 - and none while flag 0x1003 is set; far 2000 (map 83 4000, flag 0x1003 7000)
+void fieldDepthRange(const App& app, const cr::Vec3& eye, const cr::Vec3& target, float& zNear, float& zFar) {
+    const int map = app.mapNumber;
+    auto in = [map](std::initializer_list<int> l) { return std::find(l.begin(), l.end(), map) != l.end(); };
+    float off = 10;
+    if (eye.y > 200) off = eye.y / 10;
+    else {
+        const cr::Vec3 d = eye - target;
+        const float dist = std::sqrt(cr::dot(d, d));
+        if (dist > 100 && std::fabs(eye.y - target.y) > 25 && !in({46, 130, 86, 87})) off = dist / 10;
+    }
+    if (in({19, 28, 65, 97, 102, 138})) off = 0;
+    if (in({13, 29, 47, 66, 71, 91, 152, 174, 185, 191, 197, 208, 214})) off = 0;
+    if (in({15, 22, 34})) off = eye.y * 0.5f;
+    if (map == 83) off = 100;
+    const bool wide = app.game.flag(0x1003);
+    zNear = 1 + (wide ? 0 : off);
+    zFar = wide ? 7000.0f : map == 83 ? 4000.0f : 2000.0f;
+    if (zNear >= zFar * 0.5f) zNear = zFar * 0.5f; // (a guard: the original has none)
+}
+
 cr::Mat4 scriptCameraView(const App& app, const cr::Vec3& eye, const cr::Vec3& target) {
     const cr::StageCamera& sc = app.stageCam;
     const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
@@ -16935,7 +17196,9 @@ cr::Mat4 scriptCameraView(const App& app, const cr::Vec3& eye, const cr::Vec3& t
     toScreen.m[0] = w / SW, toScreen.m[5] = h / H;
     toScreen.m[12] = (2 * rx + w) / SW - 1, toScreen.m[13] = 1 - (2 * ry + h) / H;
     const float whole = float(std::max(1, sc.viewWidth / std::max(1, sc.viewHeight)));
-    return toScreen * cr::Mat4::perspective(sc.fovDegrees * 3.14159265f / 180.0f, whole, 1.0f, 4000.0f) *
+    float zNear, zFar;
+    fieldDepthRange(app, eye, target, zNear, zFar);
+    return toScreen * cr::Mat4::perspective(sc.fovDegrees * 3.14159265f / 180.0f, whole, zNear, zFar) *
            cr::Mat4::lookAt(eye, target, {0, 1, 0});
 }
 
@@ -17055,6 +17318,8 @@ void drawFrame(App& app, bool present = true) {
         cr::Mat4 vp;
         float x = 0, y = 0, w = 0, h = 0;
     } prompt;
+    bool fieldHiddenDrawn = false; // (the field pass left the field out itself: no black over it)
+    ++app.frameNo;
     auto promptLater = [&](const cr::Mat4& vp, float x, float y, float pw, float ph) { prompt.on = true, prompt.vp = vp, prompt.x = x, prompt.y = y, prompt.w = pw, prompt.h = ph; };
     // W: the game's 2D layout (1024); SW: the whole logical screen (wider in widescreen)
     const float W = cr::Renderer::kLogicalW, H = cr::Renderer::kLogicalH, SW = r.screenW();
@@ -17107,10 +17372,12 @@ void drawFrame(App& app, bool present = true) {
             tgt = scriptCam ? camTarget : cr::Vec3{sc.target[0], sc.target[1], sc.target[2]};
             const float aspect = scriptCam ? SW / H : sc.viewHeight > 0 ? float(sc.viewWidth) / float(sc.viewHeight) : 1.0f;
             const float fov = app.haveStageCam ? sc.fovDegrees : 60.0f;
-            mvp = cr::Mat4::perspective(fov * 3.14159265f / 180.0f, aspect, scriptCam ? 1.0f : 10.0f, 4000.0f) *
-                  cr::Mat4::lookAt(eye, tgt, {0, 1, 0});
+            float zNear, zFar; // (FieldCamera::setCamera3D's, the script's camera and the stage's alike)
+            fieldDepthRange(app, eye, tgt, zNear, zFar);
+            app.nearPlane = zNear, app.farPlane = zFar;
+            mvp = cr::Mat4::perspective(fov * 3.14159265f / 180.0f, aspect, zNear, zFar) * cr::Mat4::lookAt(eye, tgt, {0, 1, 0});
             if (scriptCam && app.haveStageCam && sc.viewWidth > 0 && sc.viewHeight > 0) mvp = scriptCameraView(app, eye, tgt);
-            r.setCamera(scriptCam ? 1.0f : 10.0f, 4000.0f, fov * 3.14159265f / 180.0f);
+            r.setCamera(zNear, zFar, fov * 3.14159265f / 180.0f);
             animateModel(app, dt);
             animateNpcs(app, dt);
             updateNpcJoints(app);
@@ -17147,7 +17414,11 @@ void drawFrame(App& app, bool present = true) {
         drawSceneBack(app, false); // ScnEffectProc's z -1998 layers (the sky, the shaft, ...): behind the painting
         r.setOrigin(0);
         r.setLayer(3); // (the Vita's screen: fldread_prc's paintings and the view with them at full size)
-        if (app.background.id) drawLayer(app.background);
+        // Screen's toggle (G+0x8f13e): drawBack leaves out the painting and mdl_put every model (the
+        // effects' too); the shadows (npc_shodow) and ScnEffect's layers are drawn all the same
+        const bool hidden = app.fieldHidden;
+        fieldHiddenDrawn = hidden;
+        if (app.background.id && !hidden) drawLayer(app.background);
         r.setOrigin(0);
         if (have3D) {
             if (scriptCam) {
@@ -17158,13 +17429,16 @@ void drawFrame(App& app, bool present = true) {
             // Field props are occlusion geometry: all their materials are untextured / solid-alpha
             // and black-diffuse, placed over pillars and door frames of the painting. They only
             // write depth, so the player and NPCs disappear behind them
-            r.setColorWrite(false);
-            if (app.showProps) drawLoaded(app, app.model, mvp);
-            r.setColorWrite(true);
-            drawNpcs(app, mvp);
-            if (app.havePlayer && playerShown(app)) drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app)), modelDrawn(app);
+            if (!hidden) {
+                r.setColorWrite(false);
+                if (app.showProps) drawLoaded(app, app.model, mvp);
+                r.setColorWrite(true);
+                drawNpcs(app, mvp);
+                if (app.havePlayer && playerShown(app)) drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app), -1.0f, 0, app.playerFaded), modelDrawn(app);
+            }
+            drawFieldShadows(app, mvp); // (draw order 990: after the models)
             if (app.puzzle.stage >= 0) puzzle::drawFx(app, mvp);
-            drawEffects(app, app.fieldEffects, mvp, &eye, &tgt); // (the camera: for FrmPlayEff's camera-facing effects)
+            if (!hidden) drawEffects(app, app.fieldEffects, mvp, &eye, &tgt); // (the camera: for FrmPlayEff's camera-facing effects)
             if (app.showCollision && app.collision.vao) {
                 cr::Material colMat; // translucent so the painted floor shows through
                 colMat.culling = 0;
@@ -17180,7 +17454,7 @@ void drawFrame(App& app, bool present = true) {
             if (scriptCam) promptLater(mvp, 0, 0, SW, H);
             else promptLater(mvp, vx, vy, vw, vh);
         }
-        if (app.foreground.id) drawLayer(app.foreground);
+        if (app.foreground.id && !hidden) drawLayer(app.foreground);
         r.setLayer(0);
         drawSceneEffects(app);
         r.setOrigin(0);
@@ -17221,7 +17495,8 @@ void drawFrame(App& app, bool present = true) {
             drawLoaded(app, m, mvp);
         }
         if (app.mode == Mode::Maps && app.havePlayer && playerShown(app))
-            drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app)), modelDrawn(app);
+            drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app), -1.0f, 0, app.playerFaded), modelDrawn(app);
+        if (app.mode == Mode::Maps) drawFieldShadows(app, mvp);
         if (app.mode == Mode::Maps && app.puzzle.stage >= 0) puzzle::drawFx(app, mvp);
         if (app.mode == Mode::Maps) drawEffects(app, app.fieldEffects, mvp, &eye, &c);
         if (app.mode == Mode::Maps && app.collision.vao && app.showCollision) {
@@ -17252,16 +17527,20 @@ void drawFrame(App& app, bool present = true) {
         drawPrompt(app, prompt.vp, prompt.x, prompt.y, prompt.w, prompt.h);
     }
     if (app.mode == Mode::Maps) {
-        if (app.fieldHidden && !app.booting) r.fillRect(0, 0, SW, H, 0, 0, 0, 1); // Screen's toggle: the field not drawn (drawBack / mdl_put skipped)
-        const float ab = screenFadeBackAlpha(app); // Screen's back channel first, then the front
+        if (app.fieldHidden && !app.booting && !fieldHiddenDrawn) r.fillRect(0, 0, SW, H, 0, 0, 0, 1); // Screen's toggle: the field not drawn (drawBack / mdl_put skipped)
+        const float ab = screenFadeBackAlpha(app); // Screen's back channel (-100); the front one (189): drawFrontFade
         if (ab > 0.001f) r.fillRect(0, 0, SW, H, app.fadeBackGrey, app.fadeBackGrey, app.fadeBackGrey, ab);
-        const float a = screenFadeAlpha(app); // Screen: fades to / from a grey level
-        if (a > 0.001f) r.fillRect(0, 0, SW, H, app.fadeGrey, app.fadeGrey, app.fadeGrey, a);
         for (app.menuMask.clock += dt; app.menuMask.clock >= 1.0f / kFramesPerSecond; app.menuMask.clock -= 1.0f / kFramesPerSecond)
             stepMenuMask(app);
         drawMenuMask(app);
     }
     r.setOrigin(r.uiX()); // the game's 2D from here on: its 1024 x 768 layout, centred
+    app.order2d = App::Order2D();
+    // A message window this frame (the calls of drawMessageBox below): the front fade waits for its
+    // text - else it goes over the portraits at once
+    const bool heldNow = app.heldPage && !(!app.runner.running() || !app.dialogue.empty() || app.lastPage.empty());
+    const bool messageNow = app.mode == Mode::Maps && (!app.dialogue.empty() || (app.choiceFlag >= 0 && !app.lastPage.empty()) ||
+                                                       (app.choiceFlag < 0 && (heldNow || (app.msgWin.state >= 1 && app.msgWin.state <= 5))));
     if (app.mode == Mode::Maps) {
         if (!app.dialogue.empty()) { // 0x1c: 1 = the left speaks, 2 = the right; the other side dims
             const size_t pi = std::min(app.dialoguePage, app.dialogue.size() - 1);
@@ -17283,6 +17562,7 @@ void drawFrame(App& app, bool present = true) {
                     if (!small && p.tex.width < 1024) {
                         const float ox = phone ? 0.0f : 0.0f;
                         r.drawQuadUV(p.tex, 32 + ox + p.x, 64 + p.y, 960, 640, 0, 0, 480, 320, p.shade, p.shade, p.shade, p.alpha);
+                        app.order2d.portrait = ++app.order2d.seq;
                         continue;
                     }
                     const float pw = small ? 960.0f : 1024.0f, ph = small ? 640.0f : 768.0f;
@@ -17290,6 +17570,7 @@ void drawFrame(App& app, bool present = true) {
                     const float k = phone ? vh / ph : std::max(vw / pw, vh / ph); // (the iPhone's: its height)
                     r.drawQuadUV(p.tex, 512 - pw * k / 2 + p.x, top + (vh - ph * k) / 2 + p.y, pw * k, ph * k, 0, 0, pw, ph,
                                  p.shade, p.shade, p.shade, p.alpha);
+                    app.order2d.portrait = ++app.order2d.seq;
                     continue;
                 }
                 const float w = float(p.tex.width) * p.scale, h = float(p.tex.height) * p.scale; // zooms about its centre
@@ -17300,9 +17581,11 @@ void drawFrame(App& app, bool present = true) {
                 r.drawQuadUV(p.tex, x, y, w, h, p.side == 1 ? float(p.tex.width) : 0, 0,
                              p.side == 1 ? -float(p.tex.width) : float(p.tex.width), float(p.tex.height), p.shade,
                              p.shade, p.shade, p.alpha); // right-hand portraits are mirrored (slot +0xe)
+                app.order2d.portrait = ++app.order2d.seq;
             }
         r.setLayer(0);
         if (app.itemWindowOpen) drawItemWindow(app);
+        if (!messageNow) drawFrontFade(app);
     }
     trackFieldMenus(app);
     if (fieldMenuWanted(app)) { // the corner button and its bar
@@ -17322,12 +17605,6 @@ void drawFrame(App& app, bool present = true) {
     if (app.mode == Mode::Maps && app.tutoTex.on) drawTutoTex(app);
     if (app.mode == Mode::Maps && app.exclamation) drawExclamation(app);
     if (app.mode == Mode::Maps && app.padArt) drawPadArt(app);
-    if (app.nowLoading.on && app.windowTex.id) { // NowLoadProc: 8 frames of (820 + 24k, 96, 24 x 24) at tex2d (464, 320)
-        app.menu.begin(r, app.windowTex, &app.font);
-        r.setOrigin(r.uiX());
-        const bool phone = app.renderer.phoneLayout(); // 2.2.0: (448, 288), the iPhone screen's corner
-        app.menu.piece((phone ? 448 : 464) + 16, (phone ? 288 : 320) + 32, 820 + 24.0f * float(app.nowLoading.frame % 8), 96, 24, 24, 1);
-    }
     if (app.mode == Mode::Maps && app.battle.active) drawBattleHud(app, W, H);
     if (app.mode == Mode::Maps && app.titleOpen && !app.optionsOpen && !app.saveScreen.open && // (the offer's windows over it)
         !app.charSelectOpen && !app.scc.open && !app.collection.open && !app.manualOpen)
@@ -17389,6 +17666,14 @@ void drawFrame(App& app, bool present = true) {
         app.textLimit = 1 << 30;
     } else if (app.mode == Mode::Maps && !app.heldPage && app.choiceFlag < 0 && app.msgWin.state >= 1 && app.msgWin.state <= 5) {
         drawMessageBox(app, {}, "", false, ""); // the window alone (_PutWin: in every state but 6) - fading in before its text, up between messages, fading out after
+    }
+    drawFrontFade(app); // (189: over the message window, when no text came)
+    r.setOrigin(r.uiX());
+    if (app.nowLoading.on && app.windowTex.id) { // NowLoadProc (draw order 500): 8 frames of (820 + 24k, 96, 24 x 24) at tex2d (464, 320)
+        app.menu.begin(r, app.windowTex, &app.font);
+        r.setOrigin(r.uiX());
+        const bool phone = app.renderer.phoneLayout(); // 2.2.0: (448, 288), the iPhone screen's corner
+        app.menu.piece((phone ? 448 : 464) + 16, (phone ? 288 : 320) + 32, 820 + 24.0f * float(app.nowLoading.frame % 8), 96, 24, 24, 1);
     }
     // The menus over everything else (Options draws above them)
     if (app.charSelectOpen) {
@@ -18576,6 +18861,182 @@ int controlHintsSelfTest(App& app) {
     app.persist = keepPersist;
     std::printf("control hints: settings Off persists %s, On persists %s, F3 persists %s; %d problems\n",
                 off ? "yes" : "NO", on ? "yes" : "NO", shortcut ? "yes" : "NO", problems);
+    return problems;
+}
+
+// The field's rendering as 3.1.0 draws it: npc_shodow's shadows, the stage record's alpha model,
+// the loaders' colours, the effects' depth writes, the fades, the front fade's place, the planes and
+// (3.1.0's data) the Options' Language row
+int fieldRenderSelfTest(App& app) {
+    int problems = 0;
+    auto check = [&](bool ok, const char* what) {
+        if (!ok) std::printf("field render: %s FAILED\n", what);
+        problems += !ok;
+    };
+    const bool keepBg = app.showBackground, keepNoEnc = app.noEncounters;
+    const int keepLang = app.language;
+    app.showBackground = true, app.noEncounters = true;
+    app.mode = Mode::Maps;
+    auto settle = [&] {
+        app.runner.stop();
+        app.pendingEntry = App::Entry::None;
+        app.dialogue.clear();
+    };
+    auto room = [&](const char* cmp, int map, int area) {
+        const auto at = std::find(app.maps.begin(), app.maps.end(), std::string(cmp));
+        if (at == app.maps.end()) return false;
+        showMap(app, int(at - app.maps.begin()), map, area);
+        settle();
+        return true;
+    };
+    auto frame = [&] {
+        app.lastTicks = 0;
+        drawFrame(app, false);
+    };
+    // The alpha model: t0110 names t0112's, t0131 t0101's, d0301 none (all three have files of their own)
+    std::string t0110, t0131, d0301 = "?";
+    if (room("t0110_10.cmp", 177, 9)) t0110 = app.mapProps;
+    if (room("t0131_10.cmp", 180, 9)) t0131 = app.mapProps;
+    if (room("d0301_10.cmp", 31, 4)) d0301 = app.mapProps;
+    check(t0110 == "t0112.bin" && t0131 == "t0101.bin" && d0301.empty(), "alpha model");
+    // Shadows: the leader's (80% of its alpha) and every flagged NPC's - the first room with one
+    int flagged = 0, playerA = -1, npcA = -1, npcWant = -1, fadedA = -1;
+    for (size_t m = 0; m < app.maps.size() && !flagged; ++m) {
+        showMap(app, int(m));
+        settle();
+        for (const App::NpcDraw& d : app.npcDraws) {
+            const bool on = d.index >= 0 && d.index < int(app.npcs.size()) && app.npcs[size_t(d.index)].hasShadow();
+            if (!on || app.npcs[size_t(d.index)].shadow[1] <= 0 || app.npcs[size_t(d.index)].shadow[2] <= 0) continue;
+            if (!flagged) npcWant = std::abs(int(app.npcs[size_t(d.index)].shadow[3])) * int(std::lround(d.alpha * 255)) / 100;
+            ++flagged;
+        }
+    }
+    if (flagged && app.havePlayer) {
+        int drawnBefore = app.shadowsDrawn;
+        frame();
+        const int drawn = app.shadowsDrawn - drawnBefore;
+        if (!app.fieldShadowAlpha.empty()) playerA = app.fieldShadowAlpha[0];
+        if (app.fieldShadowAlpha.size() >= 2 * 96) npcA = app.fieldShadowAlpha[96];
+        check(drawn == 1 + flagged && playerA == 204 && npcA == npcWant, "shadows (the leader's 204, the NPC's by its percent)");
+        ViewerHost host(app); // NpcFade 0 to half: the shadow follows the model's alpha
+        host.fadeNpc(0, 128.0f / 255.0f, 128.0f / 255.0f, 1);
+        frame();
+        if (!app.fieldShadowAlpha.empty()) fadedA = app.fieldShadowAlpha[0];
+        check(fadedA == 80 * 128 / 100 && app.playerFaded, "the leader's shadow faded with it");
+        app.fieldHidden = true; // Screen's toggle: no models, the shadows all the same
+        drawnBefore = app.shadowsDrawn;
+        frame();
+        check(app.shadowsDrawn - drawnBefore == 1 + flagged, "shadows with the field hidden");
+        app.fieldHidden = false;
+        // mdl_set_alpha over 0 frames: the alpha as it was, the model alpha-blended from then on
+        const int id = app.npcDraws.front().id;
+        const float before = app.npcDraws.front().alpha;
+        host.fadeNpc(id, 0.0f, 0.0f, 0);
+        const App::NpcDraw& d1 = app.npcDraws.front();
+        check(d1.id == id && d1.faded && d1.alpha == before && d1.fadeLeft == 0, "NpcFade over 0 frames");
+    } else check(false, "a room with a shadowed NPC");
+    std::printf("field render: alpha models t0110 %s, t0131 %s, d0301 %s; shadows: %d flagged NPCs in %s, the leader's alpha "
+                "%d, the NPC's %d (want %d), the leader at half %d\n", t0110.c_str(), t0131.c_str(), d0301.empty() ? "none" : d0301.c_str(),
+                flagged, app.maps[size_t(app.mapIndex)].c_str(), playerA, npcA, npcWant, fadedA);
+    // The colours: read_mdl's models white and opaque, glColor alone; effects their own diffuse, no alpha test
+    {
+        int notWhite = 0, effMats = 0, effBad = 0, depthEffect = -1;
+        for (const auto& [name, lm] : app.npcModels)
+            for (const cr::Material& mt : lm.cpu.materials) notWhite += !mt.unlit || mt.diffuse[0] < 1 || mt.diffuse[3] < 1;
+        for (int id = 0; id < effects::kEffects; ++id) {
+            const LoadedModel* lm = effectModel(app, id);
+            if (!lm) continue;
+            for (const cr::Material& mt : lm->cpu.materials) {
+                ++effMats, effBad += !mt.unlit || mt.alphaThreshold != 0;
+                if (depthEffect < 0 && mt.depthWrite()) depthEffect = id;
+            }
+        }
+        check(notWhite == 0 && effMats > 0 && effBad == 0, "the loaders' colours");
+        // eff3d_set_with_pos clears the depth writes; _with_pos_and_ang (FrmPlayEff2 at a record) keeps them
+        int plain = -1, angled = -1;
+        if (depthEffect >= 0 && app.havePlayer) {
+            app.fieldEffects.clear();
+            startEffect(app, app.fieldEffects, depthEffect, app.walker.pos, true, 1.0f, 0.0f);
+            int w = app.effectDepthWrites;
+            frame();
+            plain = app.effectDepthWrites - w;
+            if (!app.fieldEffects.empty()) app.fieldEffects.back().keepDepthWrite = true;
+            w = app.effectDepthWrites;
+            frame();
+            angled = app.effectDepthWrites - w;
+            app.fieldEffects.clear();
+        }
+        check(plain == 0 && angled > 0, "the effects' depth writes");
+        std::printf("field render: %d read_mdl materials not white, %d effect materials (%d not as eff3d leaves them); "
+                    "effect %d writes depth in %d materials with angles, %d without\n", notWhite, effMats, effBad, depthEffect,
+                    angled, plain);
+    }
+    // The 2D order: the front fade over a portrait and under the message's text; over the portrait alone
+    if (app.windowTex.id) {
+        App::Portrait& p = app.portraits[15];
+        const App::Portrait keep = p;
+        p = App::Portrait();
+        p.tex = app.windowTex, p.alpha = 1;
+        app.fadeGrey = 0, app.fadeFrom = 0.5f, app.fadeTo = 0.5f, app.fadeFrames = 10, app.fadeT = 0;
+        app.dialogue = {{"Fade order"}};
+        app.dialoguePage = 0;
+        frame();
+        const App::Order2D withText = app.order2d;
+        app.dialogue.clear();
+        const int keepWin = app.msgWin.state;
+        app.msgWin.state = 6;
+        frame();
+        const App::Order2D alone = app.order2d;
+        app.msgWin.state = keepWin;
+        p = keep;
+        app.fadeFrames = 0, app.fadeT = 0;
+        check(withText.portrait > 0 && withText.frontFade > withText.portrait && withText.text > withText.frontFade &&
+                  alone.portrait > 0 && alone.frontFade > alone.portrait && alone.text == 0,
+              "the front fade's place");
+        std::printf("field render: 2D order with a message: portrait %d, front fade %d, text %d; without: portrait %d, fade %d\n",
+                    withText.portrait, withText.frontFade, withText.text, alone.portrait, alone.frontFade);
+    }
+    { // setCamera3D's planes: far 2000 (map 83 4000), near 1 + the map's offset
+        float n0, f0, n83, f83;
+        const int keepMap = app.mapNumber;
+        const cr::Vec3 eye{0, 50, 100}, tgt{0, 0, 0};
+        app.mapNumber = 19, fieldDepthRange(app, eye, tgt, n0, f0);
+        app.mapNumber = 83, fieldDepthRange(app, eye, tgt, n83, f83);
+        app.mapNumber = keepMap;
+        check(n0 == 1 && f0 == 2000 && n83 == 101 && f83 == 4000, "near / far");
+    }
+    // Options (3.1.0's data): one Language row, its arrows through the languages the data has
+    if (languageSheet(app)) {
+        app.language = 1;
+        std::vector<OptRow> rows = optionRows(app, 0);
+        bool ok = rows.size() > 1 && rows[0].kind == OptControl::Value && rows[0].valueTex && rows[1].label != "Text Language";
+        std::set<int> seen;
+        for (int k = 0; ok && k < cr::kLanguages; ++k) {
+            optionRows(app, 0)[0].act(1);
+            seen.insert(app.language);
+        }
+        int usable = 0;
+        for (int l = 0; l < cr::kLanguages; ++l) usable += languageUsable(app, l);
+        ok = ok && app.language == 1 && int(seen.size()) == usable;
+        app.language = 0;
+        optionRows(app, 0)[0].act(-1);
+        const int back = app.language;
+        ok = ok && (languageUsable(app, 7) ? back == 7 : back != 0);
+        rows = optionRows(app, 0);
+        ok = ok && rows[0].valueUv[0] == 88.0f * float(app.language);
+        check(ok, "the Language row (3.1.0)");
+        std::printf("field render: the Language row cycles %zu languages, left from Japanese to %s\n", seen.size(), cr::kLanguageName[back]);
+    } else {
+        const std::vector<OptRow> rows = optionRows(app, 0);
+        check(rows.size() > 1 && rows[0].kind == OptControl::Pair && rows[0].words[0] == 37 && rows[1].label == "Text Language",
+              "the Language pair (1.0.0)");
+        std::printf("field render: Options keep 1.0.0's Japanese / English pair\n");
+    }
+    app.language = keepLang;
+    applyLanguage(app);
+    app.showBackground = keepBg, app.noEncounters = keepNoEnc;
+    problems += app.renderer.takeErrors();
+    std::printf("field render: %d problems\n", problems);
     return problems;
 }
 
@@ -20037,6 +20498,7 @@ int runSelfTest(App& app) {
     if (SDL_getenv("CR_SELFTEST_MOBILE")) return mobileInputSelfTest(app) + mobileTransitionSelfTest(app) ? 1 : 0;
     if (SDL_getenv("CR_SELFTEST_CONTROLS")) return controlHintsSelfTest(app) ? 1 : 0;
     if (SDL_getenv("CR_SELFTEST_FIELD")) return fieldPresentationSelfTest(app) ? 1 : 0;
+    if (SDL_getenv("CR_SELFTEST_FIELD_RENDER")) return fieldRenderSelfTest(app) ? 1 : 0;
     if (SDL_getenv("CR_SELFTEST_WALK")) { // only the walking collision pass
         int spawned = 0, walked = 0, problems = 0;
         problems += walkCollisionSelfTest(app, spawned, walked, problems);
@@ -20048,7 +20510,7 @@ int runSelfTest(App& app) {
         setMode(app, Mode::Maps);
         return battleSelfTest(app, frames, glErrors) ? 1 : 0;
     }
-    int glErrors = controlHintsSelfTest(app) + fieldPresentationSelfTest(app), frames = 0, failedModels = 0;
+    int glErrors = controlHintsSelfTest(app) + fieldPresentationSelfTest(app) + fieldRenderSelfTest(app), frames = 0, failedModels = 0;
     setMode(app, Mode::Models);
     for (size_t i = 0; i < app.models.size(); ++i) {
         showModel(app, int(i));
@@ -20705,7 +21167,8 @@ int runSelfTest(App& app) {
         app.game.setFlag(0x43, true); // ("About Option" read)
         openOptions(app, 0);
         const std::vector<OptRow> titlePage = optionRows(app, 0);
-        problems += titlePage.size() != 13 || titlePage.back().label != sysLabel(app, 58122, "Reset Data");
+        problems += titlePage.size() != size_t(13 - languageSheet(app)) || // (3.1.0: one Language row)
+                    titlePage.back().label != sysLabel(app, 58122, "Reset Data");
         { // Reset Data: asked twice; No keeps the saves, Yes to both removes them (in a test folder)
             const std::string keepDir = app.saveDirOverride;
             app.saveDirOverride = userDir() + "selftest-reset/";
@@ -20762,8 +21225,8 @@ int runSelfTest(App& app) {
         app.game.setFlag(0x43, true);
         openOptions(app, 0);
         std::vector<OptRow> gamePage = optionRows(app, 0);
-        problems += gamePage.size() != 13 || gamePage.back().label != sysLabel(app, 58123, "Return to Title") || !gamePage.back().enabled;
-        if (gamePage.size() == 13 && gamePage.back().act) gamePage.back().act(0);
+        problems += gamePage.size() != size_t(13 - languageSheet(app)) || gamePage.back().label != sysLabel(app, 58123, "Return to Title") || !gamePage.back().enabled;
+        if (gamePage.size() == size_t(13 - languageSheet(app)) && gamePage.back().act) gamePage.back().act(0);
         problems += app.resetAsk != 3; // "return to the title?"
         resetAnswer(app, true);
         for (int f = 0; f < 14 && app.titleReturnIn > 0; ++f) stepEvents(app); // (twelve frames of black)

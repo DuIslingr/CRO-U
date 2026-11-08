@@ -53,6 +53,10 @@ struct FieldNpc {
     int16_t link[4] = {0, 0, 0, 0}; // NPC table +22..+28: a candle switch's linked NPCs; a candle block's
                                     // start (+22, 0 = put away) and switch (+24)
     float scale = 1;             // NPC table +38: percent, -1 = 100
+    // NPC table +30..+36: its shadow (npc_shodow, drawn when +18 has bit 15): unused, radius x, radius z,
+    // percent (< 0: at the model's position at 100%, else under its node 1102)
+    int16_t shadow[4] = {0, 0, 0, 0};
+    bool hasShadow() const { return (treasure & 0x8000) != 0; }
     float axes[3] = {-1, -1, -1}; // SetScale / AdjScale's (npc ctl +0x2c..+0x34, x y z), in place of scale once set
     float rectAngle = 0;         // the record's angle: RectWrapper::init turns the solid box by it once, at load
     bool mdlRead = false;        // its model read by a script (__EvtNpcMdlRead: npc ctl +0x98)
@@ -82,6 +86,7 @@ struct NpcRow {
     uint16_t kind = 0, box = 0;
     uint16_t puzzle = 0;    // +20: what a puzzle room makes of it (game/puzzle.hpp kPuzzle*)
     int16_t link[4] = {0, 0, 0, 0}; // +22..+28 (FieldNpc::link)
+    int16_t shadow[4] = {0, 0, 0, 0}; // +30..+36 (FieldNpc::shadow)
     float scale = 1;
 };
 

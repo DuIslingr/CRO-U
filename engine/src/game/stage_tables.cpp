@@ -114,6 +114,13 @@ const char* const kNpcModelFile[kNumNpcModels] = {
     "d0558bt.bin",
 };
 
+const char* const kStageAlphaModel[kNumStageAlphaModels] = {
+    "d0202.bin", "d0205.bin", "d0207.bin", "d0211.bin", "d0215.bin", "d0218.bin", "d0301.bin", "d0302.bin",
+    "d0303.bin", "d0305.bin", "d0309.bin", "d0311.bin", "d0313.bin", "d0314.bin", "d0316.bin", "d0318.bin",
+    "d0319.bin", "d0404.bin", "d0408.bin", "d0410.bin", "d0419.bin", "d0502.bin", "d0504.bin", "d0506.bin",
+    "d0508.bin", "d0510.bin", "d0601.bin", "d0603.bin", "d0604.bin", "d0605.bin", "t0101.bin", "t0112.bin",
+};
+
 const char* const kTex2dImage[kNumTex2dImages] = {
     "sqex.mct", "mve.mct", "mclogo.mct", "title1.mct", "title2.mct",
     "chara3.mct", "chara1.mct", "chara2.mct", "endback01.mct", "endback02.mct",

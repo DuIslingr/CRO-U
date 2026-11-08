@@ -4,6 +4,21 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
 
 ## What's new
 
+- **The field drawn as 3.1.0 draws it:** the leader and the objects and people the game marks for
+  it cast the original's soft black ellipse shadows (the same shadow code as the battle's), which
+  stay when a scene hides the field. People and objects are coloured as the original's loader sets
+  them (the crystals' and switches' glows at full strength), and effects take their own colours -
+  many were drawn brighter than the original's, some grey where they are black. A room's occluding
+  geometry now comes from the room's own record: t0110, t0113 and t0142 hide the leader behind
+  t0112's, t0131 and t0140 behind t0101's, and d0301 / d0302 and the later d06 rooms have none. A
+  scene's fade darkens the portraits and the message window but leaves the text readable, as the
+  original's does; a person faded by a scene stays blended afterwards and a fade over no frames no
+  longer jumps; effects write depth as the original's do (the angled ones keep it), and the 3D
+  camera's near and far planes follow the original's per-room values.
+- **Languages as 3.1.0's:** with the 3.1.0 data, Options has the original's single Language row -
+  the arrows step through every language the data has, the name drawn from the game's own picture -
+  and the face boards show the characters' names in the chosen language's lettering. The 1.0.0 data
+  keeps its Japanese / English buttons.
 - **Field events start as in 3.1.0:** a touch box you arrive in now fires once the scene is over
   when it isn't the one that brought you there - so the Ark's welcome-back event plays again after
   every return from a dungeon. Who is in a room is decided as the room loads, as the original does:

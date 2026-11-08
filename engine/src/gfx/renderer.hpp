@@ -29,6 +29,7 @@ struct GpuMesh {
     unsigned vao = 0, vbo = 0, ebo = 0; // opaque mesh handle in vao (0 = none); vbo/ebo reserved
     int indexCount = 0;
     int texture = -1;
+    bool vertexColors = false; // the mesh had a colour array (Mesh::hasColors)
 };
 
 class Renderer {
@@ -100,6 +101,7 @@ public:
     float screenW() const { return screenW_; }         // logical width of the whole screen
     float uiX() const { return (screenW_ - kLogicalW) * 0.5f; } // where the 1024-wide layout starts
     void setOrigin(float x) { originX_ = x; }          // added to every 2D quad's x
+    float origin() const { return originX_; }
     void setWidescreen(bool on) { widescreen_ = on; }
     // The display's safe area (a camera hole's, the system's edges): its insets in the window's
     // pixels. 3D and fades keep the whole screen; safeLeft / safeRight are how far in from the
