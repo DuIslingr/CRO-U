@@ -133,7 +133,7 @@ own, so these already match.
 
 Not done in the port yet (code reading only):
 - Full-width bands and masks that already cover the phone's width: `draw_vista` / `draw_abeblack`
-  (the tutorial bands, - ox .. 480 + ox), `achievement_prc`'s banner, `MuScrList_Draw`'s list
+  (the tutorial bands, - ox .. 480 + ox), `MuScrList_Draw`'s list
   masks, and the History menu's masks.
 - `ScnEffect*`: the scene effects' rect is the whole phone, and effect 10's fog band sits at
   64 + oy.
@@ -158,7 +158,8 @@ panel. The strip is fitted to the selected layout's visible width and bottom edg
   (`NDKGetLanguage`, `IsLanguageSettingMultibyte`) - the voiced release.
 - Stereoscopic 3D for the phones that had it (`getStereoDevice`, `setStereoMode`,
   `updateStereo`; `FieldScene::drawBack2` draws the painting twice).
-- GREE ads (`GreeAdSetup`, `GreeMoodDialog`), achievements (`achievement_prc`), the back key
+- GREE ads (`GreeAdSetup`, `GreeMoodDialog`), achievements (`achievement_prc` and the Store menu's list:
+  the port has both, in every layout - docs/ENGINE.md "Achievements"), the back key
   (`gameapp_setbackkeyflag`), pause / resume.
 - Names the iOS 1.0.0 symbols lack and Android exports, among them `btlcalc_attack_hit`,
   `btlcalc_zoku_dmg`, `btlcalc_rand_dmg`, `ComUty_ComPlate_GameCenter`, `chk_daibensharoom`,

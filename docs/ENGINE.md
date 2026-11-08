@@ -544,6 +544,34 @@ c101/c102/c104/m207a, 2026-10-12).
       walked, paid into the next win. Both are kept in the save. `--capture … --field-menu
       closed|open|known|off|map[step]` shows it. Map opens the gate's map (`__menuu_Map*`): the
       pair's blinking marker on its field and the story's two markers for where to go next.
+- [x] **Achievements** (`game/achievements.cpp`): the original's 32 - iOS 3.1.0 reports them to
+      Game Center, Android 1.1.6 shows its own banner and list. Each is a "system config" flag
+      1..32 (`SetSystemConfFlag`; Android's system.dat, global, not per save): here settings.ini's
+      `achievements=` (32 hex digits, flags 0..127). When one is earned follows 3.1.0:
+      `fld_checkAchievements` (the first of the chain below whose condition holds and isn't earned)
+      at a script's end with no tutorial kicked (`__EvtReturn` / 0x23cd4) and after a purchase
+      (`__menuu_ShopPrc` 7 sets 0x2b first); in battles `btlcalc_chk_dead` sets 0x2f / 0x30 / 0x31
+      (a blow on a monster of 5,000.. / 10,000.. / 30,000.., not of the kill type), counts the
+      monsters down in var 0x17 (0x35 at 500) and sets 0x3e when a gene plate drops that the bag
+      hasn't, and 3.1.0's battle check (FUN_0008fa80) earns 15 / 16 / 17 / 21 / 30 at once (Android's
+      `btl_checkAchievements` is empty: there they wait for the next field check, and it also checks
+      after a sale). How it shows follows Android: `achievement_prc`'s banner (a black band across
+      the screen, tex2d y 108..212 with 8-unit fades, alpha 0xc0, in over four frames with SE 0xf7,
+      "Achievement" and the name in yellow while held, a press, out over four; the field and its
+      corner button held meanwhile, the press kept from what is under it), one at a time in the
+      order earned - a battle's wait for the field -, and when one closes the field check runs
+      again for the next (the SE stopped, 0x200000f7). 3.1.0's 600-tick wait after an earn (while
+      Game Center showed its own) is left out: the banner's close does that job. The names are
+      font block 10's (system messages 61256 + 2 (n - 1), the header 61257; hints 61320 + n - 1,
+      descriptions 61352 + n - 1) - in 3.1.0's and Android's data; 1.0.0's has none, so the 3.1.0
+      English names are built in for it. The list: the title's picture 127 at (8, 176) (3.1.0 drew
+      it with Game Center for its achievements; Android always, for its own list) or **A** opens
+      Android's Store menu in mode 4 - "Achievement" over a half-white band, the rows (the earned
+      ones' descriptions, the others' hints in grey, the story's 18 left out until earned), the
+      focus row teal, achievement.mct's pictures (Android's art: without `--android` the rows have
+      none), the scroll bar, Back; the title's picture under menu mask 3 (fading across).
+      `CR_CAPTURE_ACHIEVEMENT=n:frames[:tap]` captures the banner, `CR_CAPTURE_ACHLIST=scroll[:flags
+      hex]` the list (with `--title --frames n`); `CR_SELFTEST_ACHIEVEMENTS=1` runs its self-test
 - [x] Script natives: the pair's healing (2018), the music by var (2024 / 2026), the shop ended by
       its script (2025) and its own music (track 19, then the one before), the pair number
       (2027), the loading spinner (2028), the dungeons' area-name banners (`TexDisp`, 2016), the

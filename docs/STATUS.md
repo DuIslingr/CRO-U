@@ -243,3 +243,8 @@ separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
       its Ogg Vorbis music
 - [x] the Android release alone as the game (`--data` / `--android` with no iOS data): the
       OBB's files, its event files unscrambled, voices streamed from it; self-test clean
+- [x] achievements (docs/ENGINE.md "Achievements"): the original's 32 with 3.1.0's conditions and
+      check points (a script's end, a purchase, the battles' blows / falls / plates), kept in
+      settings.ini across saves; Android's banner (checked against Part 15 507.8-509.9 s: the band,
+      its four frames in and out, the lines) and Android's list from the title's trophy (Part 15
+      3857.5-3876 s); self-test `achievements:`

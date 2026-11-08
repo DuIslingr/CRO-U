@@ -62,6 +62,7 @@
 #include "game/genes.hpp"
 #include "game/puzzle.hpp"
 #include "game/treasure.hpp"
+#include "game/achievements.hpp"
 #include "assets/model.hpp"
 #include "assets/texture.hpp"
 #include "audio/music.hpp"
@@ -496,6 +497,24 @@ struct App {
         float clock = 0, spin = 0;
         cr::Texture tex;               // collection_rate
     } collection;
+    struct Achievements { // game/achievements.hpp: the earned set (settings.ini), achievement_prc's banner, the list
+        cr::achievements::Flags flags; // the system config flags (1..32 earned; 0x2b.. what the battles and the shop saw)
+        cr::achievements::Banner banner;
+        std::vector<int> queue;        // earned, banner not shown yet (a battle's wait for the field)
+        float clock = 0;
+        bool tap = false, eatUp = false; // a press for the banner (pad_chk_trg_down); its release kept from what's under it
+        bool live = true;              // earned at all (off in the self-test's other checks and in captures)
+        // The list (Android's Store menu in mode 4, from the title's picture 127; ours in every layout)
+        bool listOpen = false;
+        int listAnim = 0, listCursor = 0;
+        float listScroll = 0, listClock = 0;
+        bool listDrag = false;
+        float listDragY = 0, listDragScroll = 0;
+        std::vector<int> listRows;     // the achievements listed, in order (secret ones only once earned)
+        cr::Texture icons;             // achievement.mct (Android's art; none in iOS data)
+        bool iconsTried = false;
+        std::vector<int> earnedLog;    // (self-test) every achievement earned this run, in order
+    } ach;
     bool manualOpen = false;               // Options > Instruction Manual
     int manualCursor = 0, manualTop = 0, manualAnim = 0;
     int manualIntro = 0;                   // the page shown before a topic is chosen (56040), 0 none
@@ -1873,6 +1892,9 @@ void outPicture(cr::MenuPainter& m, const cr::Texture& tex, int pict, float x, f
 void openScenarios(App& app);
 void openScenarios(App& app, int mode);
 void openCollection(App& app);
+void openAchievementList(App& app);
+int menuMaskAlpha(const App& app);
+void drawMenuMaskShape(App& app, int alpha);
 // __RenewalGetSccnariosState: the Camp's "new" mark on Scenarios - flag 0x642 and no cell open on
 // cards 0..3, or flag 0x665 and none open on all five
 bool campScenariosNew(const App& app) {
@@ -4109,6 +4131,8 @@ void loadMix(App& app) {
         for (int i = 0; i < 4; ++i)
             if (const char* at = SDL_strstr(text, keys[i])) *fields[i] = std::clamp(SDL_atoi(at + SDL_strlen(keys[i])), 0, 100);
         if (const char* at = SDL_strstr(text, "language=")) app.language = std::clamp(SDL_atoi(at + 9), 0, cr::kLanguages - 1);
+        // the system config flags (system.dat's +0x87604 on Android): the achievements earned
+        if (const char* at = SDL_strstr(text, "achievements=")) app.ach.flags.fromHex(std::string(at + 13, SDL_strnlen(at + 13, 32)));
         applyLanguage(app);
         loadVideo(app, text);
         app.voiceEntries.clear();
@@ -4152,12 +4176,81 @@ void saveMix(const App& app) {
                               std::to_string(int(app.lockLandscapeFlipped)) + "\n" + "vita=" + app.vitaPath + "\n" + "android=" + app.androidPath + "\n" + "pad_confirm=" +
                               (app.padConfirmEast ? "east" : "south") + "\n" + "field_speed=" + std::to_string(app.fieldSpeed) +
                               "\nbattle_speed=" + std::to_string(app.battleSpeed) + "\n";
-    const std::string all = t + "language=" + std::to_string(app.language) + "\nvoice_entries=" + list + "\n" + video;
+    const std::string all = t + "language=" + std::to_string(app.language) + "\nvoice_entries=" + list + "\n" + video +
+                            "achievements=" + app.ach.flags.hex() + "\n";
     std::string error;
     if (!crstorage::replaceFile(settingsPath(), all, &error)) SDL_Log("settings: %s", error.c_str());
 }
 
 
+
+// ---- Achievements (game/achievements.hpp; docs/ENGINE.md "Achievements") ----
+// When one is earned follows 3.1.0 (its checks and their callers; the flag kept at once, as Game
+// Center's answer sets it there); how it shows follows Android 1.1.6 (achievement_prc's banner -
+// 3.1.0 had Game Center's own). The earned set is global, in settings.ini (Android: system.dat)
+
+// SetSystemConfFlag, kept
+void setSystemConfFlag(App& app, int f) {
+    if (app.ach.flags.has(f)) return;
+    app.ach.flags.set(f);
+    saveMix(app);
+}
+
+// checkAchievements(n): earned; its banner waits its turn (one at a time, in the order earned)
+void earnAchievement(App& app, int n) {
+    App::Achievements& a = app.ach;
+    if (!a.live || n < 1 || n > cr::achievements::kCount || a.flags.has(n)) return;
+    a.flags.set(n);
+    a.queue.push_back(n);
+    a.earnedLog.push_back(n);
+    SDL_Log("achievement %d earned", n);
+    saveMix(app);
+}
+
+// fld_checkAchievements (3.1.0: a script's end without a tutorial kicked, the shop's purchase;
+// Android also as a banner closes). One at a time: nothing while a banner is up or waiting (3.1.0
+// skips it for 600 ticks after one, while Game Center shows its own; the banner's close checks again)
+void fieldCheckAchievements(App& app) {
+    App::Achievements& a = app.ach;
+    if (app.booting || app.titleOpen || a.banner.on || !a.queue.empty()) return;
+    earnAchievement(app, cr::achievements::fieldCheck(app.game, a.flags));
+}
+
+// btlcalc_chk_dead's system flags, then 3.1.0's battle check (FUN_0008fa80; Android's is empty -
+// there the five wait for the next field check). The banner waits for the field
+void battleConfFlag(App& app, int f) {
+    if (!f) return;
+    setSystemConfFlag(app, f);
+    earnAchievement(app, cr::achievements::battleCheck(app.ach.flags));
+}
+
+// Where Android's banner can come up: over the field or the shop (achievement_prc runs every
+// frame; Android starts it only at a script's end, a purchase or a banner's close), not in a battle
+bool achievementBannerCanShow(const App& app) {
+    return app.mode == Mode::Maps && !app.booting && !app.titleOpen && !app.battle.active &&
+           (!app.runner.running() || app.shop.open);
+}
+bool achievementBannerUp(const App& app) { return app.ach.banner.on; }
+
+// achievement_prc, at 20 Hz: SE 0xf7 as one comes in; at its close (pad_all_clear, the flag set,
+// isAchievementDraw off) the field check again - another one stops the SE (0x200000f7) and follows
+void stepAchievements(App& app, float dt) {
+    App::Achievements& a = app.ach;
+    for (a.clock += dt; a.clock >= 1.0f / kFramesPerSecond; a.clock -= 1.0f / kFramesPerSecond) {
+        if (!a.banner.on && !a.queue.empty() && achievementBannerCanShow(app)) {
+            a.banner.start(a.queue.front());
+            a.queue.erase(a.queue.begin());
+        }
+        const auto e = a.banner.step(a.tap);
+        a.tap = false;
+        if (e == cr::achievements::Banner::Sound) app.sound.play(0xf7);
+        if (e == cr::achievements::Banner::Closed) {
+            fieldCheckAchievements(app);
+            if (!a.queue.empty()) app.sound.play(0x200000f7);
+        }
+    }
+    if (!a.banner.on) a.clock = std::min(a.clock, 1.0f / kFramesPerSecond);
+}
 
 // ---- Video settings ----
 
@@ -6016,6 +6109,10 @@ void shopPay(App& app) {
         cr::addOz(app.game, -total);
     }
     menuSound(app, se::kPaid);
+    if (!s.selling) { // __menuu_ShopPrc 7 (3.1.0): SetSystemConfFlag(0x2b), _fld_checkAchievements (Android 1.1.6 checks after a sale too)
+        setSystemConfFlag(app, cr::achievements::kBought);
+        fieldCheckAchievements(app);
+    }
     const cr::ItemParam* p = app.itemTable.item(item);
     if (!s.selling && p && cr::equipSlot(p->kind) >= 0 && (p->owners >> shopCharacter(app) & 1) &&
         app.game.party[size_t(shopCharacter(app))].equip[cr::equipSlot(p->kind)] != item) {
@@ -6200,8 +6297,7 @@ void drawNumCount(cr::MenuPainter& m, int count, int = 99) { // (no dimming at t
 // least) at ((knob - len + 12) x scroll) / ((n - 2) x step), its caps (160, 196) / (160, 212)
 void drawScrGauge(cr::MenuPainter& m, float x, float y, float len, int n, float scroll, float step, int bob, float a) {
     m.piece(x, y, 144, 184, 16, 16, a);
-    const int middles = int(len - 24) / 8;
-    for (int i = 0; i < middles; ++i) m.piece(x, y + 16 + 8 * float(i), 144, 200, 16, 8, a);
+    for (float k = 16; k < len - 8; k += 8) m.piece(x, y + k, 144, 200, 16, std::min(8.0f, len - 8 - k), a); // (to the bottom piece)
     m.piece(x, y + len - 8, 144, 208, 16, 16, a);
     m.picture(76, x, y - float(bob), a);
     m.picture(77, x, y + len - 8 + float(bob), a);
@@ -8548,7 +8644,8 @@ bool fieldEncountersOff(const App& app) { return app.game.noEncounters[size_t(fi
 // is still loading (G+0x8a976 != 0 - here: a room's entry script yet to start), and draws at full
 // alpha otherwise: its +0x20 a frame count starts at 0x140 (menuf_mainSet) and moves only while
 // drawn, so the HUD goes the frame a script starts and comes back whole - no fade
-bool fieldHudShown(const App& app) { return !fieldSceneRunning(app) && app.pendingEntry == App::Entry::None; }
+// (and Android's _menuf_mainPut / Prc: nothing while isAchievementDraw)
+bool fieldHudShown(const App& app) { return !fieldSceneRunning(app) && app.pendingEntry == App::Entry::None && !achievementBannerUp(app); }
 
 void stepFieldMenu(App& app) {
     App::FieldMenu& f = app.fieldMenu;
@@ -11104,9 +11201,10 @@ void drawTitleMenu(App& app) {
         app.renderer.setOrigin(wideLeft(app)); // (... and the pictures down the left to its left)
         m.picture(125, 8 + dx, 16, pa);
         m.picture(126, 8 + dx, 96, pa);
+        m.picture(127, 8 + dx, 176, pa); // (3.1.0: with Game Center - its achievements; Android: always - its list; ours: the list)
     }
     if (keyHints(app) && !app.resumeNotice && !app.resumePrompt) // (our key hints)
-        m.text("Up/Down  Enter  V: Options  Esc: quit", 20, 360, false, t * 0.8f, 9);
+        m.text("Up/Down  Enter  V: Options  A: Achievements  Esc: quit", 20, 360, false, t * 0.8f, 9);
     app.renderer.setOrigin(app.renderer.uiX());
 }
 
@@ -11224,6 +11322,7 @@ bool titleKey(App& app, SDL_Keycode key) {
         return true;
     }
     switch (key) {
+    case SDLK_A: menuSound(app, se::kChoose); openAchievementList(app); break; // (our key for the picture at (8, 176))
     case SDLK_UP: case SDLK_W: app.titleCursor = (app.titleCursor + 2) % 3; menuSound(app, se::kCursor); break;
     case SDLK_DOWN: case SDLK_S: app.titleCursor = (app.titleCursor + 1) % 3; menuSound(app, se::kCursor); break;
     case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: case SDLK_E: titleChoose(app, app.titleCursor); break;
@@ -11246,6 +11345,186 @@ void titleClick(App& app, float px, float py) {
     float sx, sy;
     menuPointAt(app, lx, ly, wideLeft(app), sx, sy); // the store's pictures (8, 16) / (8, 96) 80 x 72: their sound, no store here
     if (sx >= 8 && sx < 88 && ((sy >= 16 && sy < 88) || (sy >= 96 && sy < 168))) menuSound(app, se::kChoose);
+    // (8, 176): __menuu_TitlePrc 8's third box (3.1.0: SE 0x93, Game Center's achievements - _showa;
+    // Android: the Store menu in mode 4, its achievement list)
+    if (sx >= 8 && sx < 88 && sy >= 176 && sy < 248) { menuSound(app, se::kChoose); openAchievementList(app); }
+}
+
+// ---- Achievements: Android's banner (achievement_prc) and list (the Store menu in mode 4) ----
+std::string achievementName(const App& app, int n) {
+    return sysLabel(app, cr::achievements::nameId(n), cr::achievements::fallbackName(n));
+}
+
+// achievement_prc's drawing, in tex2d units of the phone's 480 x 320 (at (16, 32) of the menus' 512 x
+// 384 in every layout): tex2d_add4 slot 0x31 black from x -e to 480 + e - Android's phone edges, here
+// the visible screen's - in three bands, y 108..116 fading in, 116..204 at the alpha, 204..212 fading
+// out; while held, drawfont_center "Achievement" (0x24, block 10's 0x101) white at (240, 136) and the
+// name (0x25, (n + 0x7f) x 2) yellow (0xff00ffff) at (240, 168), 16 high, edged as drawfont is
+void drawAchievementBanner(App& app) {
+    const cr::achievements::Banner& b = app.ach.banner;
+    if (!b.on) return;
+    cr::Renderer& r = app.renderer;
+    const float keep = r.origin();
+    const int layer = r.layer();
+    r.setLayer(0);
+    r.setOrigin(0);
+    const float a = float(b.alphaByte()) / 255.0f;
+    const float L = r.phoneLayout() ? r.screenW() * 0.5f - r.screenW() * 0.5f / r.layoutScale() : 0.0f;
+    const float R = r.phoneLayout() ? r.layoutRight() : r.screenW();
+    auto Y = [](float ty) { return 2 * (32 + ty); };
+    auto fade = [&](float y0, float a0, float a1) { // 8 units: the vertex colours' blend, a unit a strip
+        for (int i = 0; i < 8; ++i) r.fillRect(L, Y(y0 + float(i)), R - L, 2, 0, 0, 0, a0 + (a1 - a0) * (float(i) + 0.5f) / 8);
+    };
+    fade(108, 0, a);
+    r.fillRect(L, Y(116), R - L, Y(204) - Y(116), 0, 0, 0, a);
+    fade(204, a, 0);
+    if (b.lines() && app.font.loaded()) {
+        cr::MenuPainter& m = app.menu;
+        m.begin(r, app.windowTex, &app.font);
+        r.setOrigin(r.uiX());
+        const PhoneMenu phoneMenu(app, m);
+        const std::string head = sysLabel(app, cr::achievements::headerId(), "Achievement"), name = achievementName(app, b.id);
+        m.text(head, 240 - m.textWidth(head, 16) / 2, 136, false, 1, 16);
+        m.textTint(name, 240 - m.textWidth(name, 16) / 2, 168, 1, 1, 0, 1, 16);
+    }
+    r.setOrigin(keep);
+    r.setLayer(layer);
+}
+
+// The list (InitStoreMenu's functions with SetStoreMode(4): Set 0x82328, Prc 0x81d94, Put 0x823e8):
+// the achievements in order - earned ones with their description (block 10's 0x160 + n), the others
+// with a hint (0x140 + n) in grey, the story's (the table at 0xb9194) left out until earned. Each row
+// (ComUty_ComPlate_GameCenter 0x7a7ec) 435 x 64: the focus row teal (0x00d7a2, opaque at the left to
+// 0x33 at the right), a white line under it, picture n - 1 of achievement.mct (57 x 57, eight a row) at
+// (24, 4), the name yellow at (88, 12), the line at (88, 36). Put: a white band at alpha 0x80 over
+// (0, -2) 480 x 29 with "Achievement" centred at y 6. Rows from y 28 (Part 15 3857.5 s), scrolled by a
+// finger until the last is on top (3864.5 s); the focus is the row over y 60 (3867 / 3876 s)
+namespace achui {
+constexpr float kTop = 28, kRowH = 64, kBottom = 284, kRowW = 435;
+}
+
+void openAchievementList(App& app) {
+    App::Achievements& a = app.ach;
+    a.listOpen = true;
+    a.listAnim = 0, a.listCursor = 0, a.listScroll = 0, a.listClock = 0, a.listDrag = false;
+    a.listRows.clear();
+    for (int n = 1; n <= cr::achievements::kCount; ++n)
+        if (a.flags.has(n) || !cr::achievements::secret(n)) a.listRows.push_back(n);
+    if (!a.iconsTried) { // (Android's art: the iOS data has none - the rows then go without their pictures)
+        a.iconsTried = true;
+        cr::Image img;
+        if (loadImage(app, "achievement.mct", img)) a.icons = app.renderer.upload(img);
+    }
+}
+
+void closeAchievementList(App& app) {
+    app.ach.listOpen = false;
+    app.ach.listDrag = false;
+}
+
+float achListMaxScroll(const App& app) { return std::max(0.0f, float(int(app.ach.listRows.size()) - 1) * achui::kRowH); }
+int achListFocus(const App& app) {
+    const int n = int(app.ach.listRows.size());
+    return n ? std::clamp(int((app.ach.listScroll + 32) / achui::kRowH), 0, n - 1) : -1;
+}
+
+void stepAchievementList(App& app) {
+    App::Achievements& a = app.ach;
+    ++a.listAnim;
+    if (!a.listDrag) { // (keys: the cursor's row eases to the top, 16 a frame)
+        const float want = std::clamp(float(a.listCursor) * achui::kRowH, 0.0f, achListMaxScroll(app));
+        if (std::abs(want - a.listScroll) <= 16) a.listScroll = want;
+        else a.listScroll += want > a.listScroll ? 16 : -16;
+    }
+}
+
+void drawAchievementList(App& app) {
+    using namespace achui;
+    App::Achievements& a = app.ach;
+    cr::Renderer& r = app.renderer;
+    cr::MenuPainter& m = app.menu;
+    m.begin(r, app.windowTex, &app.font);
+    r.setOrigin(r.uiX());
+    const PhoneMenu phoneMenu(app, m);
+    drawMenuMaskShape(app, menuMaskAlpha(app)); // (Android: the title's picture under the mask)
+    r.setOrigin(r.uiX());
+    const float t = std::min(1.0f, float(a.listAnim + 1) / 6.0f); // (the windows coming on)
+    const float white[4] = {1, 1, 1, 0.5f * t};
+    m.quad(0, -2, 480, 29, white, white);
+    const std::string head = sysLabel(app, cr::achievements::headerId(), "Achievement");
+    // (MuComFontDisp at ((480 - its width) / 2, 6), its style 1: black edged white - Part 15 3857.5 s)
+    m.text(head, 240 - m.textWidth(head, 14) / 2, 6, true, t, 14);
+    const int focus = achListFocus(app);
+    m.setClip(kTop, kBottom);
+    for (size_t k = 0; k < a.listRows.size(); ++k) {
+        const float y = kTop + kRowH * float(k) - a.listScroll;
+        if (y + kRowH <= kTop || y >= kBottom) continue;
+        const int n = a.listRows[k];
+        const bool earned = a.flags.has(n);
+        if (int(k) == focus) {
+            const float l[4] = {0, 0xd7 / 255.0f, 0xa2 / 255.0f, t}, rr[4] = {0, 0xd7 / 255.0f, 0xa2 / 255.0f, 0x33 / 255.0f * t};
+            m.quad(0, y, kRowW, kRowH, l, rr);
+        }
+        const float line[4] = {1, 1, 1, t};
+        m.quad(0, y + 63, kRowW, 1, line, line);
+        if (a.icons.id) {
+            const float k2 = float(a.icons.width) / 512.0f;
+            m.imagePieceTo(a.icons, 24, y + 4, 57, 57, float((n - 1) % 8) * 57 * k2, float((n - 1) / 8) * 57 * k2, 57 * k2, 57 * k2, t);
+        }
+        m.textTint(achievementName(app, n), 88, y + 12, 1, 1, 0, t, 14);
+        const std::string line2 = sysText(app, earned ? cr::achievements::descriptionId(n) : cr::achievements::hintId(n));
+        // (the line's font is smaller than the name's: 9.5 here gives Part 15 3857.5 s's width, "Defeated
+        // Progenitor's Tooth." 246 px of 1280 - the name at the menu font's 13 measures as the video's)
+        if (earned) m.text(line2, 88, y + 36, false, t, 9.5f);
+        else m.textTint(line2, 88, y + 36, 0x80 / 255.0f, 0x80 / 255.0f, 0x80 / 255.0f, t, 9.5f);
+    }
+    m.clearClip();
+    // MuScrList_Draw's bar beside the rows (ComUty_GuageBarDraw's pieces; Part 15 3857.5 s: dark from
+    // x 1080 to 1111, y 98 to 609 of 1280 x 720 - x 460, y 34, 244 long)
+    // (the knob as ComUty_GuageBarDraw's: 3876 s, scrolled 683.5, its top at 280; at the end 544 - as here)
+    const int n = int(a.listRows.size());
+    if (n > 1) drawScrGauge(m, 460, 34, 244, n, -a.listScroll, kRowH, 0, t);
+    m.backBar(192, 288, false, t);
+    if (keyHints(app)) m.text("Up/Down  Esc: back", 8, 300, false, t * 0.8f, 9); // (our key hints)
+    r.setOrigin(r.uiX());
+}
+
+void achievementListKey(App& app, SDL_Keycode key) {
+    App::Achievements& a = app.ach;
+    const int n = int(a.listRows.size());
+    switch (key) {
+    case SDLK_UP: case SDLK_W:
+        if (a.listCursor > 0) --a.listCursor, menuSound(app, se::kCursor);
+        break;
+    case SDLK_DOWN: case SDLK_S:
+        if (a.listCursor + 1 < n) ++a.listCursor, menuSound(app, se::kCursor);
+        break;
+    case SDLK_PAGEUP: a.listCursor = std::max(0, a.listCursor - 4), menuSound(app, se::kPage); break;
+    case SDLK_PAGEDOWN: a.listCursor = std::max(0, std::min(n - 1, a.listCursor + 4)), menuSound(app, se::kPage); break;
+    case SDLK_ESCAPE: case SDLK_BACKSPACE: case SDLK_AC_BACK: case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: case SDLK_E:
+        menuSound(app, se::kBack);
+        closeAchievementList(app);
+        break;
+    default: break;
+    }
+}
+
+// A press at (mx, my) (the phone's tex2d units): the Back bar closes it; on the rows, a drag scrolls them
+void achievementListDown(App& app, float mx, float my) {
+    App::Achievements& a = app.ach;
+    if (mx >= 192 && mx < 448 && my >= 286 && my < 320) { achievementListKey(app, SDLK_ESCAPE); return; }
+    if (my >= achui::kTop && my < achui::kBottom) a.listDrag = true, a.listDragY = my, a.listDragScroll = a.listScroll;
+}
+void achievementListDrag(App& app, float my) {
+    App::Achievements& a = app.ach;
+    if (!a.listDrag) return;
+    a.listScroll = std::clamp(a.listDragScroll - (my - a.listDragY), 0.0f, achListMaxScroll(app));
+    a.listCursor = achListFocus(app);
+}
+void achievementListScrollBy(App& app, int rows) {
+    App::Achievements& a = app.ach;
+    a.listDrag = false;
+    a.listCursor = std::clamp(achListFocus(app) + rows, 0, std::max(0, int(a.listRows.size()) - 1));
 }
 
 float screenFadeAlpha(const App& app) {
@@ -12608,6 +12887,8 @@ void stepEvents(App& app) {
                 return;
             }
         }
+        // (__EvtReturn / 0x23cd4 with no tutorial kicked: _ContData_Save_set_fld, then _fld_checkAchievements)
+        fieldCheckAchievements(app);
     }
     const cr::EventResult& r = app.runner.result();
     if (!r.error.empty())
@@ -12786,9 +13067,10 @@ void updatePlayer(App& app, float dt, float camYaw) {
     if (!app.havePlayer) return;
     const bool* keys = SDL_GetKeyboardState(nullptr);
     // A running script, its dialogue box or item window hold the player in place
+    // (Android: FieldScene::onUpdate does nothing while isAchievementDraw - the banner holds the field)
     const bool talking = fieldSceneRunning(app) || app.optionsOpen || app.campOpen || app.saveScreen.open ||
                          app.shop.open || app.mapScreen.open || app.puzzle.tpState != 0 || app.puzzle.pkState != 0 ||
-                         (app.puzzle.stage >= 0 && app.puzzle.scene != 4);
+                         (app.puzzle.stage >= 0 && app.puzzle.scene != 4) || achievementBannerUp(app);
     // EvtStart: an event stands the player (mdl_set_act_motion(leader, 0, 2)) unless its record's
     // +0xe has 0x4000; held here, stepWalker doesn't run, so the walk / run clip would play in place
     auto standHeld = [&] {
@@ -15890,6 +16172,16 @@ void showHits(App& app) {
             if (h.amount < 0) btlvoice::healed(app, h.target);   // btlcalc_dmg_hp
             else btlvoice::hpChange(app, h.target, h.amount);     // btlcalc_chk_dead (a miss too)
         }
+        if (!h.mp && h.type != cr::kHitQuiet && h.target >= 2) { // btlcalc_chk_dead on a monster: the achievements' flags
+            if (h.type != cr::kHitKill) battleConfFlag(app, cr::achievements::blowFlag(h.amount)); // a blow of 5,000 / 10,000 / 30,000
+            if (h.fell) {
+                int& kills = app.game.vars[cr::achievements::kKillVar]; // var 0x17 (to 9999); the 500th: 0x35
+                if (kills < 9999 && ++kills >= 500) battleConfFlag(app, cr::achievements::kKills500);
+                // a monster of battle models 33..138 leaves its gene plate when the bag has none (steal_item_add): 0x3e
+                if (f.def && cr::plateDrop(f.def->model) > 0 && ownedCount(app, cr::plateDrop(f.def->model)) == 0)
+                    battleConfFlag(app, cr::achievements::kPlateFound);
+            }
+        }
         b.shownHp[h.target] = f.hp;
         b.shownMp[h.target] = f.mp;
         if (!a || h.type == cr::kHitQuiet) continue;
@@ -17710,6 +18002,7 @@ int menuMaskWanted(const App& app, bool& atOnce) {
         return app.camp.page == App::Camp::Status && app.camp.phase == App::Camp::Slot ? 2 : 1;
     }
     if ((app.optionsOpen && !optionsAbout(app)) || app.shop.open || app.worldChoiceOpen || app.lastBattle.open) return 1;
+    if (app.ach.listOpen) return 3; // (the Store menu's Set: MuCom_MenuSetMask(3))
     if (app.battle.active && app.battle.phase == App::Battle::Results && app.battle.result.stage != 3) return 1; // (MbResultPrc 0 .. 10)
     return -1;
 }
@@ -17740,8 +18033,12 @@ void settleMenuMask(App& app) { // (captures: the menu's mask as it stands once 
 
 // PutMask's quad (tex2d-space +-512 x +-384 at z -1: over the 3D, under the 2D); widescreen
 // carries the shapes out to the screen's sides
+void drawMenuMaskShape(App& app, int alpha);
 void drawMenuMask(App& app) {
-    const int alpha = menuMaskAlpha(app);
+    if (app.ach.listOpen) return; // (the achievement list draws its own over the title's picture)
+    drawMenuMaskShape(app, menuMaskAlpha(app));
+}
+void drawMenuMaskShape(App& app, int alpha) {
     if (alpha <= 0) return;
     cr::Renderer& r = app.renderer;
     r.setOrigin(0);
@@ -17749,12 +18046,17 @@ void drawMenuMask(App& app) {
     switch (app.menuMask.type) {
     case 1: { const float q[8] = {0, 0, x0 + 427, 0, x0 + 747, H, 0, H}; r.fillQuad(q, 0, 0, 0, a); break; }
     case 2: { const float q[8] = {x0 + 597, 0, SW, 0, SW, H, x0 + 277, H}; r.fillQuad(q, 0, 0, 0, a); break; }
-    case 3: // the bottom's corners at 0x10 at most: bands down the screen
-        for (int k = 0; k < 16; ++k) {
-            const float t = (float(k) + 0.5f) / 16, bottom = std::min(a, 16.0f / 255.0f);
-            r.fillRect(0, H * float(k) / 16, SW, H / 16 + 1, 0, 0, 0, a + (bottom - a) * t);
+    case 3: { // PutMask: the left edge's corners at the alpha, the right edge's at 0x10 at most - fading across
+        // the screen (Android: the phone's; Part 15 3857.5 s against 3855.5 s: x 0 at 0.37 of the title's
+        // brightness, x 640 0.68, x 1216 0.91)
+        const float L = r.phoneLayout() ? SW * 0.5f - SW * 0.5f / r.layoutScale() : 0.0f, R = r.phoneLayout() ? r.layoutRight() : SW;
+        const float right = std::min(a, 16.0f / 255.0f);
+        for (int k = 0; k < 32; ++k) {
+            const float t = (float(k) + 0.5f) / 32;
+            r.fillRect(L + (R - L) * float(k) / 32, 0, (R - L) / 32 + 0.5f, H, 0, 0, 0, a + (right - a) * t);
         }
         break;
+    }
     default: r.fillRect(0, 0, SW, H, 0, 0, 0, a); break;
     }
 }
@@ -18096,8 +18398,14 @@ void drawFrame(App& app, bool present = true) {
     if (app.mode == Mode::Maps && app.padArt) drawPadArt(app);
     if (app.mode == Mode::Maps && app.battle.active) drawBattleHud(app, W, H);
     if (app.mode == Mode::Maps && app.titleOpen && !app.optionsOpen && !app.saveScreen.open && // (the offer's windows over it)
-        !app.charSelectOpen && !app.scc.open && !app.collection.open && !app.manualOpen)
+        !app.charSelectOpen && !app.scc.open && !app.collection.open && !app.manualOpen && !app.ach.listOpen)
         drawTitleMenu(app);
+    if (app.ach.listOpen) { // the achievement list (the title's picture 127)
+        for (app.ach.listClock += dt; app.ach.listClock >= 1.0f / kFramesPerSecond; app.ach.listClock -= 1.0f / kFramesPerSecond)
+            stepAchievementList(app);
+        if (!app.titleOpen) closeAchievementList(app);
+        else drawAchievementList(app);
+    }
     if (app.optionsOpen) {
         for (app.optionsClock += dt; app.optionsClock >= 1.0f / kFramesPerSecond; app.optionsClock -= 1.0f / kFramesPerSecond)
             stepOptions(app);
@@ -18238,6 +18546,8 @@ void drawFrame(App& app, bool present = true) {
         ++app.manualAnim;
         if (app.manualOpen) drawManual(app);
     }
+    stepAchievements(app, realDt); // achievement_prc: last in gameapp_prc, over everything
+    drawAchievementBanner(app);
     r.setOrigin(0);
     r.endFrame(present);
 }
@@ -19314,6 +19624,178 @@ void saveFrame(App& app, const char* path) {
         std::memcpy(static_cast<uint8_t*>(surf->pixels) + size_t(y) * surf->pitch, &px[size_t(y) * sw * 4], size_t(sw) * 4);
     SDL_SaveBMP(surf, path);
     SDL_DestroySurface(surf);
+}
+
+// Achievements (game/achievements.hpp): each condition earns exactly its achievement, once; the
+// battle's check; nothing at the title; the banner's frames (achievement_prc); the queue shown one
+// at a time on the field, the next checked as one closes; the earned set kept across a restart
+// (settings.ini); the list's rows
+int achievementsSelfTest(App& app) {
+    namespace ach = cr::achievements;
+    int problems = 0;
+    const App::Achievements keepAch = app.ach;
+    const cr::GameState keepGame = app.game;
+    const bool keepPersist = app.persist, keepBooting = app.booting, keepTitle = app.titleOpen, keepBattle = app.battle.active;
+    const Mode keepMode = app.mode;
+    app.persist = false, app.booting = false, app.titleOpen = false, app.battle.active = false, app.mode = Mode::Maps;
+    app.runner.stop();
+    auto fresh = [&] {
+        app.ach = App::Achievements();
+        app.game = cr::GameState();
+    };
+    fresh();
+    // One state a condition: the achievement it earns (fld_checkAchievements' order)
+    struct Case { const char* what; int expect; std::function<void()> set; };
+    const std::vector<Case> cases = {
+        {"flag 0x48a", 1, [&] { app.game.setFlag(0x48a, true); }},
+        {"flag 0x4f4", 10, [&] { app.game.setFlag(0x4f4, true); }},
+        {"a purchase (0x2b)", 11, [&] { app.ach.flags.set(ach::kBought); }},
+        {"50 weapons", 12, [&] { for (int i = 0; i < 50; ++i) app.game.items[0xc9 + i] = 1; }},
+        {"49 weapons", 0, [&] { for (int i = 0; i < 49; ++i) app.game.items[0xc9 + i] = 1; }},
+        {"50 armour", 13, [&] { for (int i = 0; i < 50; ++i) app.game.items[0x11d + i] = 1; }},
+        {"15 gems", 14, [&] { for (int i = 0; i < 15; ++i) app.game.items[0x171 + i] = 1; }},
+        {"a 10,000 blow (0x30)", 16, [&] { app.ach.flags.set(ach::kHit10000); }},
+        {"100,000 Oz", 18, [&] { app.game.oz = 100000; }},
+        {"99,999 Oz", 0, [&] { app.game.oz = 99999; }},
+        {"7,770,000 Oz, 18 and 19 earned", 20, [&] { app.game.oz = 7770000, app.ach.flags.set(18), app.ach.flags.set(19); }},
+        {"500 down (0x35)", 21, [&] { app.ach.flags.set(ach::kKills500); }},
+        {"flag 0x65f", 27, [&] { app.game.setFlag(0x65f, true); }},
+        {"Ohm's items to 200", 28, [&] { for (int i = 0; i < 20; ++i) app.game.items[0x209 + i] = 1; app.game.vars[0x28] = 0; }}, // (5x5 + 15x5 + 30x5 + 40x5 = 450)
+        {"Ohm 900, 28 earned", 29, [&] { app.game.vars[0x28] = 900; app.ach.flags.set(28); }},
+        {"a plate found (0x3e)", 30, [&] { app.ach.flags.set(ach::kPlateFound); }},
+        {"every plate's genes", 31, [&] { for (int p = 7; p < 0x1f; ++p) for (int e : cr::plateContents(cr::kFirstPlate + p)) if (e > 0) app.game.items[e] = 1; }},
+    };
+    int conditions = 0;
+    for (const Case& c : cases) {
+        fresh();
+        c.set();
+        fieldCheckAchievements(app);
+        const bool once = c.expect ? app.ach.earnedLog == std::vector<int>{c.expect} && app.ach.flags.has(c.expect) &&
+                                         app.ach.queue == std::vector<int>{c.expect}
+                                   : app.ach.earnedLog.empty();
+        app.ach.queue.clear(); // (as the banner would have been shown: the same state checks again)
+        fieldCheckAchievements(app);
+        const bool again = c.expect ? app.ach.earnedLog.size() == 1 || app.ach.earnedLog[1] != c.expect : app.ach.earnedLog.empty();
+        if (once && again) ++conditions;
+        else std::printf("achievements: %s earned %d (want %d)\n", c.what, app.ach.earnedLog.empty() ? 0 : app.ach.earnedLog[0], c.expect), ++problems;
+    }
+    // the battle's check (3.1.0's FUN_0008fa80): a blow's flag earns at once, in the battle
+    fresh();
+    app.battle.active = true;
+    battleConfFlag(app, ach::blowFlag(31000));
+    const bool battle = app.ach.flags.has(ach::kHit30000) && app.ach.earnedLog == std::vector<int>{17} && ach::blowFlag(4999) == 0 &&
+                        ach::blowFlag(5000) == ach::kHit5000 && ach::blowFlag(29999) == ach::kHit10000;
+    problems += !battle;
+    // ... and its banner waits for the field
+    app.ach.clock = 0;
+    stepAchievements(app, 0.06f);
+    const bool waited = !app.ach.banner.on && app.ach.queue == std::vector<int>{17};
+    app.battle.active = false;
+    stepAchievements(app, 0.05f);
+    const bool shown = app.ach.banner.on && app.ach.banner.id == 17 && app.ach.queue.empty();
+    problems += !waited + !shown;
+    // nothing while the title is up (a check there would earn from whatever the game holds)
+    fresh();
+    app.game.setFlag(0x48a, true);
+    app.titleOpen = true;
+    fieldCheckAchievements(app);
+    const bool title = app.ach.earnedLog.empty();
+    app.titleOpen = false;
+    problems += !title;
+    // achievement_prc's frames: in over four (SE on the first; 48, 96, 144, 192 of 255), the lines held
+    // with the last, until a press; then one frame whole without them and three out; closed
+    ach::Banner b;
+    b.start(5);
+    std::vector<int> alphas;
+    std::vector<bool> lines;
+    bool sound = false;
+    for (int f = 0; f < 4; ++f) {
+        sound |= b.step(false) == ach::Banner::Sound && f == 0;
+        alphas.push_back(b.alphaByte()), lines.push_back(b.lines());
+    }
+    for (int f = 0; f < 200; ++f) b.step(false);
+    const bool held = b.on && b.lines() && b.alphaByte() == 192;
+    b.step(true);
+    alphas.push_back(b.alphaByte()), lines.push_back(b.lines());
+    for (int f = 0; f < 3; ++f) b.step(false), alphas.push_back(b.alphaByte()), lines.push_back(b.lines());
+    const bool closed = b.step(false) == ach::Banner::Closed && !b.on;
+    const bool timing = sound && held && closed && alphas == std::vector<int>{48, 96, 144, 192, 192, 144, 96, 48} &&
+                        lines == std::vector<bool>{false, false, false, true, false, false, false, false};
+    problems += !timing;
+    // the queue on the field: one at a time, in order; the next checked as one closes (and shown)
+    fresh();
+    app.game.setFlag(0x48a, true), app.game.setFlag(0x48b, true);
+    fieldCheckAchievements(app);
+    const bool one = app.ach.earnedLog == std::vector<int>{1};
+    int shownOrder[2] = {0, 0}, banners = 0;
+    for (int f = 0; f < 60 && banners < 2; ++f) {
+        const bool was = app.ach.banner.on;
+        stepAchievements(app, 1.0f / kFramesPerSecond);
+        if (!was && app.ach.banner.on) shownOrder[banners++] = app.ach.banner.id;
+        if (app.ach.banner.lines()) app.ach.tap = true; // (a press as soon as it's held)
+    }
+    const bool chain = one && shownOrder[0] == 1 && shownOrder[1] == 2 && app.ach.earnedLog == std::vector<int>({1, 2});
+    problems += !chain;
+    // the field held while it's up (FieldScene::onUpdate does nothing; the HUD's corner button gone)
+    const bool hold = app.ach.banner.on && !fieldHudShown(app);
+    problems += !hold;
+    // kept across a restart: settings.ini's achievements= (an isolated folder, as controlHintsSelfTest's)
+    bool kept = false;
+    {
+        const char* oldEnv = SDL_getenv("CR_SAVE_DIR");
+        const std::string keepEnv = oldEnv ? oldEnv : "";
+        const auto testDir = std::filesystem::temp_directory_path() / ("cr-ach-test-" + std::to_string(SDL_GetTicksNS()));
+        if (std::filesystem::create_directory(testDir)) {
+            SDL_SetEnvironmentVariable(SDL_GetEnvironment(), "CR_SAVE_DIR", testDir.u8string().c_str(), true);
+            const App::Mix keepMix = app.mix;
+            const int keepLanguage = app.language;
+            app.persist = true;
+            fresh();
+            app.game.setFlag(0x4c6, true);
+            fieldCheckAchievements(app); // (7: written as it is earned)
+            setSystemConfFlag(app, ach::kHit5000);
+            const ach::Flags before = app.ach.flags;
+            app.ach = App::Achievements();
+            loadMix(app);
+            kept = before.has(7) && app.ach.flags.has(7) && app.ach.flags.has(ach::kHit5000) && app.ach.flags.bits == before.bits &&
+                   app.ach.flags.earned() == 1;
+            app.persist = false;
+            app.mix = keepMix, app.language = keepLanguage;
+            applyLanguage(app), applyMix(app);
+            SDL_RemovePath(settingsPath().c_str());
+            std::filesystem::remove(testDir);
+            if (oldEnv) SDL_SetEnvironmentVariable(SDL_GetEnvironment(), "CR_SAVE_DIR", keepEnv.c_str(), true);
+            else SDL_UnsetEnvironmentVariable(SDL_GetEnvironment(), "CR_SAVE_DIR");
+        }
+    }
+    problems += !kept;
+    ach::Flags hex;
+    hex.set(1), hex.set(32), hex.set(0x3e);
+    ach::Flags back;
+    const bool hexOk = back.fromHex(hex.hex()) && back.bits == hex.bits && hex.hex().size() == 32 && !back.fromHex("zz");
+    problems += !hexOk;
+    // the list: earned rows with their lines, the story's hidden until earned (InitStoreMenu's table)
+    fresh();
+    app.ach.flags.set(1), app.ach.flags.set(12);
+    app.titleOpen = true;
+    openAchievementList(app);
+    const bool listRows = app.ach.listRows.size() == 15 && app.ach.listRows.front() == 1 && app.ach.listRows[1] == 11 &&
+                          app.ach.listRows.back() == 32;
+    closeAchievementList(app);
+    app.titleOpen = false;
+    problems += !listRows;
+    const bool names = achievementName(app, 7) == "Eye for an Eye" && achievementName(app, 32) == "Gene Splicer";
+    problems += !names;
+    std::printf("achievements: %d of %zu conditions earn their own once, battle check %s (banner waits %s, then %s), none at the title "
+                "%s, banner frames %s, one at a time in order %s, field held %s, kept across a restart %s, flags text %s, list rows %s, "
+                "names %s; %d problems\n",
+                conditions, cases.size(), battle ? "yes" : "NO", waited ? "yes" : "NO", shown ? "shown" : "NOT SHOWN",
+                title ? "yes" : "NO", timing ? "yes" : "NO", chain ? "yes" : "NO", hold ? "yes" : "NO", kept ? "yes" : "NO",
+                hexOk ? "yes" : "NO", listRows ? "yes" : "NO", names ? "yes" : "NO", problems);
+    app.ach = keepAch;
+    app.game = keepGame;
+    app.persist = keepPersist, app.booting = keepBooting, app.titleOpen = keepTitle, app.battle.active = keepBattle, app.mode = keepMode;
+    return problems;
 }
 
 int controlHintsSelfTest(App& app) {
@@ -20954,6 +21436,7 @@ int walkCollisionSelfTest(App& app, int& spawned, int& walked, int& mapErrors) {
 
 int runSelfTest(App& app) {
     app.persist = false;
+    app.ach.live = false; // (no achievements earned by the other checks - achievementsSelfTest turns them on for its own)
     app.typeOn = false; // pages whole (the typing has its own test)
     app.video.layout = 1; // the iPad layout the tests measure (the iPhone one has its own)
     applyVideo(app);
@@ -21021,6 +21504,7 @@ int runSelfTest(App& app) {
     if (SDL_getenv("CR_SELFTEST_LIFECYCLE")) return fieldLifecycleSelfTest(app) ? 1 : 0;
     if (SDL_getenv("CR_SELFTEST_MOBILE")) return mobileInputSelfTest(app) + mobileTransitionSelfTest(app) ? 1 : 0;
     if (SDL_getenv("CR_SELFTEST_CONTROLS")) return controlHintsSelfTest(app) ? 1 : 0;
+    if (SDL_getenv("CR_SELFTEST_ACHIEVEMENTS")) return achievementsSelfTest(app) ? 1 : 0;
     if (SDL_getenv("CR_SELFTEST_FIELD")) return fieldPresentationSelfTest(app) ? 1 : 0;
     if (SDL_getenv("CR_SELFTEST_FIELD_RENDER")) return fieldRenderSelfTest(app) ? 1 : 0;
     if (SDL_getenv("CR_SELFTEST_WALK")) { // only the walking collision pass
@@ -21034,7 +21518,8 @@ int runSelfTest(App& app) {
         setMode(app, Mode::Maps);
         return battleSelfTest(app, frames, glErrors) ? 1 : 0;
     }
-    int glErrors = controlHintsSelfTest(app) + fieldPresentationSelfTest(app) + fieldRenderSelfTest(app), frames = 0, failedModels = 0;
+    int glErrors = controlHintsSelfTest(app) + achievementsSelfTest(app) + fieldPresentationSelfTest(app) + fieldRenderSelfTest(app), frames = 0,
+        failedModels = 0;
     setMode(app, Mode::Models);
     for (size_t i = 0; i < app.models.size(); ++i) {
         showModel(app, int(i));
@@ -25856,6 +26341,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         SDL_GetWindowSizeInPixels(app.window, &ww, &wh);
         if (ww > 0 && wh > 0) app.renderer.fitScreen(ww, wh);
     }
+    app.ach.live = false; // (no banners of their own in captures: CR_CAPTURE_ACHIEVEMENT shows one)
     app.typeOn = SDL_getenv("CR_CAPTURE_TYPED") != nullptr; // CR_CAPTURE_TYPED=n: n frames of typing
     setMode(app, Mode::Maps);
     int idx = -1;
@@ -25995,6 +26481,28 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         app.staffRoll.fast = fast != 0;
         for (int f = 0; f < frames && app.staffRoll.open; ++f) stepStaffRoll(app);
         std::printf("staff roll: state %d, picture y %.1f, next line %d\n", app.staffRoll.state, app.staffRoll.picY, app.staffRoll.next);
+    }
+    if (const char* ab = SDL_getenv("CR_CAPTURE_ACHIEVEMENT")) { // "n:frames[:tap]": achievement n's banner, frames in (a press at frame tap)
+        int n = 1, frames = 4, tap = -1;
+        std::sscanf(ab, "%d:%d:%d", &n, &frames, &tap);
+        app.ach.banner.start(n);
+        for (int f = 0; f < frames && app.ach.banner.on; ++f) app.ach.banner.step(f == tap);
+        std::printf("achievement banner: %d, state %d, level 0x%x, alpha %d%s\n", n, app.ach.banner.state, app.ach.banner.level,
+                    app.ach.banner.alphaByte(), app.ach.banner.on ? "" : " (closed)");
+        app.ach.clock = -1e9f; // (held as it is: the capture's own frame doesn't step it)
+    }
+    if (const char* al = SDL_getenv("CR_CAPTURE_ACHLIST")) { // "scroll[:flags hex]": the title's achievement list, scrolled (units)
+        float scroll = 0;
+        char hex[40] = {};
+        std::sscanf(al, "%f:%32s", &scroll, hex);
+        if (hex[0]) app.ach.flags.fromHex(hex);
+        openAchievementList(app);
+        app.ach.listAnim = 10, app.ach.listDrag = true;
+        app.ach.listScroll = std::clamp(scroll, 0.0f, achListMaxScroll(app));
+        app.ach.listClock = -1e9f;
+        settleMenuMask(app);
+        std::printf("achievement list: %zu rows, %d earned, focus %d, icons %dx%d\n", app.ach.listRows.size(), app.ach.flags.earned(),
+                    achListFocus(app), app.ach.icons.width, app.ach.icons.height);
     }
     if (const char* it = SDL_getenv("CR_CAPTURE_ITEM")) { // "item[:frames]": Uty_GetItem's band, frames (3) in
         int item = 0, frames = 3;
@@ -27469,6 +27977,18 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
     if (!consumeGraphicsReset(app)) return SDL_APP_FAILURE;
     if (app.inputCancel.note(*event)) return SDL_APP_CONTINUE;
     consumeInputCancel(app);
+    { // achievement_prc holds the input: a press is the banner's (pad_chk_trg_down), and its release isn't
+      // passed on to what's under it (pad_all_clear as it closes)
+        const Uint32 t = event->type;
+        const bool press = t == SDL_EVENT_KEY_DOWN || t == SDL_EVENT_MOUSE_BUTTON_DOWN || t == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+        if (app.ach.banner.on && press) {
+            if (!(t == SDL_EVENT_KEY_DOWN && event->key.repeat)) app.ach.tap = true;
+            app.ach.eatUp = t == SDL_EVENT_MOUSE_BUTTON_DOWN;
+            return SDL_APP_CONTINUE;
+        }
+        if (t == SDL_EVENT_MOUSE_BUTTON_UP && app.ach.eatUp) { app.ach.eatUp = false; return SDL_APP_CONTINUE; }
+        if (t == SDL_EVENT_MOUSE_MOTION && app.ach.banner.on) return SDL_APP_CONTINUE;
+    }
     switch (event->type) {
     case SDL_EVENT_QUIT:
         return SDL_APP_SUCCESS;
@@ -27526,6 +28046,10 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         }
         if (app.collection.open) {
             collectionKey(app, event->key.key);
+            break;
+        }
+        if (app.ach.listOpen) {
+            achievementListKey(app, event->key.key);
             break;
         }
         if (app.saveScreen.open) {
@@ -27719,7 +28243,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             if (app.vitaLogo.phase == 2) app.vitaLogo.skip = true;
             break;
         }
-        if (app.manualOpen || app.scc.open || app.collection.open) {
+        if (app.manualOpen || app.scc.open || app.collection.open || app.ach.listOpen) {
             int ww = 0, wh = 0;
             SDL_GetWindowSize(app.window, &ww, &wh);
             const float kx = ww > 0 ? float(app.renderer.frameWidth()) / float(ww) : 1.0f;
@@ -27731,7 +28255,8 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
                 float mx, my;
                 menuPoint(app, lx, ly, mx, my);
                 App::Scenarios& sc = app.scc;
-                if (app.collection.open) collectionClick(app, mx, my);
+                if (app.ach.listOpen) achievementListDown(app, mx, my);
+                else if (app.collection.open) collectionClick(app, mx, my);
                 else if (sc.card >= 0 && sc.zoom > bingo::kZoomMin && my >= 48 && my < 284) { // a zoomed picture: drag, or tap to zoom out
                     app.dragging = true;
                     sc.dragMoved = 0;
@@ -27828,6 +28353,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             break;
         }
         if (app.dragging && app.scc.open && app.scc.dragMoved < 8) scenariosChoose(app);
+        app.ach.listDrag = false;
         if (app.charSelectOpen) charSelectRelease(app);
         app.dragging = false;
         app.optionsBarDrag = false;
@@ -27864,6 +28390,16 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             app.renderer.toLogical(event->motion.x * (ww > 0 ? float(app.renderer.frameWidth()) / float(ww) : 1.0f),
                                    event->motion.y * (wh > 0 ? float(app.renderer.frameHeight()) / float(wh) : 1.0f), lx, ly);
             holdSkip(app, kSkipPointer, skipCorner(app, lx, ly));
+        }
+        if (app.ach.listOpen && app.ach.listDrag && (event->motion.state & SDL_BUTTON_LMASK)) { // the rows follow the finger
+            int ww = 0, wh = 0;
+            SDL_GetWindowSize(app.window, &ww, &wh);
+            float lx, ly, mx, my;
+            app.renderer.toLogical(event->motion.x * (ww > 0 ? float(app.renderer.frameWidth()) / float(ww) : 1.0f),
+                                   event->motion.y * (wh > 0 ? float(app.renderer.frameHeight()) / float(wh) : 1.0f), lx, ly);
+            menuPoint(app, lx, ly, mx, my);
+            achievementListDrag(app, my);
+            break;
         }
         if (app.campPointer.down) {
             int ww = 0, wh = 0;
@@ -27912,6 +28448,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         if (app.campOpen && !app.optionsOpen) { campScrollBy(app, event->wheel.y > 0 ? -1 : event->wheel.y < 0 ? 1 : 0); break; }
         if (app.optionsOpen && !app.resetAsk) { optionsScrollBy(app, event->wheel.y > 0 ? -1 : event->wheel.y < 0 ? 1 : 0); break; }
         if (app.scc.open) break;
+        if (app.ach.listOpen) { achievementListScrollBy(app, event->wheel.y > 0 ? -1 : event->wheel.y < 0 ? 1 : 0); break; }
         if (app.manualOpen) { manualKey(app, event->wheel.y > 0 ? SDLK_UP : SDLK_DOWN); break; }
         app.zoom = std::clamp(app.zoom * (event->wheel.y > 0 ? 0.9f : 1.1f), 0.1f, 10.0f);
         break;
