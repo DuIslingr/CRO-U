@@ -6735,7 +6735,9 @@ float campEase(const App& app) {
     return std::min(1.0f, float(app.camp.anim) / 4.0f);
 }
 float campListX(const App& app) {
-    return campui::kRowX + (app.camp.page == App::Camp::Items ? 160 * (1 - campEase(app)) : 0);
+    // (the Items list's window comes in from 480 to the right - MuScrList_Start(.., 0): WinDispOn(.., 0x1e0);
+    // Part 13 1172.02-1172.10 s: 237, 121, 0 units short on successive frames)
+    return campui::kRowX + (app.camp.page == App::Camp::Items ? 480 * (1 - campEase(app)) : 0);
 }
 bool campSlotList(const App& app) { return app.camp.page == App::Camp::Equip && app.camp.phase == App::Camp::Slot; }
 bool campStatusList(const App& app) { // the Status details' equipment or skill list
@@ -9320,7 +9322,7 @@ void drawCamp(App& app) {
             // MuScrList_Draw type 10 (__ChkCampItem): white for what can be used here (its table: 1 while
             // MuCom_CheckExitItem, 3..6, 24..27), yellow for what either member wears, else grey; no count for a
             // plate (Part 13 1172.5 s: "Emergency Exit" white, "Key" and the Collection grey)
-            scrollList(kRowX + 160 * (1 - ease), int(c.list.size()), [&](int k, float x, float y, bool lit) {
+            scrollList(campListX(app), int(c.list.size()), [&](int k, float x, float y, bool lit) {
                 const int it = c.list[size_t(k)];
                 bool worn = false;
                 for (int g = 0; g < campMembers(app); ++g) {
