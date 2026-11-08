@@ -325,7 +325,8 @@ c101/c102/c104/m207a, 2026-10-12).
       equipment; stats from `_pcparam` + level + equipment, `pcparam_max_*`) are saved. Oz comes
       from selling and battles; the 10% gene-skill
       discount and the seeds' and genes' stat bonuses wait for skills.
-      `--capture t0108_10.cmp <out> --shop main|category|buy|items|sell|count|equip|talk`
+      `--capture t0108_10.cmp <out> --shop main|category|member|buy|items|sell|count|equip|talk`
+      (`items@n`: the cursor on row n, the list scrolled to it)
 - [x] Message windows as the script's `Open` picks them (`__EvtOpen` / `PutWin` / `PutMsg`: its
       style byte and lines choose a rect from 0xd3d30 and the look): style 2, the speech, on the
       torn parchment (window_hd 1024,248 1024x280, the name on the blue streak painted into it,

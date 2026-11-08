@@ -102,6 +102,10 @@ public:
     float uiX() const { return (screenW_ - kLogicalW) * 0.5f; } // where the 1024-wide layout starts
     void setOrigin(float x) { originX_ = x; }          // added to every 2D quad's x
     float origin() const { return originX_; }
+    // A band of y (logical, before the layout's mapping) outside which 2D quads are cut away -
+    // drawQuad / drawQuadUV / fillRect / fillQuad (the menus' scroll lists: MuScrList_Draw's masks)
+    void setClipY(float y0, float y1) { clipY0_ = y0, clipY1_ = y1; }
+    void clearClipY() { clipY0_ = -1e9f, clipY1_ = 1e9f; }
     void setWidescreen(bool on) { widescreen_ = on; }
     // The display's safe area (a camera hole's, the system's edges): its insets in the window's
     // pixels. 3D and fades keep the whole screen; safeLeft / safeRight are how far in from the
@@ -163,6 +167,7 @@ public:
     float pixelScale() const { return phone_ ? scale_ * layoutScale() : scale_; }
 
 private:
+    bool clipV(float& y, float& h, float& t0, float& t1) const;
     void mapScreen(int w, int h); // logical screen -> the current target's pixels
     float safeEdge(float insetPx) const; // a window-pixel inset, in logical units in from the screen's edge
 
@@ -175,6 +180,7 @@ private:
     float scale_ = 1, offX_ = 0, offY_ = 0; // scale_: the frame's pixels per logical pixel
     float scaleX_ = 1, scaleY_ = 1;          // the current target's (the scene's, while in it)
     float screenW_ = kLogicalW, originX_ = 0, renderScale_ = 1;
+    float clipY0_ = -1e9f, clipY1_ = 1e9f;
     bool vita_ = false;
     bool android_ = false;
     int layer_ = 0;

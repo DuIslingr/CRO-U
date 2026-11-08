@@ -29,6 +29,14 @@ public:
     // Outside all that: the whole menu scaled by k and moved to (x, y) (fitting the iPad's 512 x 384
     // menus into the iPhone layout's screen)
     void setFit(float x, float y, float k) { fx_ = x; fy_ = y; fk_ = k; }
+    // Cuts what's drawn after this to menu rows y0..y1 (MuScrList_Draw's masks over a scrolled
+    // list); clearClip ends it
+    void setClip(float y0, float y1) {
+        if (r_) r_->setClipY(Y(y0) * 2.0f, Y(y1) * 2.0f);
+    }
+    void clearClip() {
+        if (r_) r_->clearClipY();
+    }
 
     // A piece of window_hd at (x, y): its sheet rectangle in menu units (u, v, w, h)
     void piece(float x, float y, float u, float v, float w, float h, float alpha = 1, float r = 1, float g = 1, float b = 1);
