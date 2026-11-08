@@ -18993,7 +18993,18 @@ int storyLossSelfTest(App& app) {
         showMap(app, 0, 0, 9); // (area 9: j001_t01.evt)
         app.pendingEntry = App::Entry::None;
         app.runner.stop();
-        const bool started = app.runner.startAt(app.events, 0xa0d2, 0, app.game, app.area, app.mapNumber);
+        // (the scene found by its bytes - vars 58..60 set, then Battle 650 - not by 1.0.0's offset 0xa0d2: 3.1.0's
+        // multi-language file has it at 0xa100)
+        uint32_t sceneAt = 0xa0d2;
+        {
+            static const uint8_t kScene[] = {0x09, 0x10, 0xe5, 0x03, 0x00, 0x00, 0x13, 0x10, 0x3a, 0x00, 0x00, 0x00, 0x09, 0x10,
+                                             0xe5, 0x03, 0x00, 0x00, 0x13, 0x10, 0x3b, 0x00, 0x00, 0x00, 0x09, 0x10, 0xe5, 0x03,
+                                             0x00, 0x00, 0x13, 0x10, 0x3c, 0x00, 0x00, 0x00, 0x20, 0x8a, 0x02, 0x00, 0x00};
+            const std::vector<uint8_t>& ev = app.events.bytes();
+            const auto it = std::search(ev.begin(), ev.end(), std::begin(kScene), std::end(kScene));
+            if (it != ev.end()) sceneAt = uint32_t(it - ev.begin());
+        }
+        const bool started = app.runner.startAt(app.events, sceneAt, 0, app.game, app.area, app.mapNumber);
         bool fought = false, lostShown = false, wrongWay = false, on = false;
         int group = -1, rounds = 0;
         for (int f = 0; f < 30000 && started && !on && !wrongWay; ++f) {
