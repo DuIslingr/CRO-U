@@ -16192,7 +16192,10 @@ void stepBattle(App& app) {
             // texts 0x36 / 0x37 for 60 frames)
             app.fadeGrey = 1, app.fadeFrom = 1, app.fadeTo = 0, app.fadeFrames = 20, app.fadeT = 0;
             setBattleCamera(app, std::max(0, b.formation - 2), -1);
-            if (b.start.strike == 1 || b.start.strike == 2) setBanner(app, sysText(app, 57053 + b.start.strike), 60);
+            if (b.start.strike == 1 || b.start.strike == 2) { // (var 0: the lead's name, +0xaa - "Vieg's team attacks first!")
+                const App::Battle::Actor* lead = battleActor(app, 0);
+                setBanner(app, sysText(app, 57053 + b.start.strike, lead ? lead->name : std::string()), 60);
+            }
         }
         // 300's first frame (7348-7358): the counter at 29 sets the formation's camera again with actor 0 -
         // cameras 0..0xd turn (raw[14] -20 over raw[15] 15); formation 2's at 59 camera 0x21b (-25 over 30)
@@ -23397,6 +23400,7 @@ int runSelfTest(App& app) {
         bool openOk = false, soundOk = false, idleOk = false, shadowOk = false, castOk = false, turnOk = false, projOk = false, nameOk = false;
         int shadowsDrawn = 0, castFrames = 0, phases = 0, formation2 = 0;
         std::vector<float> introSteps;
+        std::string strikeBanner;
         // _btl_in_eff's table
         soundOk = battleInSound(1) == 0xa8 && battleInSound(9) == 0xa9 && battleInSound(0x2b) == 0xa9 && battleInSound(0xae) == 0xa8 &&
                   battleInSound(0x105) == 0xaa && battleInSound(0x107) == 0xa8 && battleInSound(0x11b) == 0xaa && battleInSound(0x15f) == 0xa9 &&
@@ -23475,6 +23479,16 @@ int runSelfTest(App& app) {
             int ambushAt = 0;
             for (; ambushAt < 100 && b.phase == App::Battle::Intro; ++ambushAt) stepBattle(app);
             check(ambushAt == kIntroWhite + 31 && b.phase == App::Battle::Acting && b.cam == fm && b.camActor == 0, "ambush-400");
+            // a first strike: "<the lead>'s team attacks first!" (sys 0x36, var 0 the lead's name) for 60 frames
+            endBattle(app, false);
+            startBattle(app, {group, 0, -1, 1}, 0);
+            for (int f = 0; f < kIntroWhite + 1 && b.phase == App::Battle::Intro; ++f) stepBattle(app);
+            {
+                const App::Battle::Actor* lead = battleActor(app, 0);
+                check(lead && !lead->name.empty() && b.banner == sysText(app, 57054, lead->name) && b.banner.rfind(lead->name, 0) == 0,
+                      "strike-banner");
+                strikeBanner = b.banner;
+            }
             // formation 2 (a boss's): 300's first frame camera 0x21b (-25 over 30), the commands 62 on
             const cr::BattleCamera* c2 = app.battleData.camera(0x21b);
             check(c2 && c2->raw[14] == -25 && c2->raw[15] == 30, "camera-0x21b");
@@ -23601,11 +23615,11 @@ int runSelfTest(App& app) {
         problems += app.renderer.takeErrors();
         std::printf("battle scene: the opening (white %d steps, 200's fade and still camera, 300's turning one eased in under the fade - "
                     "eye steps %.2f / %.2f (peak, 300's 15th) / %.3f (the last) -, 32 to the commands and their camera, an ambush's 31 to the "
-                    "enemies' round, formation 2's 0x21b and 62 (group %d)) %s, "
+                    "enemies' round, formation 2's 0x21b and 62 (group %d), a first strike's \"%s\") %s, "
                     "start sound %s, idle phases (%d monsters) %s, shadows (%d fans, 204 / 80%% of the fade, hidden none) %s, cast loop "
                     "(%d frames) %s, turning 15/frame %s, near 1 far 3500 %s, m010's name row %s; %d problems%s\n",
                     kIntroWhite, introSteps.empty() ? 0.0f : introSteps[0], introSteps.size() > 13 ? introSteps[13] : 0.0f,
-                    introSteps.empty() ? 0.0f : introSteps.back(), formation2, openOk ? "yes" : "NO", soundOk ? "yes" : "NO", phases, idleOk ? "yes" : "NO", shadowsDrawn, shadowOk ? "yes" : "NO",
+                    introSteps.empty() ? 0.0f : introSteps.back(), formation2, strikeBanner.c_str(), openOk ? "yes" : "NO", soundOk ? "yes" : "NO", phases, idleOk ? "yes" : "NO", shadowsDrawn, shadowOk ? "yes" : "NO",
                     castFrames, castOk ? "yes" : "NO", turnOk ? "yes" : "NO", projOk ? "yes" : "NO", nameOk ? "yes" : "NO", problems, why.c_str());
         mapErrors += problems;
         app.runner.stop();
