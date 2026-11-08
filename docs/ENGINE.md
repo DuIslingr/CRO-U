@@ -436,7 +436,9 @@ c101/c102/c104/m207a, 2026-10-12).
       the bag on the gene board (picture, n / 6 known, abilities and skills). Seed points and
       worn plates are saved. `--capture … --camp --camp-view
       items|use|equip|slots|wear|status|genes|plate|entries` renders a page (`entries`: the first
-      plate's known entries with Back / OK).
+      plate's known entries with Back / OK); `open@n` / `genes-open@n` / `equip-open@n` n frames after
+      the main page's Items (Genes, Equip) is chosen, `back@n` (`genes-back@n`, `equip-back@n`) after Back
+      from it, `ask@n` after the Emergency Exit is chosen in the list and `exit@n` after its Yes.
 - [x] Genes (`game/genes.cpp`): abilities (items 81-130, battle actions +120), skills (131-186)
       and the 22 gene plates; each member wears the Human Genes and up to three plates (Equip).
       In battle **Genes** lists what the worn plates hold that's known, with its MP (pair mode:
