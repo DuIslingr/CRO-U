@@ -64,3 +64,15 @@ video moves under a seek: pause it first, and label each grab with the frame cal
 
 Everything else from the 3.1.0 audit rounds rests on code reading; check it here before claiming it
 is what players saw.
+
+## Field and story scenes (agent)
+
+Port side: `--layout android --android <OBB folder>` captures, the 16:9 band scaled to 1280 x 720;
+glyph boxes by thresholded bounding boxes, pictures by gradient cross-correlation.
+
+| Behaviour (source) | Video, time | Result |
+|---|---|---|
+| The "next" mark's art (`PutMsg`: tex2d_add u 512 / 532, v 36, 20 x 20 - window_hd (1024 / 1064, 72) 40 x 40) | Part 1 (o1X9b4VBWM0) 298.0 s and Part 3 1004.5 s: an olive down arrow over a bar on the parchment | Contradicted, fixed: the port drew a black diamond from another piece of the sheet. Now the olive one on the parchment (style 2), the white one on the other windows (4, 8, 0x10, 0x20), none on a window with none of those bits |
+| The "next" mark's place (`PutMsg`: tex2d x 452 + ox, y 296 + oy on the iPhone; 328 on the iPad; style 4 y 100, style 8 the band's y + 84) | Part 1 298.0 s: the arrow's box at x 1224..1255, y 672..688 | Contradicted, fixed: the port's was 19 px left and lower (1205..1249 x 676..697); now 1224..1255 x 673..689 |
+| The skip button (`PutMsg`: (336, 848) 32 x 32 at tex2d (444, 0) on the iPhone, (460, -32) on the iPad; Android + ox, - oy) | Part 1 298.0 s: its arrows' box at x 1230..1251, y 23..42 | Contradicted, fixed: the port cut a 50 px piece of the 64 px cell and put it 8 px low (the 9 px noted above); now the whole cell at (444, 0) - arrows at 1230..1251 x 23..43 |
+| The message lines' and the name's x (`CmdFont` x 36, `drawfont_text` x 24 on the Retina phone) | Part 1 298.0 s ("I have nothing against you, but this is just part / of my job.", "Vieg"): the lines from x 233, the name from 209 | Contradicted, fixed: the port's lines started at 250 and the name at 221 - the Hud's text carries a margin (4 per unit of scale) that was drawn from CmdFont's x. Now 234 and 209. The lines' tops: 516 in the video, 524 in the port (was 540) - the font's own offset (known) |
