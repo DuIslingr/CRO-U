@@ -1134,7 +1134,10 @@ struct App {
         bool skip = false;                 // +0x26: ... and Yes (flag 1)
         bool cancelled = false;            // +0x24: Back (flag 0)
         float win[11] = {}, winTo[11] = {}, fromX[11] = {}, fromY[11] = {};
-        cr::Texture maps[7];               // MAP_01..06 / MAP_07..13.mct (slots 0x11..)
+        float scroll = 0;                  // MuScrList's rows' offset (48 x the focus row once settled, 8 a frame toward it)
+        int scrollList = -1;               // ... of which list (0 the gates, 1 the bands)
+        int mark = 0;                      // the board's mark (PictAnim of picture 13, a tick a frame)
+        cr::Texture maps[7];               // the gates' pictures (slots 0x11..: e3bd0 / e3be8's names)
         float clock = 0;
     } worldSelect;
     struct LastBattle {                    // __menuu_LastBt* (Util 8): which pair meets the next guardian
@@ -8289,11 +8292,14 @@ void openWorldSelect(App& app) {
     }
     ws.levels = std::max(1, ws.levels);
     ws.world = ws.worlds[0];
-    for (int k = 0; k < 7; ++k) { // MAP_01..06 / MAP_07..13
+    // __menuu_WldChoiceSet: the gates' pictures by the table at e3bd0 (the first pair's six) / e3be8 (the
+    // second's seven) - not in number order: the second and third gates swapped, the last two 06 and 13
+    static const char* const kMapName[2][7] = {{"MAP_01.mct", "MAP_03.mct", "MAP_02.mct", "MAP_04.mct", "MAP_06.mct", "MAP_13.mct", nullptr},
+                                               {"MAP_07.mct", "MAP_08.mct", "MAP_09.mct", "MAP_10.mct", "MAP_11.mct", "MAP_12.mct", "MAP_14.mct"}};
+    for (int k = 0; k < 7; ++k) {
         cr::Image img;
-        char name[16];
-        std::snprintf(name, sizeof name, "MAP_%02d.mct", firstWorld(ws.pair) + k + 1);
-        if (loadImage(app, name, img)) ws.maps[k] = app.renderer.upload(img);
+        const char* name = kMapName[ws.pair ? 1 : 0][k];
+        if (name && loadImage(app, name, img)) ws.maps[k] = app.renderer.upload(img);
     }
     on(app, 0), on(app, 1), on(app, 2, -140, 0), on(app, 6, -480, 0), on(app, 4), on(app, 5);
     ws.state = 1;
@@ -8393,6 +8399,13 @@ void stepWorldSelect(App& app) {
     if (!app.worldChoiceOpen) return;
     for (int w = 0; w < 11; ++w)
         ws.win[w] = ws.win[w] < ws.winTo[w] ? std::min(ws.winTo[w], ws.win[w] + 0.25f) : std::max(ws.winTo[w], ws.win[w] - 0.25f);
+    { // MuScrList_Proc: the rows step 8 a frame toward the focus row's place (a jump sets it at once)
+        const int list = ws.winTo[7] > 0 || ws.state == 6 ? 1 : 0;
+        const float to = wldsel::kListStep * float(list ? ws.levelCursor : ws.cursor);
+        if (ws.scrollList != list || std::fabs(to - ws.scroll) > wldsel::kListStep) ws.scrollList = list, ws.scroll = to;
+        else ws.scroll = ws.scroll < to ? std::min(to, ws.scroll + 8) : std::max(to, ws.scroll - 8);
+    }
+    ++ws.mark;
     switch (ws.state) {
     case 3: if (--ws.timer < 0) ws.state = 4; break;
     case 7: if (--ws.timer < 0) ws.state = 8; break;
@@ -8426,65 +8439,72 @@ void drawWorldSelect(App& app) {
     auto dy = [&](int w) { return ws.fromY[w] * (1 - ease(ws.win[w])); };
     const int mapIx = std::clamp(ws.world - wldsel::firstWorld(ws.pair), 0, 6);
     if (ws.win[1] > 0 && ws.maps[mapIx].id) // the world's picture
-        m.imagePiece(ws.maps[mapIx], dx(1) + ox, dy(1) + 64 + oy, 0, 0, 256, 256, ws.win[1]);
+        m.image(ws.maps[mapIx], dx(1) + ox, dy(1) + 64 + oy, 256, 256, ws.win[1]); // (the whole sheet: the _hd one is 512 square)
     if (ws.win[0] > 0) m.picture(0, dx(0) + 8 + ox, dy(0) + 4 + oy, ws.win[0]);
     if (ws.win[2] > 0) { // (the labels as the camp's: FontDisp's y the line box's top)
         m.picture(15, dx(2) + ox, dy(2) + 56 + oy, ws.win[2]);
-        m.textCentred(sysText(app, 58000), dx(2) + 12 + ox, dy(2) + 47 + oy, false, ws.win[2], 15);
+        m.textCentred(sysText(app, 58000), dx(2) + 12 + ox, dy(2) + 47 + oy, false, ws.win[2], 14); // (the menu font, as the Camp's lines)
     }
     if (ws.win[3] > 0) {
         m.picture(16, dx(3) + 24 + ox, dy(3) + 72 + oy, ws.win[3]);
-        m.textCentred(sysText(app, 58001), dx(3) + 40 + ox, dy(3) + 65 + oy, false, ws.win[3], 15);
+        m.textCentred(sysText(app, 58001), dx(3) + 40 + ox, dy(3) + 65 + oy, false, ws.win[3], 14);
     }
-    auto plate = [&](float x, float y, bool chosen, const std::string& name, int pips, float a) {
-        m.picture(chosen ? 9 : 8, x, y, a);
-        m.text(name, x + 56, y + 12, false, a, 14);
-        if (pips >= 0)
-            for (int k = 0; k < 4; ++k) m.picture(pips & (1 << k) ? 11 : 10, x + 195 + 14 * float(k), y + 30, a);
+    // MuScrList mode 0 (as the Camp's and the shop's lists - __menuu_WldChoicePrc 0: MuScrList_Init(4, 5),
+    // SetIdInfo(0, 6, type 7) for the gates, __WldChoice_LvlChoiceListInit's (1, 7, type 7) for the bands): row
+    // k at (192, 150 + 48k - offset), cut to 76..280, the focus row on the line lit; the down pill (0x90) over
+    // the first row while the focus is one of the first two, the up pill (0x91) under the last while it is one
+    // of the last two; the gauge (ComUty_GuageBarDraw at (456, 72)); the plates ComUty_ComPlate_Wld's (icon
+    // 0x3d and the name). Part 8 (rU44ipMZ91g) 3.0 s: "Conglom Plant" lit on the line, the up pill under it
+    auto list = [&](int w, int n, auto&& name) {
+        using namespace campui;
+        const float x = wldsel::kListX + dx(w), a = ws.win[w];
+        const float scroll = ws.scrollList == (w == 7 ? 1 : 0) ? ws.scroll : 0.0f;
+        const int focus = std::clamp(int((scroll + 28) / kRowH), 0, std::max(0, n - 1));
+        ownPlace(true);
+        m.setClip(kListTop, kListBottom);
+        for (int i = 0; i < n; ++i) {
+            const float y = kFocusY + kRowH * float(i) - scroll;
+            if (y + kRowH <= kListTop || y >= kListBottom) continue;
+            m.picture(i == focus ? 9 : 8, x, y, a);
+            m.piece(x + 12, y + 8, float(0x3d % 16) * 32, 248 + float(0x3d / 16) * 32, 32, 32, a); // icon 0x3d
+            plateText(m, name(i), x + 56, y + 12, 0, a);
+        }
+        if (n > 2) {
+            if (focus < 2) m.picture(0x90, x + 88, 112 - scroll, a);
+            if (focus >= n - 2) m.picture(0x91, x + 88, 208 + kRowH * float(n - 1) - scroll, a);
+        }
+        m.clearClip();
+        drawCampScrollBar(m, scroll, n, a);
+        ownPlace(false);
+        m.backBar(wldsel::kBackX + dx(w), wldsel::kBackY, false, a);
     };
     r.setOrigin(wideRight(app));
-    if (ws.win[6] > 0) { // the gates
-        ownPlace(true);
-        ws.top = std::clamp(ws.top, std::max(0, ws.cursor - kRows + 1), ws.cursor);
-        for (int i = ws.top; i < std::min(int(ws.worlds.size()), ws.top + kRows); ++i) {
-            const int g = ws.worlds[size_t(i)];
-            const int pips = -1; // (ComUty_ComPlate_Wld: the plain plate)
-            const float x = kListX + dx(6), y = kListY + kListStep * float(i - ws.top);
-            plate(x, y, ws.state == 1 && i == ws.cursor, sysText(app, 58002 + g), pips, ws.win[6]);
-            m.piece(x + 12, y + 8, float(0x3d % 16) * 32, 248 + float(0x3d / 16) * 32, 32, 32, ws.win[6]); // icon 0x3d
-        }
-        scrollBar(m, dx(6), ws.top, int(ws.worlds.size()), ws.win[6]);
-        ownPlace(false);
-        m.backBar(kBackX + dx(6), kBackY, false, ws.win[6]);
-    }
-    if (ws.win[7] > 0) { // the level bands
-        ownPlace(true);
-        ws.levelTop = std::clamp(ws.levelTop, std::max(0, ws.levelCursor - kRows + 1), ws.levelCursor);
-        for (int i = ws.levelTop; i < std::min(ws.levels, ws.levelTop + kRows); ++i)
-        {
-            const float x = kListX + dx(7), y = kListY + kListStep * float(i - ws.levelTop);
-            plate(x, y, ws.state == 6 && i == ws.levelCursor, sysText(app, 58200 + i), -1, ws.win[7]);
-            m.piece(x + 12, y + 8, float(0x3d % 16) * 32, 248 + float(0x3d / 16) * 32, 32, 32, ws.win[7]);
-        }
-        scrollBar(m, dx(7), ws.levelTop, ws.levels, ws.win[7]);
-        ownPlace(false);
-        m.backBar(kBackX + dx(7), kBackY, false, ws.win[7]);
-    }
+    if (ws.win[6] > 0) // the gates
+        list(6, int(ws.worlds.size()), [&](int i) { return sysText(app, 58002 + ws.worlds[size_t(i)]); });
+    if (ws.win[7] > 0) // the level bands
+        list(7, ws.levels, [&](int i) { return sysText(app, 58200 + i); });
     r.setOrigin(r.uiX());
     if (ws.win[9] > 0) { // the board (ComUty_MsgBoardDraw at y 220, from 160 below)
         const float a = ws.win[9], y = 220 + oy + dy(9);
         m.picture(12, ox, y, a);
+        // (ComUty_MsgBoardDraw: the mark, picture 13 out and back a tick a frame, at (458, 298); the lines in the
+        // menu font - Part 8 6.0 s: "Conglom Plant / LV41 - LV50 / Is this okay?", the mark at the lower right)
+        const short* mk = cr::kMenuPicture[13];
+        m.piece(458 + ox, y + 78, float(mk[0] + 20 * pictAnimFrame(ws.mark, 1, 4)), mk[1], mk[2], mk[3], a);
         std::vector<std::string> lines;
         if (ws.asking) lines = {sysText(app, 57000 + 0x40)};
         else if (ws.world == wldsel::lastWorld(ws.pair)) lines = {sysText(app, 58002 + ws.world), sysText(app, 58018)};
         else lines = {sysText(app, 58002 + ws.world), sysText(app, 58200 + ws.level), sysText(app, 58018)};
-        for (size_t k = 0; k < lines.size(); ++k) m.text(lines[k], 24 + ox, y + 14 + 16 * float(k), false, a, 15);
+        for (size_t k = 0; k < lines.size(); ++k) m.text(lines[k], 24 + ox, y + 14 + 16 * float(k), false, a, 13);
     }
     r.setOrigin(wideRight(app));
     if (ws.win[8] > 0) { // Yes / No
         ownPlace(true);
-        m.plate(336 + dx(8), 104, 0, 0, ws.confirm == 0, ws.win[8], false);
-        m.plate(336 + dx(8), 160, 1, 1, ws.confirm == 1, ws.win[8], false);
+        // (__WldChoice_YesNoChoiceProc: ComUty_YesNoChoiceProc lights only the box a finger is on - Part 8 6.0 s
+        // both dark; keys and pads keep the cursor's lit)
+        const bool lit = !app.pointerLast;
+        m.plate(336 + dx(8), 104, 0, 0, lit && ws.confirm == 0, ws.win[8], false);
+        m.plate(336 + dx(8), 160, 1, 1, lit && ws.confirm == 1, ws.win[8], false);
     }
     ownPlace(false);
     r.setOrigin(r.uiX());
@@ -8526,11 +8546,19 @@ void worldSelectClick(App& app, float px, float py) {
             else worldSelectLevel(app, -1);
             return;
         }
-        const int top = ws.state == 1 ? ws.top : ws.levelTop, n = ws.state == 1 ? int(ws.worlds.size()) : ws.levels;
-        for (int i = top; i < std::min(n, top + kRows); ++i)
-            if (in(kListX, kListY + kListStep * float(i - top), 256, 48)) {
-                if (ws.state == 1) ws.cursor = i, worldSelectChoose(app, i);
-                else ws.levelCursor = i, worldSelectLevel(app, i);
+        // (MuScrList mode 0: the row on the line is chosen, another tapped comes to the line; the pills jump to
+        // the other end)
+        const int n = ws.state == 1 ? int(ws.worlds.size()) : ws.levels;
+        int& cur = ws.state == 1 ? ws.cursor : ws.levelCursor;
+        const float scroll = ws.scroll;
+        if (n > 2 && cur < 2 && in(kListX + 88, 112 - scroll, 80, 24)) { cur = n - 1; menuSound(app, se::kCursor); return; }
+        if (n > 2 && cur >= n - 2 && in(kListX + 88, 208 + kListStep * float(n - 1) - scroll, 80, 24)) { cur = 0; menuSound(app, se::kCursor); return; }
+        if (my < campui::kListTop || my >= campui::kListBottom) return;
+        for (int i = 0; i < n; ++i)
+            if (in(kListX, campui::kFocusY + kListStep * float(i) - scroll, 256, 48)) {
+                if (i != cur) { cur = i; menuSound(app, se::kCursor); return; }
+                if (ws.state == 1) worldSelectChoose(app, i);
+                else worldSelectLevel(app, i);
                 return;
             }
     } else if (ws.state == 4 || ws.state == 8) {
@@ -27260,9 +27288,21 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             for (int f = 0; f < int(app.captureAt[0]); ++f) stepCharSelect(app);
         }
     }
-    if (app.captureMenu == 8) { // (stepped in: a capture draws one frame)
+    if (app.captureMenu == 8) { // (stepped in: a capture draws one frame) [--at gate [1: chosen, 2 + n: band n chosen]]
         openWorldSelect(app);
         for (int f = 0; f < 40 && app.worldChoiceOpen; ++f) stepWorldSelect(app);
+        if (app.captureAt[0] == app.captureAt[0]) {
+            app.worldSelect.cursor = int(app.captureAt[0]);
+            for (int f = 0; f < 40 && app.worldChoiceOpen; ++f) stepWorldSelect(app);
+            if (app.captureAt[1] >= 1) worldSelectChoose(app, int(app.captureAt[0]));
+            for (int f = 0; f < 40 && app.worldChoiceOpen; ++f) stepWorldSelect(app);
+            if (app.captureAt[1] >= 2) { // (2 + n: band n chosen too - the question)
+                app.worldSelect.levelCursor = int(app.captureAt[1]) - 2;
+                for (int f = 0; f < 40 && app.worldChoiceOpen; ++f) stepWorldSelect(app);
+                worldSelectLevel(app, int(app.captureAt[1]) - 2);
+                for (int f = 0; f < 40 && app.worldChoiceOpen; ++f) stepWorldSelect(app);
+            }
+        }
     }
     if (app.captureMenu == 9) {
         openLastBattle(app);
