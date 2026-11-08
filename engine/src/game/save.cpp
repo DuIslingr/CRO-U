@@ -21,6 +21,13 @@ bool writeSave(const std::string& path, const SaveData& s) {
     o << "CRSAVE 1\n";
     o << "area " << s.area << "\nmap " << s.map << "\npos " << s.pos[0] << ' ' << s.pos[1] << ' ' << s.pos[2]
       << "\nyaw " << s.yaw << "\nleader " << s.leader << "\nplay " << s.playSeconds << "\nsaved " << s.savedAt << '\n';
+    bool anyPlace = false;
+    for (const SaveData::Place& p : s.places) anyPlace |= p.has;
+    for (int sc = 0; sc < kScenarios && anyPlace; ++sc) { // (none set: the lines above are the one place, as the reader takes them)
+        const SaveData::Place& p = s.places[size_t(sc)];
+        o << "place " << sc << ' ' << int(p.has) << ' ' << p.area << ' ' << p.map << ' ' << p.pos[0] << ' ' << p.pos[1] << ' '
+          << p.pos[2] << ' ' << p.yaw << ' ' << p.leader << ' ' << p.playSeconds << ' ' << p.savedAt << '\n';
+    }
     o << "wornbag 1\n";
     if (s.game.scenarioGenes) o << "scenario_genes 1\n";
     o << "flags";
@@ -85,7 +92,7 @@ bool readSave(const std::string& path, SaveData& s, std::string* error) {
     out.game.wornInBag = false; // until its line says so
     std::string line;
     std::getline(in, line);
-    int parts = 0, partyLines = 0;
+    int parts = 0, partyLines = 0, placeLines = 0;
     while (std::getline(in, line)) {
         std::istringstream l(line);
         std::string key;
@@ -99,6 +106,17 @@ bool readSave(const std::string& path, SaveData& s, std::string* error) {
         else if (key == "leader") l >> out.leader;
         else if (key == "play") l >> out.playSeconds;
         else if (key == "saved") l >> out.savedAt;
+        else if (key == "place") {
+            int sc = -1, has = 0;
+            SaveData::Place p;
+            if (l >> sc >> has >> p.area >> p.map >> p.pos[0] >> p.pos[1] >> p.pos[2] >> p.yaw >> p.leader >> p.playSeconds >> p.savedAt &&
+                sc >= 0 && sc < kScenarios) {
+                p.has = has != 0 && p.area >= 0 && p.area < kNumAreas && p.map >= 0 && p.map < kNumMaps;
+                p.leader = std::clamp(p.leader, 0, 3);
+                out.places[size_t(sc)] = p;
+                ++placeLines;
+            }
+        }
         else if (key == "oz") l >> out.game.oz;
         else if (key == "scenario") {
             GameState& g = out.game;
@@ -185,6 +203,7 @@ bool readSave(const std::string& path, SaveData& s, std::string* error) {
     }
     out.leader = std::clamp(out.leader, 0, 3);
     out.game.oz = std::clamp(out.game.oz, 0, 9999999);
+    if (!placeLines) out.setPlace(out.game.scenario, out.placeInPlay()); // (an older file, a resume point, an import)
     s = std::move(out);
     return true;
 }

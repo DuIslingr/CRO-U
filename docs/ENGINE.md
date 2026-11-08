@@ -278,7 +278,9 @@ c101/c102/c104/m207a, 2026-10-12).
       expression in at once and clears that side, 0x40 zooms a centre image 200% -> 100% over 4
       frames; in widescreen side portraits keep to the screen's edges)
 - [x] Saves, as the original keeps them (`game/save.cpp`, a small text file in the save folder):
-      one per pair (each pair's story is its own: save1.dat .. save4.dat), saved from the **Camp
+      one file for both scenarios (data.dat, as the original's `_prty`: both scenarios' records,
+      bags and Oz, the one flag and variable arrays, each scenario's own saved place and "saved"
+      mark; the earlier versions' save1.dat .. save4.dat are folded into it once), saved from the **Camp
       menu** (K on the field, laid out as `__menuu_CampMainPut` draws it: the pair's face
       boards, the clock and the purse, Items / Equip / Genes / Status / Options, and Save) or a script's Util 5/6 - "Save data?" Yes / No, "Save complete.". The
       title's **Start** runs as the boot script has it (j001_t99: Util 0 -> Util 4 -> Util 5):

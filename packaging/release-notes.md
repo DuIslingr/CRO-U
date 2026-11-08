@@ -77,6 +77,17 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   its actors with the fighter's own counter action), and speeds are read afresh for every action
   of a round (a Speed Up or Down moves the rest of the round); the AI's fallback targets are the
   original's (a random living opponent).
+- **One save for both scenarios:** the game now keeps a single `data.dat`, as the original's
+  `_prty` is - both scenarios' records, bags and Oz, one set of flags and variables, and each
+  scenario's own saved place. The second scenario therefore sees what the first earned (the shared
+  genes, skills, manual pages and plates, the flags behind the Scenarios chart and the extras), a
+  plain new game keeps your Oz and the shared bag as the original's does, and Load / New per
+  scenario start from that scenario's own place. Your `save1.dat` / `save2.dat` from earlier
+  versions are folded into it once; a Vita import still produces them and they fold the same way.
+- **The title's announcements:** the one-time boards the original shows after a clear or when a
+  "Breaking the Limit" trial opens ("New fun stuff available after clearing the game!", each
+  trial's board, "Check out the Info Board next to Piu-Piu", "Voices added!"), a tap each, once a
+  launch, with their marks kept in the save as the original's title keeps them.
 - **Scripts across every area** (the opcode and native sets of all eleven files checked against the
   original's handlers): an actor told to face the way it moves turns as the original computes it
   (not a true arctangent - a diagonal walk faces 26 degrees), a degree given with a move is set as
