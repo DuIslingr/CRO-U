@@ -225,7 +225,7 @@ struct App {
     int titleCursor = 0;
     int titleAnim = 0;
     int titleStage = 0;                    // __menuu_TitlePrc: 0 the title alone, a tap away (state 1); 1 the plates (7 / 8)
-    int resumeIn = 0;                      // the Progress Tracker's Yes: frames of black left before the load (TitlePrc 0x1d)
+    int resumeIn = 0;                      // the Progress Tracker's answer: frames left before the load / Start (TitlePrc 0x1d / 0x1e)
     int titleReturnIn = 0;                 // Options' Return to Title: frames of black left before the title (OptionPrc 0x18)
     // __menuu_TitlePrc 3..6: the version-up boards after the tap (titleStage 2) - "New fun stuff
     // available after clearing the game!", each newly opened "Breaking the Limit" trial, "Check out
@@ -510,8 +510,16 @@ struct App {
         Camp::Phase phase = Camp::List;
     } campPointer;
     float saveClock = 0;
-    int resumePrompt = 0;                  // 1: "You have save data from your last session" (Yes / No)
-    int resumeCursor = 0;
+    // The Progress Tracker's offer (TitlePrc 0x16..0x1f): "About Progress Tracker" (56041) once a
+    // launch while flag 0x44 is clear, then the interrupted party's boards, its date and Yes / No
+    int resumePrompt = 0;                  // 1: "You have save data from your last session" (Yes / No, 0x1b); 2: its windows going (0x1c..)
+    int resumeCursor = 0;                  // 0 Yes (the upper plate), 1 No
+    int resumeNotice = 0;                  // 0x17..0x19: 1 the message being read, 2 its window closing
+    bool resumeYes = false;                // DAT_ecb6c: Yes chosen (the music off and the black, then the load)
+    float resumeWin = 0;                   // windows 4..7 (ComUty_WinDispOn / Off): 0 out .. 1 in
+    int resumeMark = 0;                    // the board's tap mark (ComUty_PictAnim of picture 13: 1 tick a frame, out and back)
+    bool interruptShown = false;           // _gbTutoFlg (MuTitle_GetInInterruptFlg): the message shown this launch (TitleSet keeps it)
+    int titleOut = 0;                      // frames since the title's plates began going for the offer (window 3 off)
     cr::SaveData resumeData;
     vitaimport::Session saveImport;
     std::string saveDirOverride;           // tests: where save.dat / resume.dat go
@@ -4884,6 +4892,9 @@ bool applySave(App& app, const cr::SaveData& s) {
     app.booting = false;
     app.titleOpen = false;
     app.game = s.game;
+    // ContData_memcpy / Load_SaveData: once "About Progress Tracker" has been shown this launch
+    // (MuTitle_GetInInterruptFlg), the state taken up keeps flag 0x44 - the message isn't offered again
+    if (app.interruptShown) app.game.setFlag(0x44, true);
     if (!app.game.wornInBag) cr::putWornInBag(app.game, app.itemTable);
     app.treasureBoxes.clear();
     app.entryArea = -1;
@@ -5136,10 +5147,14 @@ void saveScreenChoose(App& app, int i) { // the title's plates (savePlates): the
     menuSound(app, se::kChoose);
 }
 
-// ComUty_GameTimeAndPlayTimeDraw: the save's date (picture 125 over a line; the month 126 + m,
-// the day, 139, the year; the time with the colon 75) on a dark board at (324, 12), and under it
-// __ComUty_PlayingTimeDraw at (324, 84): picture 126, the hours (to 999) and minutes
-void drawSaveDate(App& app, cr::MenuPainter& m, const cr::SaveData& d, float a) {
+// ComUty_GameTimeAndPlayTimeDraw (the same in 1.0.0 and 3.1.0): the save's date on a dark board at
+// (324, 12) - picture 0x81 (DATE) at (372, 12) over a line, the month 0x82 + m (1..12) at (336, 38),
+// the day at 378, 0x8f at (400, 38), the year at 410; the time at 368 + (0, 12, 36, 48)
+// (_ganRealTimeTbl, no leading zero) with the colon (0x4b) at (392, 58) - and under it
+// __ComUty_PlayingTimeDraw at (324, 84): picture 0x82 at (344, 88) over a line, the hours (to 999)
+// and minutes at (+32 / 44 / 56 / 80 / 92, +22) (_ganTimeTbl), the colon at (+68, +22). `dx`: the
+// window's slide (TitlePut's window 5 comes in from +360)
+void drawSaveDate(App& app, cr::MenuPainter& m, const cr::SaveData& d, float a, float dx) {
     (void)app;
     const time_t when = time_t(d.savedAt);
     struct tm tm {};
@@ -5149,28 +5164,28 @@ void drawSaveDate(App& app, cr::MenuPainter& m, const cr::SaveData& d, float a) 
     localtime_r(&when, &tm);
 #endif
     const float dark[4] = {0, 0, 0, 0.5f * a}, white[4] = {1, 1, 1, a};
-    m.quad(324, 12, 148, 64, dark, dark);
-    m.picture(125, 372, 12, a);
-    m.quad(325, 28, 146, 1, white, white);
-    m.picture(126 + std::clamp(tm.tm_mon + 1, 1, 12), 336, 38, a);
-    drawShopNumber(m, tm.tm_mday, 378, 38, 2, 12, a);
-    m.picture(139, 400, 38, a);
-    drawShopNumber(m, tm.tm_year + 1900, 410, 38, 4, 12, a);
+    m.quad(324 + dx, 12, 148, 64, dark, dark);
+    m.picture(0x81, 372 + dx, 12, a);
+    m.quad(325 + dx, 28, 146, 1, white, white);
+    m.picture(0x82 + std::clamp(tm.tm_mon + 1, 1, 12), 336 + dx, 38, a);
+    drawShopNumber(m, tm.tm_mday, 378 + dx, 38, 2, 12, a);
+    m.picture(0x8f, 400 + dx, 38, a);
+    drawShopNumber(m, tm.tm_year + 1900, 410 + dx, 38, 4, 12, a);
     const int digit[4] = {tm.tm_hour / 10, tm.tm_hour % 10, tm.tm_min / 10, tm.tm_min % 10};
     static const float kAt[4] = {0, 12, 36, 48};
     for (int i = 0; i < 4; ++i)
-        if (i || tm.tm_hour >= 10) drawShopNumber(m, digit[i], 368 + kAt[i], 58, 1, 12, a);
-    m.picture(75, 392, 58, a);
+        if (i || tm.tm_hour >= 10) drawShopNumber(m, digit[i], 368 + dx + kAt[i], 58, 1, 12, a);
+    m.picture(0x4b, 392 + dx, 58, a);
     const int secs = int(std::max(0.0, d.playSeconds));
     const int hours = std::min(999, secs / 3600), mins = std::min(59, secs / 60 % 60);
-    m.quad(324, 84, 148, 40, dark, dark);
-    m.picture(126, 344, 88, a);
-    m.quad(325, 100, 146, 1, white, white);
+    m.quad(324 + dx, 84, 148, 40, dark, dark);
+    m.picture(0x82, 344 + dx, 88, a);
+    m.quad(325 + dx, 100, 146, 1, white, white);
     const int pd[5] = {hours / 100, hours % 100 / 10, hours % 10, mins / 10, mins % 10};
     static const float kPlay[5] = {32, 44, 56, 80, 92};
     for (int i = 0; i < 5; ++i)
-        if (i || pd[i]) drawShopNumber(m, pd[i], 324 + kPlay[i], 84 + 22, 1, 12, a);
-    m.picture(75, 324 + 68, 84 + 22, a);
+        if (i || pd[i]) drawShopNumber(m, pd[i], 324 + dx + kPlay[i], 84 + 22, 1, 12, a);
+    m.picture(0x4b, 324 + dx + 68, 84 + 22, a);
 }
 
 void drawSaveScreen(App& app) {
@@ -5208,7 +5223,7 @@ void drawSaveScreen(App& app) {
     if (ss.load && !ss.haveSave) m.text("No save data", 24, 100, false, a, 16);
     // (CR1's pair emblems, pictures 111..113: Omega's SaveLoadPut has none)
     r.setOrigin(wideRight(app));
-    if (ss.load && ss.haveSave) drawSaveDate(app, m, ss.data, a);
+    if (ss.load && ss.haveSave) drawSaveDate(app, m, ss.data, a, 0);
     if (ss.phase == 0) { // the plates at (328, 136 + 48 x which): the last battle, Load, New
         const std::vector<int> plates = savePlates(app);
         static const int kWord[3] = {4, 7, 6};
@@ -8479,24 +8494,116 @@ void trackerSceneEnd(App& app) {
     writeResume(app);
 }
 
-// At the title: "You have save data from your last session. Resume game from last saved point?"
+// ---- The title's Progress Tracker offer (__menuu_TitlePrc 0x16..0x1f, TitlePut windows 4..7) ----
+// Start with a resume point (TitlePrc 8: MuCom_ChackInterruptData, isContData): first, while flag
+// 0x44 is clear and not yet this launch (_gbTutoFlg, which TitleSet's memset leaves alone), flags
+// 0x44 and 3 set and "About Progress Tracker" (system message 56041, MsgUty_SetMsg(0x29)) read
+// through in the message window (0x16..0x19); then (0x1a, ContData_memcpy: the interrupted game in
+// play) its pair's face boards come in from x -240 at (0, 24 + 88k) (window 6), its date and play
+// time from +360 (window 5, ComUty_GameTimeAndPlayTimeDraw), Yes / No from +360 at (336, 126) /
+// (336, 176) (window 4, ComUty_YesNoChoicePosDraw / Proc: the upper box answers 2, Yes) and the
+// message board up from +160 at y 220 with 57092 / 57093 (window 7, ComUty_MsgBoardDraw). An answer
+// (SE 0x93 either way) sends the four windows back out (0x1c); Yes then stops the music and fades
+// to black over 10 frames before the load (0x1d / 0x1e, SaveData_Load_set); No waits 4 and Start
+// goes on (TitleClr: Load_SaveData, flag 0 clear). The resume point is used up either way.
+void openResumePrompt(App& app) { // TitlePrc 0x1a
+    app.resumePrompt = 1;
+    app.resumeCursor = 0;
+    app.resumeWin = 0;
+    app.resumeMark = 0;
+}
+
 void offerResume(App& app) {
-    if (app.resumePrompt || !app.persist) return;
-    if (cr::readSave(savePath(app, "resume.dat"), app.resumeData)) {
-        app.resumePrompt = 1;
-        app.resumeCursor = 0;
+    if (app.resumePrompt || app.resumeNotice || !app.persist) return;
+    if (!cr::readSave(savePath(app, "resume.dat"), app.resumeData)) return;
+    if (!allPairsFlags(app).flag(0x44) && !app.game.flag(0x44) && !app.interruptShown) { // 0x16
+        app.game.setFlag(0x44, true);
+        app.interruptShown = true;
+        // 0x17: flag 3 (MsgUty's pictures - 0x29 has none: MsgUty_SetMsg's table at 0xd5200 holds
+        // 12, 13, 18, 10, 19), MsgUty_WinOpen(0x29): not in that table, so the window's sixth rect
+        // with style 8 (__EvtOpen's style 8, one line: kRect 5), fading in with SE 0x97
+        app.game.setFlag(3, true);
+        app.msgStyle = 8, app.msgLines = 1, app.heldPage = false;
+        app.msgWin.state = 1, app.msgWin.t = 0, app.msgWin.alpha = 0;
+        app.sound.play(0x97);
+        app.dialogue.clear();
+        showMessages(app, {56041});
+        app.resumeNotice = 1;
+        return;
     }
+    openResumePrompt(app);
 }
 
 void answerResume(App& app, bool yes) {
-    app.resumePrompt = 0;
+    if (app.resumePrompt != 1) return;
+    app.resumePrompt = 2; // 0x1c: the windows go
+    app.resumeYes = yes;
     SDL_RemovePath(savePath(app, "resume.dat").c_str()); // used up either way, as the original's
-    menuSound(app, se::kChoose); // Yes and No alike (TitlePrc's ComUty_YesNoChoicePosProc)
-    if (!yes) { titleStart(app); return; } // No: on with Start
-    // Yes (TitlePrc 0x1d): the music off, black over 10 frames, ten frames, then the load (stepEvents)
+    menuSound(app, se::kChoose); // Yes and No alike (ComUty_YesNoChoicePosProc's SE 0x93)
+    if (!yes) { app.resumeIn = 7; return; } // 0x1d: 4, counted below zero in 0x1e, then TitleClr
+    // Yes (0x1d): the music off, black over 10 frames, ten counted below zero, then the load (stepResume)
     playBgm(app, 1u << 27);
     app.fadeGrey = 0, app.fadeFrom = 0, app.fadeTo = 1, app.fadeFrames = 10, app.fadeT = 0;
-    app.resumeIn = 10;
+    app.resumeIn = 13;
+}
+
+// ComUty_YesNoChoicePosProc(.., 0x150, 0x7e, 0x150, 0xb0): the boxes 136 x 40 at (336, 126) - Yes
+// - and (336, 176) - No - (widescreen: on the screen's right, as drawn)
+void resumeClick(App& app, float px, float py) {
+    if (app.resumePrompt != 1) return;
+    float lx, ly, mx, my;
+    app.renderer.toLogical(px, py, lx, ly);
+    menuPointAt(app, lx, ly, wideRight(app), mx, my);
+    for (int k = 0; k < 2; ++k)
+        if (mx >= 336 && mx < 336 + 136 && my >= 126 + 50 * k && my < 126 + 50 * k + 40) {
+            app.resumeCursor = k;
+            answerResume(app, k == 0);
+            return;
+        }
+}
+
+// One 20 Hz frame of the offer: the message read through (0x18: flag 3 clear, MsgUty_WinClose - SE
+// 0x98, the window fading out), its window gone (0x19), the windows' slide, the board's mark, the
+// answer's countdown
+void stepResume(App& app) {
+    if (app.resumeNotice == 1 && app.dialogue.empty()) {
+        app.game.setFlag(3, false);
+        app.msgWin.state = 4, app.msgWin.t = 0;
+        app.sound.play(0x98);
+        app.resumeNotice = 2;
+    } else if (app.resumeNotice == 2 && (app.msgWin.state == 0 || app.msgWin.state == 6)) {
+        app.resumeNotice = 0;
+        openResumePrompt(app);
+    }
+    if (app.resumePrompt == 1) app.resumeWin = std::min(1.0f, app.resumeWin + 0.25f);
+    else if (app.resumePrompt == 2) app.resumeWin = std::max(0.0f, app.resumeWin - 0.25f);
+    if (app.resumePrompt) ++app.resumeMark;
+    if (app.resumeIn > 0 && --app.resumeIn == 0) {
+        app.resumePrompt = 0;
+        if (!app.resumeYes) titleStart(app);
+        else if (!applySave(app, app.resumeData)) { menuSound(app, se::kBuzzer); titleStart(app); }
+    }
+}
+
+// ComUty_PictAnimDraw out and back (PictAnimInit's last 1): its count goes up to ticks x frames and
+// back down to 0, one a draw; the piece is count / ticks steps to the right
+int pictAnimFrame(int draws, int ticks, int frames) {
+    const int top = ticks * frames, k = draws % (2 * top);
+    return (k <= top ? k : 2 * top - k) / ticks;
+}
+
+// ComUty_MsgBoardDraw at (0, y): picture 12, the mark (picture 13, 20 px a frame) at (458, y + 78),
+// and its lines from (24, y + 14), 16 apart - those only while the window stands still
+void drawMsgBoard(App& app, cr::MenuPainter& m, float y, int frame, float a, bool still, std::initializer_list<int> lines) {
+    m.picture(12, 0, y, a);
+    const short* p = cr::kMenuPicture[13];
+    m.piece(458, y + 78, float(p[0] + 20 * frame), p[1], p[2], p[3], a);
+    if (!still) return;
+    float ly = y + 14;
+    for (int id : lines) {
+        if (id > 0) m.text(sysText(app, id), 24, ly, false, a, 14);
+        ly += 16;
+    }
 }
 
 void drawResumePrompt(App& app) {
@@ -8504,15 +8611,28 @@ void drawResumePrompt(App& app) {
     cr::MenuPainter& m = app.menu;
     m.begin(r, app.windowTex, &app.font);
     const PhoneMenu phoneMenu(app, m); // the iPhone layout: its screen's menu coordinates
-    r.setOrigin(0);
-    r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 0.6f);
+    const float w = app.resumeWin, e = 1 - (1 - w) * (1 - w), a = w, out = 1 - e;
+    // Window 6: the interrupted game's pair (ComUty_CharInfoInit: the scenario's pair, one while
+    // flag 0xfed + scenario holds the second back), as its state has them - in play since 0x1a
+    std::swap(app.game, app.resumeData.game);
+    r.setOrigin(wideLeft(app)); // (widescreen: the boards to the screen's left, as the save screen's)
+    for (int k = 0; k < campMembers(app); ++k) {
+        const int ch = campCharacter(app, k);
+        int hp, hpMax, mp, mpMax;
+        memberHpMp(app, ch, hp, hpMax, mp, mpMax);
+        drawFaceBoard(app, m, -240 * out, 24 + 88.0f * float(k), ch, hp, hpMax, mp, mpMax, a);
+    }
+    std::swap(app.game, app.resumeData.game);
+    r.setOrigin(wideRight(app)); // (... the date and Yes / No to its right)
+    drawSaveDate(app, m, app.resumeData, a, 360 * out);                    // window 5
+    m.plate(336 + 360 * out, 126, 0, 0, app.resumeCursor == 0, a, false); // window 4: Yes
+    m.plate(336 + 360 * out, 176, 1, 1, app.resumeCursor == 1, a, false); // No
     r.setOrigin(r.uiX());
-    const float po = r.phoneLayout() ? 1.0f : 0.0f; // (the panel bypasses the menu's iPhone offset)
-    drawWinPiece(app, kWinSmallPanel, 64 * 2 + 32 * po, 140 * 2 + 64 * po, 384 * 2, 72 * 2);
-    m.textCentred(sysText(app, 57092), 84, 160, false, 1, 15);
-    m.textCentred(sysText(app, 57093), 84, 188, false, 1, 15);
-    m.button(128, 230, 0, "", app.resumeCursor == 0, 1, app.resumeCursor == 0);
-    m.button(272, 230, 1, "", app.resumeCursor == 1, 1, app.resumeCursor == 1);
+    drawMsgBoard(app, m, 220 + 160 * out, pictAnimFrame(app.resumeMark, 1, 4), a, w >= 1, {57092, 57093}); // window 7
+    r.setOrigin(wideLeft(app));
+    if (keyHints(app)) // (our key hints)
+        m.text("Up/Down  Enter  Esc: no", 20, 372, false, a * 0.8f, 9);
+    r.setOrigin(r.uiX());
 }
 
 // The flags of every pair's story at once: what the original keeps in its system data (the
@@ -8542,6 +8662,7 @@ void newPairParty(App& app, int pair, bool clearData) {
         g.openedBoxes.clear();
         app.treasureBoxes.clear();
     }
+    if (app.interruptShown) g.setFlag(0x44, true); // (TitleClr's Load_SaveData: the Progress Tracker's message seen)
     const bool ng = haveData && clearData; // mode 3: the records' bonuses and the bag go on (the title offers it with the clear flag)
     cr::changeScenario(g, app.itemTable, p);
     static const int kFlagClear[cr::kScenarios][2] = {{1001, 1500}, {1501, 2500}};
@@ -9666,22 +9787,22 @@ void drawTitleMenu(App& app) {
         outPicture(m, app.titleArt[1], 6, 0, -32, logo);
         outPicture(m, app.titleArt[0], 10, 0, 312, plates || board ? 1.0f : t);
     }
-    if (board) { // the version-up board (ComUty_MsgBoardDraw at y 220, window 8 sliding up 0xa0)
-        const float dy = 160 * (1 - ease);
-        m.picture(12, 0, 220 + dy, t);
-        for (int k = 0; k < 3; ++k)
-            if (app.titleBoard.lines[k]) m.text(sysText(app, app.titleBoard.lines[k]), 24, 234 + dy + 18.0f * float(k), false, t, 15);
+    if (board) { // the version-up board (ComUty_MsgBoardDraw at y 220, window 8 sliding up 0xa0; its mark 4 ticks a frame)
+        const App::TitleBoard& b = app.titleBoard;
+        drawMsgBoard(app, m, 220 + 160 * (1 - ease), pictAnimFrame(app.titleAnim, 4, 4), t, t >= 1, {b.lines[0], b.lines[1], b.lines[2]});
     }
     if (plates) {
+        // Start with a resume point (TitlePrc 8 -> 0x16): window 3 goes back out to +240, the strip
+        // (window 1) stays under the Progress Tracker's windows
+        const float q = std::min(1.0f, float(app.titleOut) / 4.0f), dx = 240 * (1 - ease) + 240 * q * q, pa = t * (1 - q);
         app.renderer.setOrigin(wideRight(app)); // (widescreen: the plates to the screen's right)
         for (int i = 0; i < 3; ++i)
-            m.plate(328 + 240 * (1 - ease), 114 + 56.0f * float(i), kTitleIcons[i], kTitleWords[i], app.titleCursor == i, t,
-                    !titleChoiceReady(i));
+            m.plate(328 + dx, 114 + 56.0f * float(i), kTitleIcons[i], kTitleWords[i], app.titleCursor == i, pa, !titleChoiceReady(i));
         app.renderer.setOrigin(wideLeft(app)); // (... and the pictures down the left to its left)
-        m.picture(125, 8, 16, t);
-        m.picture(126, 8, 96, t);
+        m.picture(125, 8 + dx, 16, pa);
+        m.picture(126, 8 + dx, 96, pa);
     }
-    if (keyHints(app)) // (our key hints)
+    if (keyHints(app) && !app.resumeNotice && !app.resumePrompt) // (our key hints)
         m.text("Up/Down  Enter  V: Options  Esc: quit", 20, 360, false, t * 0.8f, 9);
     app.renderer.setOrigin(app.renderer.uiX());
 }
@@ -9784,12 +9905,16 @@ void titleChoose(App& app, int i) {
     if (i == 1) { openScenarios(app, 0); return; }  // ModeSccnariosMenu(0), SetSccnariosMenu
     // Start (TitlePrc 8 -> 0x16): the Progress Tracker's offer first, when there is a resume point
     offerResume(app);
-    if (app.resumePrompt) return;
+    if (app.resumePrompt || app.resumeNotice) return;
     titleStart(app);
 }
 
 // Keys on the title; false = quit
 bool titleKey(App& app, SDL_Keycode key) {
+    if (app.resumeNotice) { // "About Progress Tracker": a page out, or the next
+        if (app.resumeNotice == 1 && (key == SDLK_RETURN || key == SDLK_KP_ENTER || key == SDLK_SPACE || key == SDLK_E)) tapDialogue(app);
+        return true;
+    }
     if (app.titleStage == 0 && key != SDLK_ESCAPE && key != SDLK_AC_BACK) { titleTap(app); return true; }
     if (app.titleStage == 2) { // a board: any key but Escape turns its page
         if (key != SDLK_ESCAPE && key != SDLK_AC_BACK) titleBoardTap(app);
@@ -9808,6 +9933,7 @@ bool titleKey(App& app, SDL_Keycode key) {
 void titleClick(App& app, float px, float py) {
     float lx, ly;
     app.renderer.toLogical(px, py, lx, ly);
+    if (app.resumeNotice) { if (app.resumeNotice == 1) tapDialogue(app); return; } // (the message window: a tap anywhere)
     if (app.titleStage == 0) { titleTap(app); return; } // (a tap anywhere)
     if (app.titleStage == 2) { titleBoardTap(app); return; } // (a tap anywhere)
     float mx, my;
@@ -10875,9 +11001,8 @@ void stepEvents(App& app) {
     if (app.skipScene && app.runner.running() && !app.dialogue.empty()) advanceDialogue(app);
     stepTyping(app);
     if (app.titleOpen) ++app.titleAnim; // the title menu fades in
-    if (app.resumeIn > 0 && --app.resumeIn == 0) { // the Progress Tracker's load, after its black
-        if (!applySave(app, app.resumeData)) { menuSound(app, se::kBuzzer); titleStart(app); }
-    }
+    app.titleOut = app.titleOpen && (app.resumeNotice || app.resumePrompt) ? app.titleOut + 1 : 0; // (its plates going for the offer)
+    stepResume(app); // the Progress Tracker's offer: its message, windows, and the load / Start after the answer
     if (app.titleReturnIn > 0 && --app.titleReturnIn == 0) { app.optionsOpen = false; bootTitle(app); } // Options' Return to Title, after its black
     if (app.choiceFlag >= 0 && app.choiceAnim < 4) ++app.choiceAnim;
     updateVoices(app);
@@ -16048,7 +16173,7 @@ void drawFrame(App& app, bool present = true) {
         app.menu.piece((phone ? 448 : 464) + 16, (phone ? 288 : 320) + 32, 820 + 24.0f * float(app.nowLoading.frame % 8), 96, 24, 24, 1);
     }
     if (app.mode == Mode::Maps && app.battle.active) drawBattleHud(app, W, H);
-    if (app.mode == Mode::Maps && app.titleOpen && !app.optionsOpen && !app.saveScreen.open && !app.resumePrompt &&
+    if (app.mode == Mode::Maps && app.titleOpen && !app.optionsOpen && !app.saveScreen.open && // (the offer's windows over it)
         !app.charSelectOpen && !app.scc.open && !app.collection.open && !app.manualOpen)
         drawTitleMenu(app);
     if (app.optionsOpen) {
@@ -19189,19 +19314,52 @@ int runSelfTest(App& app) {
         app.persist = false;
         cr::SaveData resume;
         problems += !cr::readSave(savePath(app, "resume.dat"), resume) || resume.map != before.map;
-        // ... offered at the title, and used up by the answer
+        // ... offered at the title (TitlePrc 0x16..0x1f): the first time a launch while flag 0x44 is
+        // clear, "About Progress Tracker" (56041) read through first in the message window (style 8,
+        // one line), flags 0x44 and 3 set while it is up; then windows 4..7 come in over the title's
+        // strip, the answer sends them back out before the load, and the resume point is used up
+        int rbad = 0;
+        rbad += pictAnimFrame(1, 1, 4) != 1 || pictAnimFrame(4, 1, 4) != 4 || pictAnimFrame(7, 1, 4) != 1 ||
+                pictAnimFrame(8, 1, 4) != 0 || pictAnimFrame(17, 4, 4) != 3;
         app.persist = true;
+        app.interruptShown = false;
         bootTitle(app);
         for (int f = 0; f < 1000 && !app.titleOpen; ++f) stepEvents(app);
         app.titleStage = 1;
         titleChoose(app, 0); // Start: the Progress Tracker's offer follows it (TitlePrc 8 -> 0x16)
+        const size_t noticePages = app.dialogue.size();
+        rbad += app.resumeNotice != 1 || app.resumePrompt || !app.game.flag(0x44) || !app.game.flag(3) || noticePages < 4 ||
+                app.msgStyle != 8 || app.msgLines != 1 || app.msgWin.state < 1 || !app.titleOpen;
+        for (int f = 0; f < 2; ++f) {
+            app.lastTicks = 0;
+            drawFrame(app, false);
+            ++frames;
+        }
+        for (int f = 0; f < 800 && app.resumeNotice == 1; ++f) {
+            stepEvents(app);
+            if (f % 8 == 7) titleKey(app, SDLK_RETURN); // (a page out, then turned)
+        }
+        rbad += app.game.flag(3) || app.resumeNotice != 2 || app.resumePrompt;
+        for (int f = 0; f < 20 && app.resumePrompt != 1; ++f) stepEvents(app); // (the window fading out first: 0x19)
+        rbad += app.resumePrompt != 1 || app.resumeNotice != 0 || app.resumeCursor != 0;
+        for (int f = 0; f < 6; ++f) stepEvents(app);
+        rbad += app.resumeWin < 1 || app.titleOut < 4 || !app.titleOpen;
+        for (int f = 0; f < 2; ++f) {
+            app.lastTicks = 0;
+            drawFrame(app, false);
+            ++frames;
+        }
         const bool offered = app.resumePrompt == 1;
         problems += !offered;
         app.menuSoundLog.clear();
         answerResume(app, true);
-        for (int f = 0; f < 12 && app.resumeIn > 0; ++f) stepEvents(app); // (ten frames of black, then the load)
+        rbad += app.resumePrompt != 2 || !app.resumeYes;
+        for (int f = 0; f < 4; ++f) stepEvents(app);
+        rbad += app.resumeWin > 0 || !app.titleOpen; // (0x1c: the windows out, the black still coming)
+        for (int f = 0; f < 20 && app.resumeIn > 0; ++f) stepEvents(app); // (ten frames of black, ten more, then the load)
         problems += expectSounds("resume", {2});
         problems += app.titleOpen || app.mapNumber != before.map || SDL_GetPathInfo(savePath(app, "resume.dat").c_str(), nullptr);
+        rbad += !app.game.flag(0x44) || app.resumePrompt; // (ContData_memcpy: the message seen this launch)
         // ... and saved as you go (the Vita's): a scene's end after the load arms it, the next writes it
         app.trackerArmed = false; // (the room's entry script may have ended during the load's frames above: that armed it)
         trackerSceneEnd(app);
@@ -19209,6 +19367,37 @@ int runSelfTest(App& app) {
         trackerSceneEnd(app);
         const bool asYouGo = armedOnly && cr::readSave(savePath(app, "resume.dat"), resume) && resume.map == before.map;
         problems += !asYouGo;
+        // ... a second offer this launch: no message (_gbTutoFlg), the question at once; No sends the
+        // windows out and Start goes on (TitleClr: the boot script on to Character Select)
+        bootTitle(app);
+        for (int f = 0; f < 1000 && !app.titleOpen; ++f) stepEvents(app);
+        app.titleStage = 1;
+        titleChoose(app, 0);
+        rbad += app.resumeNotice || app.resumePrompt != 1 || !app.dialogue.empty();
+        for (int f = 0; f < 4; ++f) stepEvents(app);
+        answerResume(app, false);
+        rbad += app.resumePrompt != 2 || app.resumeYes;
+        for (int f = 0; f < 20 && app.resumeIn > 0; ++f) stepEvents(app);
+        rbad += app.titleOpen || !app.booting || app.resumePrompt || app.game.flag(0) ||
+                SDL_GetPathInfo(savePath(app, "resume.dat").c_str(), nullptr);
+        // ... and none while the save holds flag 0x44, a new launch or not
+        {
+            cr::SaveData d;
+            if (readData(app, d)) d.game.setFlag(0x44, true), cr::writeSave(dataPath(app), d);
+            else rbad += 1;
+        }
+        cr::writeSave(savePath(app, "resume.dat"), resume);
+        app.interruptShown = false;
+        bootTitle(app);
+        for (int f = 0; f < 1000 && !app.titleOpen; ++f) stepEvents(app);
+        app.titleStage = 1;
+        titleChoose(app, 0);
+        rbad += app.resumeNotice || app.resumePrompt != 1 || app.interruptShown;
+        bootTitle(app);
+        rbad += app.resumePrompt || app.resumeNotice || app.resumeIn;
+        std::printf("title resume: the message %zu pages once a launch (flag 0x44), the windows in and out, Yes loads, No starts: %d problems\n",
+                    noticePages, rbad);
+        problems += rbad;
         SDL_RemovePath(savePath(app, "resume.dat").c_str());
         app.persist = false;
         // The title's New (pair 1, no save): New alone, at 232; Yes hands var 1 = 2 to the boot
@@ -21696,7 +21885,8 @@ void bootTitle(App& app) {
     app.itemWindowOpen = app.optionsOpen = app.optionsFromTitle = false;
     app.resetAsk = 0;
     app.saveScreen = App::SaveScreen();
-    app.resumePrompt = app.resumeCursor = 0;
+    app.resumePrompt = app.resumeCursor = app.resumeNotice = app.resumeIn = app.titleOut = 0;
+    app.resumeWin = 0;
     app.saveImport.cancel();
     app.parkedRunner.stop();
     app.renderer.destroy(app.shop.keeper);
@@ -23460,7 +23650,14 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
             return runExportTextures(*app, dir) ? SDL_APP_FAILURE : SDL_APP_SUCCESS;
         }
         if (SDL_strcmp(argv[i], "--print-sysmsg") == 0) { // --print-sysmsg id...: system messages' text (tools)
-            for (int k = i + 1; k < argc; ++k) std::printf("%s: %s\n", argv[k], sysText(*app, SDL_atoi(argv[k])).c_str());
+            for (int k = i + 1; k < argc; ++k) { // (every page's lines: " | " between lines, " || " between pages)
+                std::vector<std::vector<std::string>> pages;
+                std::string all;
+                if (app->systemText.message(SDL_atoi(argv[k]), app->language, nullptr, pages))
+                    for (size_t p = 0; p < pages.size(); ++p)
+                        for (size_t l = 0; l < pages[p].size(); ++l) all += (p && !l ? " || " : l ? " | " : "") + pages[p][l];
+                std::printf("%s: %s\n", argv[k], all.c_str());
+            }
             return SDL_APP_SUCCESS;
         }
         if (SDL_strcmp(argv[i], "--print-msg-shape") == 0 && i + 2 < argc) { // --print-msg-shape area id: pages / line lengths (tools)
@@ -23766,7 +23963,9 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         }
         if (app.resumePrompt) {
             switch (event->key.key) {
-            case SDLK_LEFT: case SDLK_RIGHT: case SDLK_A: case SDLK_D: app.resumeCursor ^= 1; menuSound(app, se::kCursor); break;
+            case SDLK_UP: case SDLK_DOWN: case SDLK_W: case SDLK_S: case SDLK_LEFT: case SDLK_RIGHT: case SDLK_A: case SDLK_D:
+                if (app.resumePrompt == 1) app.resumeCursor ^= 1, menuSound(app, se::kCursor);
+                break;
             case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: case SDLK_E: answerResume(app, app.resumeCursor == 0); break;
             case SDLK_ESCAPE: case SDLK_BACKSPACE: answerResume(app, false); break;
             default: break;
@@ -23973,14 +24172,8 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             else if (app.worldChoiceOpen) worldSelectClick(app, px, py);
             else if (app.shop.open) shopClick(app, px, py);
             else if (app.mode == Mode::Maps && app.battle.active) battleClick(app, px, py);
-            else if (app.resumePrompt) {
-                float lx, ly;
-                app.renderer.toLogical(px, py, lx, ly);
-                float mx, my;
-    menuPoint(app, lx, ly, mx, my);
-                if (my >= 222 && my < 270 && mx >= 128 && mx < 240) answerResume(app, true);
-                else if (my >= 222 && my < 270 && mx >= 272 && mx < 384) answerResume(app, false);
-            } else titleClick(app, px, py);
+            else if (app.resumePrompt) resumeClick(app, px, py);
+            else titleClick(app, px, py);
             break;
         }
         if (app.staffRoll.open) { // _pad_chk_updw_box(-16, -32, 512, 384): the end card's tap

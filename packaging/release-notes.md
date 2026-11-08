@@ -236,6 +236,16 @@ Thanks to [metastigma](https://github.com/metastigma) for the report, those fixe
   others' entries the same way. The Status page keeps the pair's plates beside the details and drops
   the small record picture from the board; the Items page leaves out the held-back member's one worn
   jewel, as the original does.
+- **The title's "Resume game from last saved point?", as the original's** (TitlePrc read in the
+  3.1.0 code): the dark panel is gone. After Start the plates slide out and the interrupted game's
+  pair comes in on the left as face boards, its date and play time and the Yes / No plates come in
+  from the right, and the two lines sit on the message board at the bottom with its tap mark; an
+  answer sends them back out before the load, or before Start goes on. The first time in a launch,
+  and only while the save hasn't seen it, "About Progress Tracker" is read through in the message
+  window first.
+- **The save date board:** the Load screen's date and play-time board shows the original's labels,
+  months and slash. It had been drawing the title's store pictures and the wrong months in their
+  place.
 
 ## Downloads
 
