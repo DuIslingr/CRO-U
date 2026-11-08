@@ -5591,6 +5591,14 @@ void openSaveScreen(App& app, bool load) {
         d.takePlace(p);
         cr::changeScenario(d.game, app.itemTable, p);
         ss.data = d;
+    } else if (load) { // no save of p: the boards are still drawn (ComUty_CharInfoInit), from the party
+        // as the title holds it - the data's, else a fresh prty_init's - switched to p (__prty_chg)
+        if (!haveData) { // (prty_init: its items, and flag 0xfee - scenario 1's second held back)
+            cr::giveStartingItems(d.game, app.itemTable);
+            d.game.setFlag(0xfee, true);
+        }
+        cr::changeScenario(d.game, app.itemTable, p);
+        ss.data.game = d.game;
     }
     if (load) { // __menuu_SaveLoadSet, the title's (Omega): the scenario's load flag (_gkanLoadFlgTbl:
         // 31 / 32, its story cleared) makes New ask about the clear data; no emblems, and the first
@@ -5763,7 +5771,10 @@ void drawSaveScreen(App& app) {
     // (0, 112) - the save's on the title, the party's when saving -, on the title the save's date
     // and play time (ComUty_GameTimeAndPlayTimeDraw) top right and the pair's emblems (pictures
     // 111..113 at (16 + 72k, 224))
-    const cr::GameState* shown = ss.load ? (ss.haveSave ? &ss.data.game : nullptr) : &app.game;
+    // (no save: still the boards - ComUty_CharInfoInit reads the party as the title holds it, after
+    // SaveLoadSet's __prty_chg to the scenario: Part 9 14.5 s, the second scenario's New alone with
+    // "Olgar" LV 1 on Vieg's face; the port wrote "No save data")
+    const cr::GameState* shown = ss.load ? &ss.data.game : &app.game;
     // (ComUty_CharInfoInit: the boards are the shown game's scenario pair - Vieg and Olgar, or Vieg and
     // Dante - one while flag 0xfed + scenario holds the second back)
     const int scn = shown ? std::clamp(shown->scenario, 0, cr::kScenarios - 1) : 0;
@@ -5775,7 +5786,6 @@ void drawSaveScreen(App& app) {
             memberHpMp(app, ch, hp, hpMax, mp, mpMax, shown);
             drawFaceBoard(app, m, 0, 24 + 88.0f * float(k), ch, hp, hpMax, mp, mpMax, a, shown);
         }
-    if (ss.load && !ss.haveSave) m.text("No save data", 24, 100, false, a, 16);
     // (CR1's pair emblems, pictures 111..113: Omega's SaveLoadPut has none)
     r.setOrigin(wideRight(app));
     if (ss.load && ss.haveSave) drawSaveDate(app, m, ss.data, a, 0);
@@ -26495,9 +26505,11 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         // (CR_TITLE_NEW_STOP=chars / save: stays on Character Select / the save screen)
         const char* stop = SDL_getenv("CR_TITLE_NEW_STOP");
         const std::string stopAt = stop ? stop : "";
+        if (app.captureTitlePair == 2) app.game.setFlag(31, true); // (the second page open: scenario 1 cleared)
         titleChoose(app, 0);
         for (int f = 0; f < 300 && !app.charSelectOpen; ++f) stepEvents(app);
         app.charSelectCursor = app.captureTitlePair - 1;
+        app.charSelectPage = app.captureTitlePair - 1; // (pair 2: the second page, "Extra" - the choice is the page's)
         if (stopAt != "chars") {
             charSelectKey(app, SDLK_RETURN);
             for (int f = 0; f < 300 && !app.saveScreen.open; ++f) stepEvents(app);
