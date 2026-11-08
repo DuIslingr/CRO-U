@@ -178,6 +178,7 @@ struct App {
     struct Order2D { int seq = 0, portrait = 0, frontFade = 0, text = 0; } order2d;
     int frontFadeDrawnAt = -1;          // drawFrontFade: the frame it last drew (once a frame)
     int frameNo = 0;
+    bool pointerLast = false;           // the last press a touch / click (no key or pad since): touch play's look
     cr::Texture charSheet;              // tex2d slot 0x30: window_char (3.1.0: the languages' names, the boards' names)
     bool charSheetTried = false;
     float nearPlane = 10, farPlane = 4000; // setCamera3D's, the last field frame's (tests)
@@ -16119,6 +16120,10 @@ void stepMenuView(App& app) {
         if (const cr::BattleActionDef* a = app.battleActions.get(v.targetAction)) setBanner(app, sysText(app, 57066 + a->scope), 1 << 20);
 }
 
+// The command pages' cursor plate lit: always for keys and pads; after a touch or click only as the
+// page goes (the plate just tapped) - 3.1.0 is touch-only and lights none till a tap
+bool battleCursorLit(const App& app) { return !app.pointerLast || app.battle.viewState == 3; }
+
 // Taps are taken once the page is in (and the logic's page is the one shown)
 bool battleMenuReady(const App& app) {
     const App::Battle& b = app.battle;
@@ -16976,18 +16981,23 @@ void drawBattleHud(App& app, float W, float H) {
         m.setOffset(float(b.slide), 0);
         // the HELP board across the top (ComUty_HelpWindowDraw): the item's or gene's target and effect
         auto helpBoard = [&](int item) { drawHelpWindow(app, m, item, a, 16, 32); }; // (Part 3 877 s: the Camp's panel and place)
+        // The lit plate: 3.1.0 is touch-only - __menub_mainPrc's state 2 clears +0x92 every frame, so a
+        // page comes in with none lit and the tapped one lights as it goes (Part 2 1248.82-1249.22 s:
+        // Solo and Pair dark, Pair lit when tapped). The cursor's plate is the port's for keys and pads:
+        // after a touch or click it shows only as the page leaves (the plate just chosen)
+        const bool cursorLit = battleCursorLit(app);
         switch (v.menu) {
         case App::Battle::Top:
             for (int i = 0; i < 4; ++i) {
                 const bool dim = (i == 1 && (!(b.rules.f[0].alive() && b.rules.f[1].alive()) || b.rules.allyAuto)) ||
                                  (i == 2 && b.rules.escapeBlocked);
-                drawBattleButton(m, kButtonX, kButtonY + kButtonStep * float(i), kTopIcon[i], kTopWord[i], v.cursor == i, dim, a);
+                drawBattleButton(m, kButtonX, kButtonY + kButtonStep * float(i), kTopIcon[i], kTopWord[i], v.cursor == i && cursorLit, dim, a);
             }
             break;
         case App::Battle::Commands:
             for (int i = 0; i < 4; ++i) {
                 const bool dim = i == 1 && (battleGeneList(app).empty() || battleGenesSilenced(app));
-                drawBattleButton(m, kButtonX, kButtonY + kButtonStep * float(i), kCmdIcon[i], kCmdWord[i], v.cursor == i, dim, a);
+                drawBattleButton(m, kButtonX, kButtonY + kButtonStep * float(i), kCmdIcon[i], kCmdWord[i], v.cursor == i && cursorLit, dim, a);
             }
             m.backBar(kBackX, kBackY, false, a);
             break;
@@ -17151,10 +17161,10 @@ void battleClick(App& app, float px, float py) {
     };
     switch (b.menu) {
     case App::Battle::Top:
-        if (const int i = buttonAt(); i >= 0) { b.cursor = i; battleChooseTop(app, i); }
+        if (const int i = buttonAt(); i >= 0) { b.cursor = b.view.cursor = i; battleChooseTop(app, i); } // (the page as shown lights the tapped plate as it goes)
         break;
     case App::Battle::Commands:
-        if (const int i = buttonAt(); i >= 0) { b.cursor = i; battleChooseCommand(app, i); }
+        if (const int i = buttonAt(); i >= 0) { b.cursor = b.view.cursor = i; battleChooseCommand(app, i); }
         else if (onBack) battleBack(app);
         break;
     case App::Battle::Targets: {
@@ -24384,6 +24394,7 @@ int runSelfTest(App& app) {
         app.runner.stop();
         startBattle(app, {1, 0, -1, 0}, 0);
         App::Battle& b = app.battle;
+        bool touchLook = false;
         bool gated = false, slides = false, askBanner = false, askHeld = false, noBack = false, hudOut = false, hudIn = false;
         int inFrames = -1, firstAt = -1, analyzePages = 0, analyzeHeld = 0, analyzeEnd = -1;
         std::string slideSeq, firstLine, hpLine;
@@ -24400,6 +24411,19 @@ int runSelfTest(App& app) {
                 if (battleMenuReady(app)) inFrames = f;
             }
             slides = slideSeq == "320 240 160 80 0"; // (state 0 -> 1 puts it at 320, then 4 frames in)
+            // touch play's look: no plate lit while the page is in after a click, the plate just chosen as
+            // it goes; keys light the cursor's (the flag the events set)
+            {
+                const bool keyLit = battleCursorLit(app);
+                app.pointerLast = true;
+                const bool inDark = b.viewState == 2 && !battleCursorLit(app);
+                const int keepState = b.viewState;
+                b.viewState = 3;
+                const bool goingLit = battleCursorLit(app);
+                b.viewState = keepState;
+                app.pointerLast = false;
+                touchLook = keyLit && inDark && goingLit;
+            }
             // Escape: Top goes (4), the ask comes (4) with its line on the banner, held
             b.cursor = 2;
             battleKey(app, SDLK_RETURN);
@@ -24479,11 +24503,11 @@ int runSelfTest(App& app) {
             analyzeOk = each && size_t(analyzePages) == want && analyzeHeld == analyzePages && analyzeEnd == 40;
             endBattle(app, false);
         }
-        problems += !gated + !slides + (inFrames != 5) + !askBanner + !askHeld + !noBack + !hudOut + !hudIn + (firstAt != 6) + !analyzeOk;
-        std::printf("battle menus: a page in over %d frames (%s), keys before %s; Escape's ask on the banner %s, held %s, No "
+        problems += !touchLook + !gated + !slides + (inFrames != 5) + !askBanner + !askHeld + !noBack + !hudOut + !hudIn + (firstAt != 6) + !analyzeOk;
+        std::printf("battle menus: touch play's unlit plates %s; a page in over %d frames (%s), keys before %s; Escape's ask on the banner %s, held %s, No "
                     "back %s; the left HUD out for a talk %s, back %s; the first action %d frames after the last command; "
                     "Analyze %d lines (\"%s\", \"%s\"), each held %d, over %d frames after %s; %d problems\n",
-                    inFrames, slideSeq.c_str(), gated ? "ignored" : "TAKEN", askBanner ? "yes" : "NO", askHeld ? "yes" : "NO",
+                    touchLook ? "yes" : "NO", inFrames, slideSeq.c_str(), gated ? "ignored" : "TAKEN", askBanner ? "yes" : "NO", askHeld ? "yes" : "NO",
                     noBack ? "yes" : "NO", hudOut ? "yes" : "NO", hudIn ? "yes" : "NO", firstAt, analyzePages, firstLine.c_str(),
                     hpLine.c_str(), analyzeHeld, analyzeEnd, analyzeOk ? "yes" : "NO", problems);
         mapErrors += problems;
@@ -26935,6 +26959,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         }
         break;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+        app.pointerLast = false;
         if (app.pad && SDL_GetGamepadID(app.pad) == event->gbutton.which) padButton(app, event->gbutton.button);
         break;
     case SDL_EVENT_GAMEPAD_BUTTON_UP: // the square let go: the skip stops
@@ -26945,6 +26970,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         if (event->key.key == SDLK_X) holdSkip(app, kSkipKey, false);
         break;
     case SDL_EVENT_KEY_DOWN:
+        app.pointerLast = false;
         // X holds the skip corner wherever a scene runs - a battle's talk too, whose key handler
         // takes every key before the switch below (seen in metastigma's fork, 8a3aa5d)
         if (event->key.key == SDLK_X && app.mode == Mode::Maps && app.runner.running()) holdSkip(app, kSkipKey, true);
@@ -27150,6 +27176,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         }
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        app.pointerLast = true;
         app.pointerCancelled = false;
         if (app.puzzle.pkPointerCancelled && app.puzzle.pkState == 1) {
             int ww = 0, wh = 0;
