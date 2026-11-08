@@ -90,6 +90,8 @@ separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
       full collection would hold taken as found once it's out of ideas)
 - [x] the Scenarios screen as Omega's bingo cards (`__menuu_Sccnarios*`): the faces and both
       Achievement rates, the cards and their pictures, cells opened from the Camp with presents;
+      < > slide windows 6..8 out and in by 240 (0xc..0xe, 5..7; the photo unseen per SccnariosPut),
+      the Camp's windows going 4 frames before it opens (FUN_0006c548 6 / 7);
       the Collection (`__menuu_Collection*`: weapons, armor and jewels seen, the rate's rank)
 - [x] Select Scenario's second page (flag 31): pulled down by its cord, falling in with its bounce,
       the music changing with the page
@@ -218,7 +220,9 @@ separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
 - [x] the Instruction Manual as OptionPrc 0xf..0x16 has it: its topics are the manual items held
       (419..473, given as the story goes), by name, each one's page 56000 + (item - 419); a page's
       centred lines (code 0x17) centred, and the header Omega's picture 103 - it listed CR1's fixed
-      topics with an introduction and showed 102 ("Sold Out!")
+      topics with an introduction and showed 102 ("Sold Out!"); a topic in MsgUty's window (0x12..0x16:
+      SE 0x97 / 0x98, paged by tap, the list back at the item), the five of MsgUty_SetMsg's table
+      (0xd5200) with their animated pictures (rows 0xd5560) and the window at `_mwin[4]`
 - [x] the staff roll as Omega's `__menuu_StaffRollSet` / `Prc` / `Put` run it: EndBack01 / 02 /
       01_end's picture 12 behind 17 lines of block 9 (20 apart, x 16, from y 352 - the iPhone 320 -,
       316 in all) under a white (first scenario) or black fade clearing over 60 frames; lines 2 a

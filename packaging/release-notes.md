@@ -263,6 +263,16 @@ Thanks to [metastigma](https://github.com/metastigma) for the report, those fixe
   once the story allows it, tapping a face board on the Camp's front makes that character the leader;
   the two one-time help messages (the first gene plate, the first visit to Items) show as in the
   original.
+- **The Instruction Manual, as the original's** (Options; read in the 3.1.0 code): a topic opens in
+  the game's own message window, a page at a time - tap or confirm turns it - with the window's
+  open and close sounds, and when it closes the list is back at that topic, instead of all the text
+  at once in a side panel. Solo and Pair, the Break Gauge, Elements, Gene Plates and Statuses show
+  their animated tutorial pictures under the text, a picture a page, as the scripts' tutorials do.
+  "About Option" on the first Options of a game shows in the same window.
+- **Scenarios' cards slide:** < and > slide the card out and the next one in from the other side,
+  as the original's, instead of switching at once; while a card not yet done slides, its picture
+  stays hidden behind the cells. Choosing Scenarios in the Camp first slides the Camp's windows
+  away, and they slide back in when you return.
 
 ## Downloads
 

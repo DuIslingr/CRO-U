@@ -454,6 +454,15 @@ struct App {
         int cStep = 0, cCount = 0;         // DAT_ed544 / ed548
         std::array<std::array<int, 2>, 7> piece{}; // DAT_ed550: where each piece is
         cr::Texture completeTex;
+        // A card's windows 6 (its name), 7 (the frame and cells) and 8 (the photo): ComUty_WinDispOn /
+        // Off, PrcWin's states (1 / 2 opening, 3 up, 4 / 5 closing, 6 gone) sliding in x over 4 frames
+        struct Win { int state = 6, t = 0; float from = 0, to = 0; };
+        std::array<Win, 3> win{};
+        // < > (SccnariosPrc 8 -> 0xc..0xe, 5): the windows slide out (6 left; 7 and 8 left for >, right
+        // for <), the next card is read and they slide in from the other side (6, 7) - 1 that, 2 the
+        // card's windows coming on (states 6 / 7: no input, the photo unseen), 0 the card up (8)
+        int phase = 0, phaseCount = 0;
+        int switchDir = 0, nextCard = -1; // DAT_ed314: 1 >, 2 <
     } scc;
     struct Collection { // the Camp's Collection (__menuu_Collection*)
         bool open = false;
@@ -507,6 +516,10 @@ struct App {
         std::string message;
         int messageFrames = 0;
         int anim = 0;
+        // Scenarios chosen (CampMainPrc 6 -> 7, FUN_0006c548): the main page's windows go - the boards (2)
+        // to x -240, the plates (3) to +360, the Scenarios / Collection pictures (0x14 / 0x15) to -120,
+        // the rest fading - and Scenarios opens 4 frames on (frames into it, 0 none)
+        int leaving = 0;
         std::array<cr::Texture, 31> plateArt; // gene_m*c.mct, loaded when a board first shows them
         std::array<cr::Texture, 11> statusArt; // _gkpachFaceImage: the records' Status portraits (j039_L01..)
     } camp;
@@ -906,6 +919,18 @@ struct App {
         float x = 0, y = 0;                // tex2d, the picture's top-left (x2: the HD frame)
         cr::Texture tex;
     } tutoTex;
+    struct ManualMsg {                     // the manual's page (OptionPrc 0x12..0x16: MsgUty_WinOpen / SetMsg)
+        int state = 0;                     // 0 the list, 1 its windows going (0x12), 2 the message up (0x13 / 0x14),
+                                           // 3 its window closing (0x15 / 0x16)
+        int count = 0, id = 0;             // 0x12's 4 frames; the message (56000 + item - 419, 56040)
+        std::vector<std::vector<std::string>> pages;
+        size_t page = 0;
+        int typed = 0;                     // the page's characters out (PrcMsg)
+        bool picture = false;              // one of MsgUty_SetMsg's five: its picture, the window at _mwin[4]
+        MsgWin win;                        // PrcWin: the window's fade
+        TutoTex pic;                       // MsgUty_TexDisp*: the picture's pages and frames
+        float clock = 0;
+    } manualMsg;
     bool exclamation = false;              // Uty_DrawExclamationMark: the dimmed screen and "!" (flag 0)
     struct PuzzleBanner {                  // Uty_PuzzleStart (call 2003): two pieces sliding apart into place
         bool on = false;
@@ -2239,8 +2264,9 @@ void resetTyping(App& app) {
 
 // PrcWin a frame: __WinOpen / __WinOpen2 take the window's alpha 0 -> 255 over 4 frames (t 4..0),
 // __WinClose / __WinClose2 255 -> 0 over 5 (t 0..4), then it is gone
-void stepMsgWin(App& app) {
-    App::MsgWin& w = app.msgWin;
+void stepMsgWin(App::MsgWin& w);
+void stepMsgWin(App& app) { stepMsgWin(app.msgWin); }
+void stepMsgWin(App::MsgWin& w) {
     switch (w.state) {
     case 1: w.t = 4, w.state = 2; break;
     case 2:
@@ -6566,6 +6592,23 @@ void campChoose(App& app) {
     }
 }
 
+// Scenarios from the Camp (CampMainPrc 5 -> 6: SE 0x93, the main page's windows off; 7: the menu set)
+void campToScenarios(App& app) {
+    if (app.camp.leaving) return;
+    menuSound(app, se::kChoose);
+    app.camp.leaving = 1;
+}
+
+// A frame of that (20 Hz): 4 frames of the windows going, then Scenarios - the Camp's windows slide
+// back in from their sides when it closes (state 9)
+void stepCampLeaving(App& app) {
+    App::Camp& c = app.camp;
+    if (!c.leaving || ++c.leaving <= 4) return;
+    c.leaving = 0;
+    c.anim = 0;
+    openScenarios(app, 1);
+}
+
 // The Emergency Exit's frames after Yes: the Items page stays through CampMainPrc 7, 0xf - 0x12 and
 // CampMain 9; CampMain 0xd takes every window off (the mask cleared), 0xe four frames on fades to
 // white over 500 ms with sound 0x128 and bgmgo(0x8000000), and 12 frames later the Camp closes
@@ -6596,6 +6639,7 @@ void campExitWarp(App& app) {
 void stepCamp(App& app) {
     App::Camp& c = app.camp;
     if (!app.campOpen) return;
+    if (c.leaving) { stepCampLeaving(app); return; } // (Scenarios chosen: the windows going)
     if (c.notice && app.dialogue.empty()) { // the message closed: on to what was asked (CampMain 2)
         const int id = c.notice;
         c.notice = 0;
@@ -6614,6 +6658,7 @@ void stepCamp(App& app) {
 
 void campKey(App& app, SDL_Keycode key) {
     App::Camp& c = app.camp;
+    if (c.leaving) return; // (the windows going to Scenarios)
     const bool back = key == SDLK_ESCAPE || key == SDLK_BACKSPACE || key == SDLK_AC_BACK || (key == SDLK_K && c.page == App::Camp::Main);
     const bool enter = key == SDLK_RETURN || key == SDLK_KP_ENTER || key == SDLK_SPACE || key == SDLK_E;
     const bool up = key == SDLK_UP || key == SDLK_W, down = key == SDLK_DOWN || key == SDLK_S;
@@ -6636,7 +6681,7 @@ void campKey(App& app, SDL_Keycode key) {
     switch (c.page) {
     case App::Camp::Main:
         if (step) { c.cursor = (c.cursor + step + campEntries(app)) % campEntries(app); menuSound(app, se::kCursor); }
-        else if (key == SDLK_Q || key == SDLK_PAGEUP) { menuSound(app, se::kChoose); openScenarios(app, 1); } // (keys, L: the Scenarios picture)
+        else if (key == SDLK_Q || key == SDLK_PAGEUP) campToScenarios(app); // (keys, L: the Scenarios picture)
         else if ((key == SDLK_C || key == SDLK_PAGEDOWN) && app.game.scenario != 0) { menuSound(app, se::kChoose); openCollection(app); } // (R: Collection)
         return;
     case App::Camp::Items:
@@ -6700,6 +6745,7 @@ void campClick(App& app, float px, float py) {
     if (c.notice) { tapDialogue(app); return; }
     if (c.phase == App::Camp::Exit) return;
     if (c.phase == App::Camp::Result) { campChoose(app); return; } // (a tap anywhere)
+    if (c.leaving) return;
     float lx, ly;
     app.renderer.toLogical(px, py, lx, ly);
     // (widescreen: Back centred, the section's box on the left, the rest on the right - drawCamp)
@@ -6723,9 +6769,9 @@ void campClick(App& app, float px, float py) {
         for (int i = 0; i < campEntries(app); ++i)
             if (in(kPlateX + 360 * (1 - campEase(app)), kPlateY + kPlateStep * float(i), 136, 40)) { c.cursor = i; campChoose(app); return; }
         const short* sp = cr::kMenuPicture[162]; // __menuu_CampMainPut's Scenarios picture (CampMainPrc case 5)
-        if (inAt(lx0, 12 - 240 * (1 - campEase(app)), 236, sp[2], sp[3])) { menuSound(app, se::kChoose); openScenarios(app, 1); return; }
+        if (inAt(lx0, 12 - 120 * (1 - campEase(app)), 236, sp[2], sp[3])) { campToScenarios(app); return; }
         const short* cp = cr::kMenuPicture[161]; // ... and Collection (case 6; the second scenario's only)
-        if (app.game.scenario != 0 && inAt(lx0, 84 - 240 * (1 - campEase(app)), 236, cp[2], cp[3])) { menuSound(app, se::kChoose); openCollection(app); return; }
+        if (app.game.scenario != 0 && inAt(lx0, 84 - 120 * (1 - campEase(app)), 236, cp[2], cp[3])) { menuSound(app, se::kChoose); openCollection(app); return; }
         // CampMain 5: in the second scenario with flag 0x636 or 0x637 a face board's box (0, 0x30 + 0x58k,
         // 0x104 x 0x50) makes that member the leader (0x93, Set_Prtyno) unless it leads already
         if (app.game.scenario == 1 && (app.game.flag(0x636) || app.game.flag(0x637)))
@@ -7770,6 +7816,8 @@ void drawTexDisp(App& app) {
 // MsgUty_TexDispProc, a frame: 1 the picture read, 2 each page turn (flag 4075) the next page (its
 // frames from the start) until the pages run out - or flag 3 clears - then 3 deletes it. The frame
 // steps every 20 frames, the last one holds 40, then the page's frames run again
+void stepTutoFrames(App::TutoTex& t);
+void drawTutoPicture(App& app, const App::TutoTex& t);
 void stepTutoTex(App& app) {
     App::TutoTex& t = app.tutoTex;
     if (!t.on) return;
@@ -7788,6 +7836,10 @@ void stepTutoTex(App& app) {
         }
         if (!app.game.flag(3)) { app.game.setFlag(4075, false); finish(); return; }
     }
+    stepTutoFrames(t);
+}
+
+void stepTutoFrames(App::TutoTex& t) { // (the frame timer alone: the manual's picture too)
     if (--t.timer < 0 && t.page >= 0 && t.page < 4) {
         const int n = t.frames[t.page];
         t.timer = ++t.frame == n - 1 ? 40 : 20;
@@ -7798,8 +7850,11 @@ void stepTutoTex(App& app) {
 // MsgUty_TexDispDraw: while flag 3 is set, the page's frame (frame x 384, row x 256: 384 x 256 of
 // the 2048-wide sheet) at tex2d (2x, 2y) of the HD frame - the screen's (2x + 32, 2y + 64)
 void drawTutoTex(App& app) {
-    const App::TutoTex& t = app.tutoTex;
-    if (!t.on || !t.tex.id || !app.game.flag(3) || t.page < 0 || t.page >= 4 || t.frames[t.page] < 0) return;
+    if (app.game.flag(3)) drawTutoPicture(app, app.tutoTex);
+}
+
+void drawTutoPicture(App& app, const App::TutoTex& t) {
+    if (!t.on || !t.tex.id || t.page < 0 || t.page >= 4 || t.frames[t.page] < 0) return;
     cr::Renderer& r = app.renderer;
     const float ox = r.uiX(), k = float(t.tex.width) / 2048.0f;
     r.setOrigin(0);
@@ -8499,11 +8554,12 @@ void drawCamp(App& app) {
     left();
     const float ease = campEase(app);
     const bool main = c.page == App::Camp::Main;
-    m.picture(81, 8, 4, 1); // "Camp"
-    const float out = main ? 1 - ease : ease; // the main screen's pieces slide away on a page
+    const float leave = c.leaving ? std::min(1.0f, float(c.leaving) / 4.0f) : 0.0f; // (off to Scenarios: all of it goes)
+    m.picture(81, 8, 4, 1 - leave); // "Camp"
+    const float out = main ? std::max(1 - ease, leave) : ease; // the main screen's pieces slide away on a page
     // The face boards (window 2): the main screen's and every member choice's (CampMainPrc 0's 3,
     // the Equip and Status pages keep them from the main screen); off once a member is chosen
-    const float faceOut = main ? 1 - ease : c.phase == App::Camp::Member ? 0.0f : ease;
+    const float faceOut = main ? std::max(1 - ease, leave) : c.phase == App::Camp::Member ? 0.0f : ease;
     for (int k = 0; k < campMembers(app); ++k) {
         const int ch = campCharacter(app, k);
         int hp, hpMax, mp, mpMax;
@@ -8521,14 +8577,14 @@ void drawCamp(App& app) {
     // bar; none during the Items Yes / No, its board and the Emergency Exit
     if (campBackShown(app)) {
         if (campArrows(app)) m.backButton(kBackX, campBackY(app), false, 0, 1);
-        else m.backBar(kBackX, campBackY(app), false, 1);
+        else m.backBar(kBackX, campBackY(app), false, 1 - leave);
     }
     left();
     if (main) { // __menuu_CampMainPut: Scenarios (162; 128 "new" over it while no cell is open) and, in the
         // second scenario only (window 0x15), Collection (161) under the boards
-        m.picture(162, 12 - 240 * out, 236, 1 - out);
-        if (campScenariosNew(app)) m.picture(128, 12 - 240 * out, 236, 1 - out);
-        if (app.game.scenario != 0) m.picture(161, 84 - 240 * out, 236, 1 - out);
+        m.picture(162, 12 - 120 * out, 236, 1 - out); // (windows 0x14 / 0x15: WinDispOn / Off at x -120)
+        if (campScenariosNew(app)) m.picture(128, 12 - 120 * out, 236, 1 - out);
+        if (app.game.scenario != 0) m.picture(161, 84 - 120 * out, 236, 1 - out);
     }
     // The Items page's title and section (windows 9, 0x10 / 0x11) are its list's: off from the member
     // choice to the list again (CampMainPrc 0's 2 -> 3 .. 10 -> 1)
@@ -8717,7 +8773,7 @@ void drawCamp(App& app) {
     const bool helpUp = c.phase == App::Camp::List && item > 0 &&
                         (c.page == App::Camp::Items || c.page == App::Camp::Equip);
     right();
-    if (!helpUp) drawClockAndOz(app, m, 1); // the HELP board takes the top while it's up
+    if (!helpUp) drawClockAndOz(app, m, 1 - leave); // the HELP board takes the top while it's up
     centre();
     if (c.messageFrames > 0) --c.messageFrames;
     if (c.messageFrames > 0 && !c.message.empty()) {
@@ -9155,6 +9211,58 @@ void loadCard(App& app, int card) {
     s.cursor = std::clamp(s.cursor, 0, 15);
     refresh(app);
 }
+
+// PrcWin for a card's window (the port's x and alpha of it): opening, t 4 -> 0 from its offset;
+// closing, t 0 -> 4 to it (FUN_0001f574 / 5b4 / 5fc / 620)
+using Win = App::Scenarios::Win;
+void winOn(Win& w, float from) { w.state = 1, w.t = 0, w.from = from; }
+void winOff(Win& w, float to) { // (ClrWin: a window not up stays gone)
+    if (w.state != 6) w.state = 4;
+    w.t = 0, w.to = to;
+}
+void winStep(Win& w) {
+    switch (w.state) {
+    case 1: w.t = 4, w.state = 2; break;
+    case 2: if (--w.t < 1) w.state = 3; break;
+    case 4: w.t = 0, w.state = 5; break;
+    case 5: if (++w.t > 4) w.state = 6; break;
+    default: break;
+    }
+}
+float winX(const Win& w) {
+    switch (w.state) {
+    case 1: return w.from;
+    case 2: return w.from * float(w.t) / 4.0f;
+    case 5: return w.to * float(std::min(w.t, 4)) / 4.0f;
+    case 6: return w.to;
+    default: return 0;
+    }
+}
+float winAlpha(const Win& w) {
+    switch (w.state) {
+    case 1: case 6: return 0;
+    case 2: return float(4 - w.t) / 4.0f;
+    case 5: return std::max(0.0f, float(4 - w.t) / 4.0f);
+    default: return 1;
+    }
+}
+// State 6: the card's windows on (from `from`: 6 always from the left; 7 only for a card not done)
+void cardWindowsOn(App& app, float from) {
+    App::Scenarios& s = app.scc;
+    winOn(s.win[0], from == 0 ? 0.0f : -240.0f);
+    if (!done(app, s.card)) winOn(s.win[1], from);
+    else s.win[1] = Win();
+    winOn(s.win[2], from);
+    s.phase = 2, s.phaseCount = 0;
+}
+// The photo's alpha (SccnariosPut): window 8's, but none in state 7 nor - for a card not done - in
+// 6 and 0xc..0xe (that card the one going), so only the whole picture shows as the cells slide
+float photoAlpha(App& app) {
+    const App::Scenarios& s = app.scc;
+    if (s.phase == 2) return 0;
+    if (s.phase == 1 && !done(app, s.card)) return 0;
+    return winAlpha(s.win[2]);
+}
 } // namespace bingo
 
 void openScenarios(App& app, int mode) {
@@ -9164,6 +9272,7 @@ void openScenarios(App& app, int mode) {
     s.anim = 0;
     s.card = -1;
     s.cursor = 0;
+    s.phase = 0, s.win = {};
     if (mode == 0) s.flags = allPairsFlags(app);
     if (!s.sheet.id) {
         cr::Image img;
@@ -9188,6 +9297,20 @@ void stepScenarios(App& app) {
     using namespace bingo;
     App::Scenarios& s = app.scc;
     ++s.anim;
+    for (Win& w : s.win) winStep(w);
+    if (s.phase == 1) { // < >: 0xc the windows off, 0xd six frames, 0xe and 5 (the next card read), then 6
+        const float side = s.switchDir == 1 ? -240.0f : 240.0f;
+        if (s.phaseCount == 0) {
+            winOff(s.win[0], -240);
+            winOff(s.win[1], side);
+            winOff(s.win[2], side);
+        }
+        if (++s.phaseCount >= 10) {
+            loadCard(app, s.nextCard);
+            s.anim = 100; // (windows 10 and 11 stay up)
+            cardWindowsOn(app, -side);
+        }
+    } else if (s.phase == 2 && ++s.phaseCount >= 5) s.phase = 0; // 7: four frames, then 8
     if (!s.bobBack) { if (++s.bob >= 4) s.bobBack = true; }
     else if (--s.bob <= 0) s.bobBack = false;
     if (s.zoomDir == 1) {
@@ -9317,26 +9440,29 @@ void drawScenarios(App& app) {
     }
     // A card (windows 6..11): the picture (tex2d_add_sca at (pan, 96 + pan), 960 x 640, scaled
     // about its middle; the sheet's 512 rows are all there is of it)
+    // (windows 6..8 slide on < >: their x offsets and alphas; 8 is the photo, 7 the frame and cells)
+    const float x6 = winX(s.win[0]), a6 = a * winAlpha(s.win[0]), x7 = winX(s.win[1]), a7 = a * winAlpha(s.win[1]);
     if (s.photo.id) {
+        const float pa = a * photoAlpha(app);
         const float w = 480 * s.zoom, h = 320 * s.zoom;
-        const float cx = 240 + s.panX / 2, cy = 48 + 160 + s.panY / 2;
-        m.imagePieceTo(s.photo, cx - w / 2, cy - h / 2, w, 256 * s.zoom, 0, 0, 960, 512, a);
+        const float cx = 240 + winX(s.win[2]) + s.panX / 2, cy = 48 + 160 + s.panY / 2;
+        if (pa > 0) m.imagePieceTo(s.photo, cx - w / 2, cy - h / 2, w, 256 * s.zoom, 0, 0, 960, 512, pa);
     }
     const bool whole = done(app, s.card) && s.complete == 0; // (the photo only once the card's done: ed274)
-    if (!whole && s.cardTex.id && s.complete < 3) { // window 7: the frame and the cells (off at the white's peak)
-        card(1, 0, 48, a);
-        card(2, 0, 276, a);
-        card(3, 0, 55, a);
-        card(4, 350, 55, a);
+    if (!whole && s.cardTex.id && s.complete < 3 && a7 > 0) { // window 7: the frame and the cells (off at the white's peak)
+        card(1, x7, 48, a7);
+        card(2, x7, 276, a7);
+        card(3, x7, 55, a7);
+        card(4, x7 + 350, 55, a7);
         for (int i = 0; i < 16; ++i) {
             const int st = s.cell[size_t(i)];
-            card((st == 0 ? 6 : st == 1 ? 0x16 : 0x26) + i, cellX(i), cellY(i), a);
+            card((st == 0 ? 6 : st == 1 ? 0x16 : 0x26) + i, x7 + cellX(i), cellY(i), a7);
         }
         if (s.mode == 1)
             for (int i = 0; i < 16; ++i)
-                if (s.canPush[size_t(i)]) card(5, cellX(i) - 13, cellY(i) - 3 - float(s.bob), a);
-        if (s.keys && s.mode == 1) {
-            const float lime[4] = {0xEB / 255.0f, 1, 0x4B / 255.0f, 0.35f * a};
+                if (s.canPush[size_t(i)]) card(5, x7 + cellX(i) - 13, cellY(i) - 3 - float(s.bob), a7);
+        if (s.keys && s.mode == 1 && s.phase == 0) {
+            const float lime[4] = {0xEB / 255.0f, 1, 0x4B / 255.0f, 0.35f * a7};
             m.quad(cellX(s.cursor), cellY(s.cursor), 55, 55, lime, lime);
         }
     }
@@ -9350,7 +9476,7 @@ void drawScenarios(App& app) {
         r.fillRect(R, T, r.screenW() - R, B - T, 0, 0, 0, 1);
         r.setOrigin(r.uiX());
     }
-    if (s.cardTex.id) card(0, 0, 0, a); // window 6: the card's name
+    if (s.cardTex.id && a6 > 0) card(0, x6, 0, a6); // window 6: the card's name
     drawClockAndOz(app, m, a);         // window 1: BattryAndRealTimeAndOzDraw, the list's and the card's alike
     if (s.complete && s.complete < 3 && s.completeTex.id) { // window 9: the pieces (picture i at the i-th place)
         const float k = s.completeTex.width >= 1024 ? 2.0f : 1.0f;
@@ -9372,11 +9498,14 @@ void drawScenarios(App& app) {
     drawShopNumber(m, cards(app) == 5 ? 80 : 64, 36, 296, 2, 12, a);
 }
 
-void scenariosCard(App& app, int dir) { // the Back bar's < > (-3 / -2): the next card along
+void scenariosCard(App& app, int dir) { // the Back bar's < > (-3 / -2): the next card along, sliding (states 0xc..7)
     App::Scenarios& s = app.scc;
+    if (s.phase) return;
     const int n = bingo::cards(app);
     menuSound(app, se::kBack);
-    bingo::loadCard(app, (s.card + dir + n) % n);
+    s.nextCard = (s.card + dir + n) % n;
+    s.switchDir = dir > 0 ? 1 : 2;
+    s.phase = 1, s.phaseCount = 0;
 }
 
 void scenariosBack(App& app) {
@@ -9395,6 +9524,7 @@ void scenariosChoose(App& app) {
         const int c = std::clamp(s.cursor, 0, cards(app) - 1);
         s.cursor = 0;
         loadCard(app, c);
+        cardWindowsOn(app, 0); // (state 6 from the overview: windows 6..8 fade in where they are)
         return;
     }
     if (done(app, s.card)) { // a whole picture: zoom in / out (state 8)
@@ -9413,7 +9543,7 @@ void scenariosChoose(App& app) {
 
 void scenariosKey(App& app, SDL_Keycode key) {
     App::Scenarios& s = app.scc;
-    if (s.complete) return; // (no input while a card completes)
+    if (s.complete || s.phase) return; // (no input while a card completes, slides or comes on)
     const bool zoomed = s.card >= 0 && s.zoom > bingo::kZoomMin;
     switch (key) {
     case SDLK_ESCAPE: case SDLK_BACKSPACE: case SDLK_AC_BACK: scenariosBack(app); return;
@@ -9447,7 +9577,7 @@ void scenariosKey(App& app, SDL_Keycode key) {
 void scenariosClick(App& app, float mx, float my) {
     using namespace bingo;
     App::Scenarios& s = app.scc;
-    if (s.complete) return;
+    if (s.complete || s.phase) return;
     auto in = [&](float x, float y, float w, float h) { return mx >= x && mx < x + w && my >= y && my < y + h; };
     if (s.card < 0) {
         if (shown(app))
@@ -9471,7 +9601,7 @@ void scenariosClick(App& app, float mx, float my) {
 // A drag over a zoomed picture (tex2d units)
 void scenariosDrag(App& app, float dx, float dy) {
     App::Scenarios& s = app.scc;
-    if (s.card < 0 || s.zoom <= bingo::kZoomMin || s.zoomDir) return;
+    if (s.card < 0 || s.zoom <= bingo::kZoomMin || s.zoomDir || s.phase) return;
     s.panX = std::clamp(s.panX + dx, -bingo::kPanX, bingo::kPanX);
     s.panY = std::clamp(s.panY + dy, bingo::kPanUp, bingo::kPanDown);
 }
@@ -9657,12 +9787,128 @@ std::vector<std::string> manualPage(const App& app, int id) { // the lines after
     return lines;
 }
 
+// A topic's page (OptionPrc 0x12..0x16): SetFlag(3), MsgUty_WinOpen - the standard window (_SetWin
+// style 8: the tutorial band) at _mwin[4] (tex2d y 16, the picture below it) for an id in
+// MsgUty_SetMsg's table, else _mwin[5] (y 108; the port's msgLines 2 / 1 pick those rects), SE
+// 0x97 - and MsgUty_SetMsg (block 5: 56000 + id), paged by tap
+// (PrcMsg). Its table (0xd5200, {id, picture}) gives five of them a picture (MsgUty_TexDispInit: the
+// rows at 0xd5560 {slot 3, pages, (row, frames) x 4, x 144, y 160}): it shows from the first page
+// turn, a page of the picture a page of text, until its pages run out or the message ends. The
+// last page out, the window closes (FUN_0008722c: ClrWin, SE 0x98) and once gone the list is back
+// at that item (0x16 -> 0xf: MuScrList_SetListPosFromItemNo)
+void drawMessageBox(App& app, const std::vector<std::string>& page, const std::string& speaker, bool next,
+                    const std::string& pageNo);
+namespace manualpic {
+struct Row { int id; const char* sheet; int pages; int row[4], frames[4]; };
+constexpr Row kRows[5] = {
+    {12, "battle_01_hd.mct", 4, {0, 1, 2, 3}, {1, 4, 4, 1}}, {13, "battle_02_hd.mct", 4, {0, 1, 2, 3}, {1, 1, 2, 1}},
+    {18, "battle_03_hd.mct", 3, {0, 1, 2, -1}, {3, 1, 1, -1}}, {10, "gene_01_hd.mct", 3, {0, 1, 2, -1}, {1, 2, 1, -1}},
+    {19, "battle_04_hd.mct", 2, {0, 1, -1, -1}, {1, 1, -1, -1}}};
+constexpr float kX = 144, kY = 160;
+const Row* find(int id) {
+    for (const Row& r : kRows)
+        if (kManualFirstPage + r.id == id) return &r;
+    return nullptr;
+}
+} // namespace manualpic
+
+void manualShow(App& app, int id) {
+    App::ManualMsg& mm = app.manualMsg;
+    app.renderer.destroy(mm.pic.tex);
+    mm.pic = App::TutoTex();
+    mm.id = id;
+    mm.pages.clear();
+    if (!app.systemText.message(id, app.language, nullptr, mm.pages) || mm.pages.empty())
+        mm.pages = {{"[message " + std::to_string(id) + "]"}};
+    mm.page = 0, mm.typed = 0;
+    mm.win = App::MsgWin();
+    mm.win.state = 1;
+    menuSound(app, 0x97);
+    const manualpic::Row* row = manualpic::find(id);
+    mm.picture = row != nullptr;
+    if (row) {
+        App::TutoTex& t = mm.pic;
+        cr::Image img;
+        std::string name = row->sheet;
+        if (loadImage(app, name, img) || loadImage(app, name.replace(name.find("_hd"), 3, ""), img)) t.tex = app.renderer.upload(img);
+        t.on = true, t.state = 2, t.pages = row->pages;
+        for (int k = 0; k < 4; ++k) t.row[k] = row->row[k], t.frames[k] = row->frames[k];
+        t.x = manualpic::kX, t.y = manualpic::kY;
+    }
+    mm.state = 2;
+}
+
+void manualCloseMessage(App& app) { // the message done: ClrFlag(3) - the picture goes - and the window closes
+    App::ManualMsg& mm = app.manualMsg;
+    app.renderer.destroy(mm.pic.tex);
+    mm.pic = App::TutoTex();
+    mm.win.state = 4;
+    menuSound(app, 0x98);
+    mm.state = 3;
+}
+
+int manualPageChars(const App& app) {
+    const App::ManualMsg& mm = app.manualMsg;
+    return mm.page < mm.pages.size() ? pageChars(mm.pages[mm.page]) : 0;
+}
+
+// A tap on the page (PrcMsg): one still typing comes out whole, one out turns - the picture to its
+// next page (flag 0xfeb), gone past its last - and the last page out ends the message
+void manualTap(App& app) {
+    App::ManualMsg& mm = app.manualMsg;
+    if (mm.state != 2 || mm.win.state != 3) return;
+    if (mm.typed < manualPageChars(app)) { mm.typed = manualPageChars(app); return; }
+    mm.typed = 0;
+    if (mm.pic.on) {
+        mm.pic.timer = 20, mm.pic.frame = 0;
+        if (++mm.pic.page >= mm.pic.pages) { app.renderer.destroy(mm.pic.tex); mm.pic = App::TutoTex(); }
+    }
+    if (++mm.page >= mm.pages.size()) manualCloseMessage(app);
+}
+
 void openManual(App& app, int intro) { // intro: a page shown before any topic (OptionSet's 56040), 0 none
     app.manualOpen = true;
     app.manualIntro = intro;
-    app.manualCursor = intro ? -1 : 0;
+    app.manualCursor = 0;
     app.manualTop = 0;
     app.manualAnim = 0;
+    App::ManualMsg& mm = app.manualMsg;
+    app.renderer.destroy(mm.pic.tex);
+    mm = App::ManualMsg();
+    if (intro) manualShow(app, intro); // (OptionPrc 0..2: the same window, then Options)
+}
+
+void manualChoose(App& app) { // OptionPrc 0x10: a topic chosen - the list's windows go, 4 frames on its page opens
+    const std::vector<int> topics = manualTopics(app);
+    if (app.manualCursor < 0 || app.manualCursor >= int(topics.size())) return;
+    menuSound(app, se::kChoose); // (__ScrListSelectSePlay)
+    App::ManualMsg& mm = app.manualMsg;
+    mm.id = kManualFirstPage + topics[size_t(app.manualCursor)] - kManualFirstItem;
+    mm.state = 1, mm.count = 4;
+}
+
+// A frame (20 Hz): 0x12's wait, PrcWin and PrcMsg's typing, the picture's frames, the window closing
+void stepManual(App& app) {
+    App::ManualMsg& mm = app.manualMsg;
+    switch (mm.state) {
+    case 1:
+        if (--mm.count < 0) manualShow(app, mm.id);
+        break;
+    case 2:
+        stepMsgWin(mm.win);
+        if (mm.win.state == 3) mm.typed = app.typeOn ? std::min(mm.typed + 1, manualPageChars(app)) : manualPageChars(app);
+        if (mm.pic.on) stepTutoFrames(mm.pic);
+        break;
+    case 3:
+        stepMsgWin(mm.win);
+        if (mm.win.state == 6) {
+            mm.state = 0;
+            if (app.manualIntro) { app.manualOpen = false; break; } // (the intro: on to Options)
+            app.manualAnim = 0; // (0xf: MuScrList_Start - the list's windows anew, at the item)
+        }
+        break;
+    default: break;
+    }
 }
 
 constexpr int kManualRows = 9;
@@ -9670,68 +9916,57 @@ constexpr int kManualRows = 9;
 void drawManual(App& app) {
     cr::Renderer& r = app.renderer;
     cr::MenuPainter& m = app.menu;
+    const App::ManualMsg& mm = app.manualMsg;
     m.begin(r, app.windowTex, &app.font);
-    const PhoneFit phoneFit(app, m); // the iPhone layout: its screen's menu coordinates
     r.setOrigin(0);
     r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 0.75f);
     r.setOrigin(r.uiX());
-    const float a = std::min(1.0f, app.manualAnim / 8.0f);
-    m.picture(103, 8, 4, a); // "Options" (_stMuPictInfo_Option)
-    m.text(sysLabel(app, 58081, "Instruction Manual"), 236, 14, false, a, 16);
-    const std::vector<int> topics = manualTopics(app);
-    for (int i = 0; i < kManualRows && app.manualTop + i < int(topics.size()); ++i) {
-        const int n = app.manualTop + i;
-        m.rowBar(20, 52 + 32.0f * float(i), itemName(app, topics[size_t(n)]), a, app.manualCursor == n);
-    }
-    if (app.manualTop > 0) m.text("...", 100, 40, false, a, 12);
-    if (app.manualTop + kManualRows < int(topics.size())) m.text("...", 100, 52 + 32.0f * kManualRows - 6, false, a, 12);
-    // The page, on the right
-    const int id = app.manualCursor >= 0 && app.manualCursor < int(topics.size())
-                       ? kManualFirstPage + topics[size_t(app.manualCursor)] - kManualFirstItem
-                       : app.manualIntro;
-    if (r.phoneLayout()) // (the panel in the fitted menu's units)
-        drawWinPiece(app, kWinMessagePanel, 2 * (kPhoneFitX + 252 * kPhoneFitK), 2 * (kPhoneFitY + 48 * kPhoneFitK),
-                     2 * 252 * kPhoneFitK, 2 * 280 * kPhoneFitK);
-    else drawWinPiece(app, kWinMessagePanel, 2 * 252, 2 * 48, 2 * 252, 2 * 280);
-    // (a line the message centres - its 0x17, marked \x01 - centred in the panel)
-    auto centred = [](std::string& l) { const bool c = !l.empty() && l[0] == '\x01'; if (c) l.erase(0, 1); return c; };
-    constexpr float kWidth = 228; // the panel's inside, in menu units: lines wrap at words
-    {
-        std::string t = manualTitle(app, id);
-        const bool c = centred(t);
-        m.text(t, c ? 268 + (kWidth - m.textWidth(t, 13)) / 2 : 268, 58, false, a, 13);
-    }
-    float y = 82;
-    for (std::string l : manualPage(app, id)) {
-        const bool centre = centred(l);
-        std::string line;
-        auto flush = [&] {
-            if (y <= 316) m.text(line, centre ? 268 + (kWidth - m.textWidth(line, 10)) / 2 : 268, y, false, a, 10);
-            y += 14;
-            line.clear();
-        };
-        size_t at = 0;
-        if (l.empty()) { flush(); continue; }
-        while (at < l.size()) {
-            const size_t sp = l.find(' ', at);
-            const std::string word = l.substr(at, sp == std::string::npos ? std::string::npos : sp - at);
-            const std::string tryLine = line.empty() ? word : line + " " + word;
-            if (!line.empty() && m.textWidth(tryLine, 10) > kWidth) {
-                flush();
-                line = word;
-            } else {
-                line = tryLine;
+    if (!app.manualIntro) {
+        const PhoneFit phoneFit(app, m); // the iPhone layout: its screen's menu coordinates
+        const float a = std::min(1.0f, app.manualAnim / 8.0f);
+        m.picture(103, 8, 4, a); // "Options" (_stMuPictInfo_Option)
+        m.text(sysLabel(app, 58081, "Instruction Manual"), 236, 14, false, a, 16);
+        // The list (MuScrList: windows 7 and 8) fades out as a topic opens and is off while it's up
+        const float la = mm.state == 0 ? a : mm.state == 1 ? a * float(std::max(0, mm.count)) / 4.0f : 0.0f;
+        if (la > 0) {
+            const std::vector<int> topics = manualTopics(app);
+            for (int i = 0; i < kManualRows && app.manualTop + i < int(topics.size()); ++i) {
+                const int n = app.manualTop + i;
+                m.rowBar(20, 52 + 32.0f * float(i), itemName(app, topics[size_t(n)]), la, app.manualCursor == n);
             }
-            if (sp == std::string::npos) break;
-            at = sp + 1;
+            if (app.manualTop > 0) m.text("...", 100, 40, false, la, 12);
+            if (app.manualTop + kManualRows < int(topics.size())) m.text("...", 100, 52 + 32.0f * kManualRows - 6, false, la, 12);
+            m.backButton(192, 344, false, 0, la);
+            if (app.showHud) m.text("Up/Down  Enter: read  Esc: back", 20, 372, false, la * 0.8f, 9); // (our key hints)
         }
-        flush();
     }
-    m.backButton(192, 344, false, 0, a);
-    if (app.showHud) m.text("Up/Down  Esc: back", 20, 372, false, a * 0.8f, 9); // (our key hints)
+    if (mm.state < 2) return;
+    // The message in the standard window (drawMessageBox with the manual's window, style and rect)
+    const int keepStyle = app.msgStyle, keepLines = app.msgLines, keepColour = app.msgColour, keepLimit = app.textLimit;
+    const App::MsgWin keepWin = app.msgWin;
+    const bool keepSkip = app.messageSkip;
+    app.msgStyle = 8, app.msgLines = mm.picture ? 2 : 1, app.msgWin = mm.win, app.msgColour = -1;
+    app.messageSkip = true; // (no skip corner: no scene is playing)
+    const bool text = mm.state == 2 && mm.page < mm.pages.size();
+    app.textLimit = app.typeOn ? mm.typed : 1 << 30;
+    drawMessageBox(app, text ? mm.pages[mm.page] : std::vector<std::string>(), "", text && mm.typed >= manualPageChars(app), "");
+    app.msgStyle = keepStyle, app.msgLines = keepLines, app.msgWin = keepWin, app.msgColour = keepColour;
+    app.textLimit = keepLimit, app.messageSkip = keepSkip;
+    if (mm.state == 2) drawTutoPicture(app, mm.pic); // (MsgUty_TexDispDraw: while flag 3 is set)
+    r.setOrigin(r.uiX());
 }
 
 void manualKey(App& app, SDL_Keycode key) {
+    App::ManualMsg& mm = app.manualMsg;
+    const bool confirm = key == SDLK_RETURN || key == SDLK_KP_ENTER || key == SDLK_SPACE || key == SDLK_E;
+    const bool back = key == SDLK_ESCAPE || key == SDLK_BACKSPACE || key == SDLK_AC_BACK;
+    if (mm.state == 2) { // the page: a tap turns it (keys: confirm; back closes it at once - the port's)
+        if (confirm) manualTap(app);
+        else if (back && mm.win.state == 3) manualCloseMessage(app);
+        return;
+    }
+    if (mm.state != 0) return; // (the list going, or the window closing)
+    if (confirm) { manualChoose(app); return; }
     const int n = int(manualTopics(app).size());
     int& c = app.manualCursor;
     switch (key) {
@@ -9747,6 +9982,9 @@ void manualKey(App& app, SDL_Keycode key) {
 }
 
 void manualClick(App& app, float px, float py) {
+    App::ManualMsg& mm = app.manualMsg;
+    if (mm.state == 2) { manualTap(app); return; } // (anywhere: PrcMsg's tap)
+    if (mm.state != 0 || app.manualIntro) return;
     float lx, ly;
     app.renderer.toLogical(px, py, lx, ly);
     float mx, my;
@@ -9754,9 +9992,10 @@ void manualClick(App& app, float px, float py) {
     if (my >= 344 && my < 368 && mx >= 192 && mx < 424) { app.manualOpen = false; menuSound(app, se::kBack); return; }
     if (mx >= 20 && mx < 240)
         for (int i = 0; i < kManualRows; ++i)
-            if (my >= 52 + 32.0f * i && my < 76 + 32.0f * i) {
-                app.manualCursor = std::min(app.manualTop + i, int(manualTopics(app).size()) - 1);
-                menuSound(app, se::kChoose); // a topic tapped (__ScrListSelectSePlay)
+            if (my >= 52 + 32.0f * i && my < 76 + 32.0f * i && app.manualTop + i < int(manualTopics(app).size())) {
+                app.manualCursor = app.manualTop + i;
+                manualChoose(app); // a topic tapped
+                return;
             }
 }
 
@@ -16518,10 +16757,10 @@ void drawFrame(App& app, bool present = true) {
         if (app.collection.open) drawCollection(app);
     }
     if (app.campOpen && !app.optionsOpen && !app.scc.open && !app.collection.open) {
-        for (app.campClock += dt; app.campClock >= 1.0f / kFramesPerSecond && app.campOpen; app.campClock -= 1.0f / kFramesPerSecond)
+        for (app.campClock += dt; app.campClock >= 1.0f / kFramesPerSecond && app.campOpen && !app.scc.open; app.campClock -= 1.0f / kFramesPerSecond)
             stepCamp(app);
         ++app.camp.anim;
-        if (app.campOpen) drawCamp(app);
+        if (app.campOpen && !app.scc.open) drawCamp(app);
     }
     if (app.mapScreen.open) {
         for (app.mapScreen.clock += dt; app.mapScreen.clock >= 1.0f / kFramesPerSecond; app.mapScreen.clock -= 1.0f / kFramesPerSecond)
@@ -16564,8 +16803,11 @@ void drawFrame(App& app, bool present = true) {
     if (app.resumePrompt && !app.optionsOpen) drawResumePrompt(app);
     if (app.optionsOpen && (app.campOpen || app.saveScreen.open)) drawOptions(app, W, H);
     if (app.manualOpen) {
+        for (app.manualMsg.clock += dt; app.manualMsg.clock >= 1.0f / kFramesPerSecond && app.manualOpen;
+             app.manualMsg.clock -= 1.0f / kFramesPerSecond)
+            stepManual(app);
         ++app.manualAnim;
-        drawManual(app);
+        if (app.manualOpen) drawManual(app);
     }
     r.setOrigin(0);
     r.endFrame(present);
@@ -19808,19 +20050,30 @@ int runSelfTest(App& app) {
         for (const char* f : {"save1.dat", "data.dat", "resume.dat"}) SDL_RemovePath(savePath(app, f).c_str());
         SDL_RemovePath(app.saveDirOverride.c_str());
         app.saveDirOverride = keepDir;
-        // The Instruction Manual (Options): the manual items held, each its page (56000 + item - 419);
-        // the first Options in a game open on 56040 "About Option" (flag 0x43), once. Then Scenarios
-        int manualTopicsHeld = 0;
+        // The Instruction Manual (Options): the manual items held, each its page (56000 + item - 419)
+        // in the standard message window (SE 0x97 / 0x98), paged by tap, the list back at the item;
+        // 431's (MsgUty_SetMsg's id 12) with battle_01's picture, a picture page a page turn, the
+        // window at _mwin[4]. The first Options in a game open on 56040 "About Option" (flag 0x43),
+        // once. Then Scenarios
+        int manualTopicsHeld = 0, manualPicturePages = 0, manualTextPages = 0;
         {
             const cr::GameState keepGame = app.game;
+            const bool keepType = app.typeOn;
+            app.typeOn = false;
             for (int item = 419; item <= 473; ++item) app.game.items.erase(item);
-            for (int item : {419, 420, 421, 428, 459}) app.game.items[item] = 1;
+            for (int item : {419, 420, 421, 428, 431, 459}) app.game.items[item] = 1;
             app.game.setFlag(0x43, false);
             const bool keepTitle = app.titleOpen;
             app.titleOpen = false;
+            App::ManualMsg& mm = app.manualMsg;
             openOptions(app, 0);
-            problems += !app.manualOpen || app.manualIntro != 56040 || manualPage(app, 56040).empty() || !app.game.flag(0x43);
-            manualKey(app, SDLK_ESCAPE);
+            problems += !app.manualOpen || app.manualIntro != 56040 || manualPage(app, 56040).empty() || !app.game.flag(0x43) ||
+                        mm.state != 2 || mm.id != 56040 || mm.picture;
+            for (int f = 0; f < 6; ++f) stepManual(app);
+            problems += mm.win.state != 3;
+            manualKey(app, SDLK_ESCAPE); // (the port's Back: the window closes, then on to Options)
+            for (int f = 0; f < 8; ++f) stepManual(app);
+            problems += app.manualOpen;
             app.optionsOpen = false;
             openOptions(app, 0);
             problems += app.manualOpen;
@@ -19831,13 +20084,39 @@ int runSelfTest(App& app) {
             manualTopicsHeld = int(topics.size());
             manualKey(app, SDLK_DOWN);
             manualKey(app, SDLK_DOWN);
-            problems += topics.size() != 5 || app.manualCursor != 2 || topics[2] != 421 || manualPage(app, 56002).empty();
-            manualKey(app, SDLK_PAGEDOWN);
+            problems += topics.size() != 6 || app.manualCursor != 2 || topics[2] != 421 || manualPage(app, 56002).empty();
+            manualKey(app, SDLK_PAGEDOWN); // (to the last, 459)
+            manualKey(app, SDLK_UP);       // 431
+            manualKey(app, SDLK_RETURN);
+            problems += mm.state != 1;
+            for (int f = 0; f < 5; ++f) stepManual(app); // 0x12's wait, then the window
+            problems += mm.state != 2 || mm.id != 56012 || !mm.picture || mm.pic.page != -1 || mm.pages.size() != 6;
+            manualKey(app, SDLK_RETURN); // (opening: no tap yet)
+            for (int f = 0; f < 6; ++f) stepManual(app);
+            problems += mm.page != 0 || mm.win.state != 3;
+            int lastPicPage = -1, framesSeen = 0;
+            for (int turn = 0; turn < 12 && mm.state == 2; ++turn) {
+                ++manualTextPages;
+                manualKey(app, SDLK_RETURN);
+                if (mm.state != 2) break;
+                if (mm.pic.on) {
+                    problems += mm.pic.page != lastPicPage + 1;
+                    lastPicPage = mm.pic.page;
+                    ++manualPicturePages;
+                    for (int f = 0; f < 70; ++f) { stepManual(app); framesSeen = std::max(framesSeen, mm.pic.frame + 1); }
+                } else stepManual(app);
+                app.lastTicks = 0;
+                drawFrame(app, false);
+            }
+            problems += mm.state != 3 || mm.pic.on || manualPicturePages != 4 || manualTextPages != 6 || framesSeen < 4;
+            for (int f = 0; f < 8; ++f) stepManual(app);
+            problems += !app.manualOpen || mm.state != 0 || app.manualCursor != 4; // the list back at 431
             manualKey(app, SDLK_ESCAPE);
-            problems += app.manualOpen;
+            problems += app.manualOpen || app.renderer.takeErrors();
+            app.typeOn = keepType;
             app.game = keepGame;
         }
-        problems += expectSounds("manual", {3, 1, 1, 5, 3});
+        problems += expectSounds("manual", {6, 7, 1, 1, 5, 1, 2, 6, 7, 3});
         // Scenarios: the title's (mode 0, to look at) then the Camp's, a cell opened with a present
         openScenarios(app);
         problems += !app.scc.open || !app.scc.sheet.id;
@@ -19851,11 +20130,27 @@ int runSelfTest(App& app) {
             const cr::GameState keepGame = app.game;
             app.game.setFlag(0x642, true);
             app.game.items[bingo::kItems[5][2]] = 1;
-            openScenarios(app, 1);
+            // From the Camp (L / the picture): its windows go, Scenarios 4 frames on
+            app.menuSoundLog.clear();
+            openCamp(app);
+            app.menuSoundLog.clear();
+            campKey(app, SDLK_Q);
+            bingoProblems += app.camp.leaving != 1 || app.scc.open;
+            campKey(app, SDLK_RETURN); // (ignored while they go)
+            for (int f = 0; f < 3; ++f) stepCampLeaving(app);
+            bingoProblems += app.scc.open;
+            stepCampLeaving(app);
+            bingoProblems += !app.scc.open || app.scc.mode != 1 || app.camp.leaving != 0;
+            bingoProblems += expectSounds("camp to scenarios", {2});
+            app.campOpen = false;
             scenariosKey(app, SDLK_RIGHT);            // the second card
             scenariosKey(app, SDLK_RETURN);
             bingoProblems += app.scc.card != 1 || !app.scc.cardTex.id || !app.scc.photo.id || !app.scc.canPush[5] ||
-                             app.scc.canPush[4];
+                             app.scc.canPush[4] || app.scc.phase != 2 || bingo::photoAlpha(app) != 0;
+            scenariosKey(app, SDLK_RIGHT); // (state 7: no input yet)
+            bingoProblems += app.scc.cursor != 0;
+            for (int f = 0; f < 5; ++f) stepScenarios(app);
+            bingoProblems += app.scc.phase != 0 || app.scc.win[1].state != 3 || bingo::winX(app.scc.win[1]) != 0;
             for (int k = 0; k < 5; ++k) scenariosKey(app, SDLK_RIGHT); // cell 0 -> 1 (wraps), down to 5
             scenariosKey(app, SDLK_DOWN);
             scenariosKey(app, SDLK_RETURN);
@@ -19863,8 +20158,34 @@ int runSelfTest(App& app) {
             bingoProblems += app.scc.cursor != 5 || app.scc.cell[5] != 2 || !app.game.flag(bingo::kOpenFlag[1] + 5) ||
                              !app.game.flag(bingo::kPushFlag[0] + 5) || app.scc.canPush[5] || bingo::presentsUsed(app) != 1;
             scenariosKey(app, SDLK_RETURN); // used: refused
+            // < > (SccnariosPrc 0xc..0xe, 5..7): > slides the card's windows out left - its photo unseen,
+            // the card not done - and the next one's in from the right; < the other way
+            int slideProblems = 0;
+            auto slide = [&](SDL_Keycode key, int to, float outSide, bool photoOut) {
+                scenariosKey(app, key);
+                slideProblems += app.scc.phase != 1;
+                stepScenarios(app);
+                stepScenarios(app);
+                stepScenarios(app);
+                slideProblems += app.scc.card == to || (outSide < 0) != (bingo::winX(app.scc.win[1]) < 0) ||
+                                 bingo::winX(app.scc.win[0]) >= 0 || (bingo::photoAlpha(app) > 0) != photoOut;
+                app.lastTicks = 0;
+                drawFrame(app, false);
+                for (int f = 0; f < 7 && app.scc.phase == 1; ++f) stepScenarios(app);
+                slideProblems += app.scc.card != to || app.scc.phase != 2 || (outSide < 0) != (bingo::winX(app.scc.win[2]) > 0) ||
+                                 bingo::photoAlpha(app) != 0;
+                for (int f = 0; f < 5; ++f) stepScenarios(app);
+                slideProblems += app.scc.phase != 0 || bingo::winX(app.scc.win[0]) != 0 || bingo::winX(app.scc.win[2]) != 0;
+            };
+            slide(SDLK_PAGEDOWN, 2, -240, false);
+            slide(SDLK_PAGEUP, 1, 240, false);
             for (int i = 0; i < 16; ++i) app.game.setFlag(bingo::kOpenFlag[1] + i, true);
             bingo::refresh(app);
+            slide(SDLK_PAGEUP, 0, 240, true); // (a whole card's photo goes with its window)
+            slide(SDLK_PAGEDOWN, 1, -240, false);
+            slideProblems += app.scc.win[1].state != 6 || bingo::photoAlpha(app) != 1; // (a whole card: no window 7)
+            bingoProblems += slideProblems;
+            bingoProblems += expectSounds("scenarios: cards", {1, 2, 1, 1, 1, 1, 1, 1, 0xaf - 0x91, 4, 3, 3, 3, 3});
             scenariosKey(app, SDLK_RETURN); // the whole picture: zoom
             for (int f = 0; f < 10; ++f) stepScenarios(app);
             bingoProblems += app.scc.zoom != bingo::kZoomMax;
@@ -19895,9 +20216,9 @@ int runSelfTest(App& app) {
             app.game = keepGame;
         }
         problems += bingoProblems;
-        std::printf("manual: %d topics held; scenarios: bingo cards drawn, a cell opened from the Camp, the Collection's rate %s\n",
-                    manualTopicsHeld,
-                    bingoProblems ? "NO" : "yes");
+        std::printf("manual: %d topics held, a page in the message window (%d pages, %d with the picture); scenarios: bingo cards "
+                    "drawn, a cell opened from the Camp, the cards slid, the Collection's rate %s\n",
+                    manualTopicsHeld, manualTextPages, manualPicturePages, bingoProblems ? "NO" : "yes");
         std::printf("saves: save -> title Start -> load %s (map %d, flags, items, vars, Oz, party, play time, position); "
                     "resume point written, offered at the title and resumed, saved as you go %s; %d problems\n", loaded ? "ok" : "FAILED",
                     after.map, asYouGo ? "yes" : "NO", problems);
@@ -23526,13 +23847,26 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
     }
     if (app.captureMenu == 5) { // --scenarios [--at card [mode]]
         openScenarios(app, app.captureAt[1] == app.captureAt[1] ? int(app.captureAt[1]) : 0);
-        if (app.captureAt[0] == app.captureAt[0] && app.captureAt[0] >= 0) bingo::loadCard(app, std::clamp(int(app.captureAt[0]), 0, 4));
+        if (app.captureAt[0] == app.captureAt[0] && app.captureAt[0] >= 0) {
+            bingo::loadCard(app, std::clamp(int(app.captureAt[0]), 0, 4));
+            bingo::cardWindowsOn(app, 0);
+            for (int f = 0; f < 6; ++f) stepScenarios(app);
+        }
         app.scc.anim = 100;
     }
     if (app.captureMenu == 6) {
         openManual(app, 0);
         app.manualAnim = 100;
         if (app.captureAt[0] == app.captureAt[0]) app.manualCursor = int(app.captureAt[0]);
+        if (manualTopics(app).empty()) // (none held yet: every manual item, the topic the item's number - 419)
+            for (int item = kManualFirstItem; item <= kManualLastItem; ++item) app.game.items[item] = 1;
+        if (app.captureAt[1] == app.captureAt[1]) { // --at topic page: that topic's page open (its picture 30 frames on)
+            app.typeOn = false;
+            manualChoose(app);
+            for (int f = 0; f < 12; ++f) stepManual(app);
+            for (int k = 0; k < int(app.captureAt[1]); ++k) manualTap(app);
+            for (int f = 0; f < 30; ++f) stepManual(app);
+        }
         std::printf("manual: %zu topics\n", manualTopics(app).size());
     }
     if (app.captureOptions) { // --volume-menu (page 1) / --video-menu (page 4)

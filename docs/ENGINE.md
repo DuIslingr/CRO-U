@@ -259,9 +259,10 @@ c101/c102/c104/m207a, 2026-10-12).
       the game's language. Keys: Up/Down, Left/Right, Enter, Q/E or PgUp/PgDn for pages, Esc; the
       mouse clicks buttons, gauges, the page number and Back. Saved to settings.ini. From the title
       it is in title mode, as in the original: Reset Data instead of Return to Title. Return to
-      Title works. The **Instruction Manual**: the 29 topics of system messages 56000 on (titles
-      in label bars, 56007 - the manual's own introduction - first), the page beside them, wrapped
-      to the panel. Not yet: Reset Data; Environment Effects and the orientation lock are stored but
+      Title works. The **Instruction Manual**: the manual items held (419..473) in label bars; a topic
+      opens its page (system message 56000 + item - 419) in the standard message window (style 8, at
+      `_mwin[4]` with a picture, else `_mwin[5]`), paged by tap, five of them with their tutorial
+      picture (MsgUty_SetMsg's table), and closes back to the list at that topic. Not yet: Reset Data; Environment Effects and the orientation lock are stored but
       have nothing to switch yet
 - [x] Solid NPCs (chests, crystals, blocks block the player) and examining (**E**/Enter):
       treasure boxes give their item (from the game's item pools, named from sys.evt) and lose
@@ -307,7 +308,7 @@ c101/c102/c104/m207a, 2026-10-12).
       Saved: flags, variables, items, opened boxes, area / map / position / facing, the leader,
       play time, the date. Loading arrives as a warp would (the room's entry scripts run).
       `CR_SAVE_DIR` puts the files elsewhere; `--camp`, `--save-screen save|load`, `--char-select`,
-      `--scenarios` (`--at y` scrolls), `--manual` (`--at n` picks topic n) capture them, `--title-new p` goes through the title as a player would (pair 1 / 2, New)
+      `--scenarios` (`--at y` scrolls), `--manual` (`--at n p` opens topic n's page p) capture them, `--title-new p` goes through the title as a player would (pair 1 / 2, New)
 - [x] **Shops** (Util 2, `__menuu_Shop*`; the Ark's shopkeeper, script 251 of areas 7/13/19/25):
       Talk / Buy / Sell, then Items / Weapons / Armor / Jewel, the list, how many with Yes / No,
       and "Equip it?" after buying gear - laid out from ShopPut and the ComUty_* pieces it calls
