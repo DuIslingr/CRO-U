@@ -5980,6 +5980,20 @@ void drawShopBar(cr::MenuPainter& m, float x, float y, float value, float most, 
     m.quad(x + 4, y + 1, 140 * f, 3, l, rr);
 }
 
+// ComUty_HelpWindowDraw: picture 0x11 (the 336 x 68 striped panel) at (144, 8), the "HELP" tag (0x12) at
+// (144, -4), up to three lines at x 156 from y 32 / 26 / 18 (one / two / three lines: DAT_d1698 + 8),
+// 16 apart (Part 3 403 s: the panel at 450..1117 x 58 on the 1280 x 720 phone)
+void drawHelpWindow(App& app, cr::MenuPainter& m, int item, float a) {
+    if (item <= 0) return;
+    m.picture(17, 144, 8, a);
+    m.picture(18, 144, -4, a);
+    std::vector<std::vector<std::string>> help;
+    if (!app.systemText.message(cr::itemHelpId(item), app.language, nullptr, help) || help.empty()) return;
+    const int n = std::min(3, int(help[0].size()));
+    static const int kTop[4] = {0, 24, 18, 10};
+    for (int i = 0; i < n; ++i) m.text(help[0][size_t(i)], 156, float(kTop[n] + 8 + 16 * i), false, a, 13);
+}
+
 // ComUty_StateBoardDraw at (bx, by) for character c; `item` (if > 0) shows what wearing it changes;
 // `record` draws the small record picture over the name (param_11: the Status page leaves it out);
 // a seed `item` (3..6) marks its stat with `seeds` x 10 (param_9: the Camp's board after use)
@@ -6096,19 +6110,7 @@ void drawShop(App& app) {
 
     // Right: Oz, the plates, the list, the count and Yes / No
     r.setOrigin(rightEdge);
-    if (list && !s.list.empty()) { // HELP: the cursor's item, from the list's left to the screen's edge
-        const float hx = 152, hw = 512 - hx + (rightEdge > 0 ? 0 : 0);
-        m.stretch(12, hx, 0, hw, 66, a);
-        m.picture(18, hx + 4, 2, a);
-        std::vector<std::vector<std::string>> help;
-        if (app.systemText.message(cr::itemHelpId(item), app.language, nullptr, help) && !help.empty()) {
-            float y = 20;
-            for (const std::string& line : help[0]) {
-                m.text(line, hx + 14, y, false, a, 13);
-                if ((y += 16) > 52) break;
-            }
-        }
-    }
+    if (list && !s.list.empty()) drawHelpWindow(app, m, item, a); // HELP: the cursor's item
     m.picture(156, 316, 0, 1); // the Oz bar (ComUty_OzDraw: 0x9c)
     drawShopNumber(m, app.game.oz, 362, 0, 9, 12, 1);
     if (s.phase == App::Shop::Main)
@@ -7275,11 +7277,14 @@ void drawCampScrollBar(cr::MenuPainter& m, int top, int n, float a) {
 // (gene_m*c.mct) at (x + 12, y + 68)
 void drawGeneBoard(App& app, cr::MenuPainter& m, float x, float y, int plate, float a, int mode = 1) {
     if (!cr::isPlate(plate)) return;
-    const float dark[4] = {0, 0, 0, 0.6f * a}, white[4] = {1, 1, 1, 0.85f * a}, clear[4] = {1, 1, 1, 0};
-    m.quad(x, y, 163, 236, dark, dark);
+    // ComUty_StateBoardChrName (x, y, 163): a white 163 x 16 bar, the name centred on it in the dark
+    // style (MuComFontDisp style 1); then MuComRectDraw's white 163 x 16 under "SKILL n / 6" - both
+    // solid, no panel behind the board (Part 3 403 s: the Equip > Genes page)
+    const float white[4] = {1, 1, 1, a};
+    m.quad(x, y, 163, 16, white, white);
     const std::string name = itemName(app, plate);
-    m.textCentred(name, x + (163 - m.textWidth(name, 14)) / 2, y + 10, false, a, 14);
-    m.quad(x, y + 24, 163, 16, white, clear);
+    m.textCentred(name, x + (163 - m.textWidth(name, 14)) / 2, y + 8, true, a, 14);
+    m.quad(x, y + 24, 163, 16, white, white);
     m.picture(95, x + 24, y + 27, a);
     drawShopNumber(m, cr::plateLearned(app.game, plate), x + 90, y + 24, 1, 12, a, 2);
     m.picture(65, x + 102, y + 24, a);
@@ -9048,12 +9053,18 @@ void drawCamp(App& app) {
         m.textCentred(sysText(app, kTitle[c.page]), 12 - 140 * (1 - ease), 47, false, pa, 15);
         std::string section;
         if (c.page == App::Camp::Items) section = sysText(app, kCategoryLabel[c.category]);
-        else if (c.page == App::Camp::Equip) section = c.phase == App::Camp::Member ? sysText(app, 58060) : sysText(app, 58061 + c.slot);
-        else if (c.page == App::Camp::Genes) section = sysText(app, 58079);
-        else if (c.phase == App::Camp::Slot && c.statusView) section = sysText(app, 58099 + c.statusView); // (windows 0x10 / 0xf: 0x64, 0x65)
+        // __menuu_CampMainPrc's window 0x10 (font slot 2): the Equip lists' ">Weapons" / ">Armor" / ">Jewel"
+        // (cases 0xb / 0xf / 0x13: 0x49..0x4b) and a gene slot's ">Genes" (0x17: 0x4c), a plate's entries'
+        // ">Gene Details" (0x1c, and the Genes page's 4: 0x4e); none on the member choice and the slot list
+        // (__MuEquip_CategoryChoiceInit: the title and the name only) nor while the Genes page browses (its
+        // 2: the title alone). Part 3 403 / 406 s: "Equip >Genes", "Equip >Gene Details"
+        else if (c.page == App::Camp::Equip || c.page == App::Camp::Genes) {
+            if (c.phase == App::Camp::Entries) section = sysText(app, 58078);
+            else if (c.page == App::Camp::Equip && c.phase != App::Camp::Member && c.phase != App::Camp::Slot)
+                section = sysText(app, c.slot < 3 ? 58073 + c.slot : 58076);
+        } else if (c.phase == App::Camp::Slot && c.statusView) section = sysText(app, 58099 + c.statusView); // (windows 0x10 / 0xf: 0x64, 0x65)
         if (!section.empty() && section[0] != '>') section = ">" + section;
-        if (c.page != App::Camp::Equip && !section.empty()) { // (Omega's equipment pages have none: __MuEquip_CategoryChoiceInit
-            // registers the title, 58059, and the character's name; the Status page's only on its lists)
+        if (!section.empty()) { // (the Status page's only on its lists)
             m.picture(16, 24 - 140 * (1 - ease), 72, pa);
             m.textCentred(section, 40 - 140 * (1 - ease), 65, false, pa, 15);
         }
@@ -9075,17 +9086,7 @@ void drawCamp(App& app) {
     auto helpBoard = [&](int it) { // HELP: the item's text across the top (as the shop's)
         if (it <= 0) return;
         right();
-        const float hx = 152;
-        m.stretch(12, hx, 0, 512 - hx, 66, ease);
-        m.picture(18, hx + 4, 2, ease);
-        std::vector<std::vector<std::string>> help;
-        if (app.systemText.message(cr::itemHelpId(it), app.language, nullptr, help) && !help.empty()) {
-            float y = 20;
-            for (const std::string& line : help[0]) {
-                m.text(line, hx + 14, y, false, ease, 13);
-                if ((y += 16) > 52) break;
-            }
-        }
+        drawHelpWindow(app, m, it, ease);
         left();
     };
     switch (c.page) {
