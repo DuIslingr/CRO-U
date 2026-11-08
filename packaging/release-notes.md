@@ -100,6 +100,24 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   variant; the party's HP and MP count down (or up) to the new value over a few frames instead of
   jumping, and MP shows red at 0; the hit labels are the original's - "Miss!" where the port said
   "Guard!", "Block!" where it said "Miss!" - and a hit on an invincible target shows "0".
+- **The battle's camera and staging, as 3.1.0's** (btlcamera_set / _prc and btl_prc read in its code):
+  the field-of-battle, victory and casting cameras glide after their mark (a fifth of the way a
+  frame) and moving the target cursor eases the view at half the way a frame, where the port cut or
+  slid evenly; the cameras that tilt do (the attack close-ups by 3-5 degrees, the boss's charge
+  from -10 to 5); a gene's or item's casting camera turns over the original's 25 frames and then
+  holds instead of crawling for minutes; a turning camera keeps the original's distance; the defeat
+  camera circles for as long as the screen shows; the battle opens on the formation's still view; a
+  boss's fall turns its camera over the fall; the victory camera frames the member who last led the
+  order. Attackers step to the original's fixed spots in front of their target (from the formation
+  table, a big monster further back) and face the way they run. A guarding member takes a blow
+  without flinching, a miss or a fended-off blow plays no hurt motion (the port played the get-up
+  one), a revived member gets up, a fallen member drops and stays down and a beaten monster fades
+  as it reels. A miss, a zero or an invincible target still shakes the screen with the hit's effect
+  and sound, as the original does; elemental genes do so whenever they deal damage. The damage
+  numbers keep to the original's five at a time, stay inside its screen margins, stack as its own
+  do when several land, and are drawn at full strength. The HP and MP bars are the original's
+  slanted bars with their offset shadow (the enemy's 96 wide), and the Break label pops from the
+  badge's corner at full strength.
 - **Checked against the newest release (3.1.0):** the game logic of the passes above was re-read in
   the 3.1.0 code; two rules changed there and the port now follows them - the Counter skill (154)
   answers every physical hit it survives (1.0.0 rolled 10 / 20 %), and a pair attack whose partner
