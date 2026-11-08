@@ -179,3 +179,17 @@ located in the video frame by gradient cross-correlation (offsets in 1280 x 720 
 | The manual's / tutorial pictures (`MsgUty_TexDispDraw`: the framed picture at (144, 160)) | Part 9 (8FlV44F1OS0) 650-667 s: the frame at x 450..830, y 360..612 under the tutorial band | Consistent: the port's `--manual --at 12 1` capture has its frame at 450..830 x 360..612 (a different picture: the video's are a script's) |
 | Piu-Piu cards (Scenarios with cards: the flaps, "Push!" marks, a card's completion), Collection Completed | - (the videos show them only as the tutorial's pictures, Part 9 654 / 664 / 666 s, and Piu-Piu's line "You've finished an entire Piu-Piu Card!", Part 14 375 s) | Code reading only |
 | The field's save screen (`__menuu_SaveLoadPut` from the SAVE button: the pair's boards at (0, 24 + 88k), Yes / No, "Save data?") | Part 6 1130.3 s | Contradicted, fixed: the port drew the Camp's heading over it - SaveLoadPut draws none. The boards, Yes / No and the board in place (`--save-screen save`) |
+
+## Round 2: Parts 1-7 and field leftovers (agent)
+
+Port side: `CR_CAPTURE_SIZE=1280x720 --layout android --android <set>` captures - a real 16:9 frame,
+compared 1:1 with ffmpeg frames (thresholded boxes, row / column profiles). The new game's opening
+is reached with `--new-game --win-battles --frames n CR_CAPTURE_EVENTS=3600:213,4000:214,9100:205,9600:201`
+(the deck's two triggers, the snow field's exit, the hall's arrival) and `CR_CAPTURE_UNTIL_MSG=id:n:p:area`.
+
+| Behaviour (source) | Video, time | Result |
+|---|---|---|
+| The 0x20 black band's width and top (`draw_vista`, Android: x - ceil(ox / scale) .. 480 + that, y 252 to the bottom) | Part 1 808-830 s (the Ark hall's arrival, "Hey, c'mon! Where's the love?"): black from y 544 across all 1280 px | Confirmed: the port's band starts at y 544 at both edges (`CR_CAPTURE_UNTIL_MSG=1001:20:0:9`) |
+| The name's streak in the 0x20 style (`PutMsg` -> `draw_vista2`: window (612, 14) 140 x 22 at tex2d (0, 238), the iPad's (-16, 238); Android's (0, 238)) | Part 1 815 s ("Vahti"), 811 s ("Olgar"): a grey streak under the name from x 160, y 528..551 | Contradicted, fixed: the port drew the name with no streak. Now the window piece (window_hd 1224, 28, 280 x 44): its rows 528..551 as the video's |
+| The "next" mark in the 0x20 style | Part 1 813-826 s: x 1224..1255, y 672..701 (428 bright pixels) | Confirmed: the port's 1224..1255 x 672..701 (432) |
+| An event motion short of the model's rest helpers (`__EvtLoadAct` binds the file's motion whatever its node count) | Part 1 811-830 s: Olgar stands arms down, no axe in sight, through "Hey, c'mon!" (j001_t01 0x9592 `LoadAct 410, 212, 4`, 0x97f5 `Anim2 410, 4, 0, 0, 280, 5`) | Contradicted, fixed: j010e16 (336 frames, 71 segments) didn't "fit" n010's 83 nodes, so slot 4 kept j010e09 - Olgar held his axe on his shoulder. LoadAct now takes a motion that nearly fits (a few segments short, or short of rest helpers, as the package loader's lists): the capture matches the frame |

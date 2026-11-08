@@ -3442,7 +3442,10 @@ struct ViewerHost : cr::EventHost {
     }
     void loadAction(int id, int action, int slot) override {
         const cr::FieldNpc* n = findNpc(app, id);
-        if (!n || n->model < 0 || n->model >= cr::kNumNpcModels || action < 0 || action >= cr::kNumActionFiles) return;
+        if (!n || n->model < 0 || n->model >= cr::kNumNpcModels || action < 0 || action >= cr::kNumActionFiles) {
+            if (SDL_getenv("CR_OP_TRACE")) std::printf("  load action %d into npc %d slot %d: no such NPC or action\n", action, id, slot);
+            return;
+        }
         const std::string file = cr::kNpcModelFile[n->model];
         LoadedModel& lm = npcModel(app, file);
         const std::string mca = cr::kActionFile[action];
@@ -3452,8 +3455,10 @@ struct ViewerHost : cr::EventHost {
             std::vector<cr::Action> acts;
             int index = -1;
             if (cr::readFile(app.dataDir + mca, ad) && cr::parseMca(ad.data(), ad.size(), 0, acts))
-                for (auto& a : acts)
-                    if (cr::actionFits(lm.cpu.skeleton, a)) {
+                for (auto& a : acts) // (__EvtLoadAct binds whatever the file holds: a motion a few
+                    // segments short, or short of n010's twelve rest helpers, too - j010e16 on Olgar,
+                    // j001_t01's arrival, Part 1 811-830 s: his arms down, the axe out of sight)
+                    if (cr::actionFits(lm.cpu.skeleton, a) || cr::actionNearlyFits(lm.cpu.skeleton, a)) {
                         a.name = mca.substr(0, mca.size() - 4);
                         index = int(lm.actions.size());
                         lm.actions.push_back(std::move(a));
@@ -3462,6 +3467,9 @@ struct ViewerHost : cr::EventHost {
             known = lm.loaded.emplace(mca, index).first;
         }
         if (known->second >= 0) app.actorSlots[id][slot] = known->second;
+        if (SDL_getenv("CR_OP_TRACE"))
+            std::printf("  load action %s into npc %d (%s) slot %d: %s\n", mca.c_str(), id, file.c_str(), slot,
+                        known->second >= 0 ? "ok" : "doesn't fit its skeleton");
     }
     void unloadAction(int id, int slot) override { // (__EvtUnloadAct: the slot freed and the model put on its action 0)
         if (auto a = app.actorSlots.find(id); a != app.actorSlots.end()) a->second.erase(slot);
@@ -13465,6 +13473,10 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
             // (draw_vista; Android: x - ox .. 480 + ox, the phone's whole width)
             r.fillRect(left - ex, 2.0f * 252 + 64, width + 2 * ex, 768 - (2.0f * 252 + 64), 0, 0, 0, wa);
             if (!speaker.empty() && textOn) { // PutMsg: drawfont_l at tex2d (16, 236), just above the band
+                // draw_vista2: the grey streak under the name - window (612, 14) 140 x 22 at tex2d
+                // (0, 238), the iPad's (-16, 238); Android's at (0, 238) too (Part 1 815 s: x 160 ..)
+                static const float kWinNameStreak[4] = {1224, 28, 280, 44};
+                drawWinPiece(app, kWinNameStreak, 2.0f * (phone ? 0 : -16) + 32, 2.0f * 238 + 64, 280, 44, wa);
                 drawFrontFade(app); // (the name: text, over the front fade)
                 const float nx = 2.0f * 16 + 32, ny = 2.0f * 236 + 64 - 11; // (the larger box's offset)
                 app.nameHud.setTint(0, 0, 0); // (an outline, so it reads over a bright scene too)
@@ -25892,11 +25904,13 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         }
     // CR_CAPTURE_UNTIL_MSG="id[:n]": stop the --frames run n frames (60 if not given) after message id
     // comes up, with no taps meanwhile
-    // ("id:n:p": p pages turned first, 45 frames apart)
-    int untilMsg = -1, untilAfter = 60, untilPages = 0, untilLeft = -1;
-    if (const char* um = SDL_getenv("CR_CAPTURE_UNTIL_MSG")) std::sscanf(um, "%d:%d:%d", &untilMsg, &untilAfter, &untilPages);
+    // ("id:n:p": p pages turned first, 45 frames apart; "id:n:p:area": only in that area - ids repeat across areas)
+    int untilMsg = -1, untilAfter = 60, untilPages = 0, untilArea = -1, untilLeft = -1;
+    if (const char* um = SDL_getenv("CR_CAPTURE_UNTIL_MSG"))
+        std::sscanf(um, "%d:%d:%d:%d", &untilMsg, &untilAfter, &untilPages, &untilArea);
     for (int f = 0; f < app.captureFrames; ++f) { // --frames: play the scripts, reading each page for 45 frames
-        if (untilMsg >= 0 && untilLeft < 0 && app.lastMessageId == untilMsg && !app.dialogue.empty()) {
+        if (untilMsg >= 0 && untilLeft < 0 && app.lastMessageId == untilMsg && !app.dialogue.empty() &&
+            (untilArea < 0 || app.area == untilArea)) {
             untilLeft = untilAfter + 45 * untilPages;
             std::printf("frame %d: message %d up\n", f, untilMsg);
         }
@@ -25940,7 +25954,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                                       " gate " + std::to_string(app.runner.gate());
             if (where != lastWhere) std::printf("frame %d: %s\n", f, where.c_str());
             lastWhere = where;
-            if (app.lastMessageId != lastMsgShown) std::printf("frame %d: message %d\n", f, app.lastMessageId);
+            if (app.lastMessageId != lastMsgShown) std::printf("frame %d: message %d (area %d)\n", f, app.lastMessageId, app.area);
             lastMsgShown = app.lastMessageId;
         }
         animateNpcs(app, 1.0f / kFramesPerSecond);
