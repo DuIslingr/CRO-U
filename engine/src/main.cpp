@@ -118,7 +118,10 @@ struct Effect {
     bool loop = false;
     float scale = 1, yaw = 0;
     float pitch = 0, roll = 0; // FrmPlayEff2: the record's X and Z angles (radians)
-    bool faceCamera = false;   // FrmPlayEff at a record's point: turned to the camera each frame (mdl + 0xfc7, as a battle's)
+    // Turned to the camera each frame (mdl + 0xfc7): Omega 3.1.0's eff3d_set_with_pos[_and_ang] set
+    // the byte only with G+0x364 bit 0x20 - a battle (btl_init) -, so a script's effect started in
+    // the field keeps its own angles (CR1 2.2.0 sets it always)
+    bool faceCamera = false;
     bool keepDepthWrite = false; // eff3d_set_with_pos_and_ang (FrmPlayEff2 at a record's point): its materials' depth writes kept
     int handle = 0;  // for stopping it
     int key = 0;     // FrmPlayEff's (effect + 1) x (actor + 1)
@@ -3683,9 +3686,9 @@ struct ViewerHost : cr::EventHost {
         cr::Vec3 p;
         if (k < 0 || app.game.flag(kClear[k][std::clamp(app.game.scenario, 0, 1)]) || !actorPos(app, npc, p)) return;
         const int h = startEffect(app, app.fieldEffects, 0x98 + k, p, true, 1.0f, 0.0f);
-        if (h) // (Uty_FireWall_Init: eff3d_set_with_pos - facing the camera)
+        if (h) // (Uty_FireWall_Init: eff3d_set_with_pos - facing the camera in a battle only)
             for (Effect& fx : app.fieldEffects)
-                if (fx.handle == h) fx.faceCamera = true;
+                if (fx.handle == h) fx.faceCamera = app.battle.active;
     }
     int bgmNo() override { return app.bgmNo; }
     void endMenu(int kind) override { // 2: the shop - SetShopBgmNoRecovery, __mc_SetMenuStat(7, 4)
@@ -4039,21 +4042,19 @@ struct ViewerHost : cr::EventHost {
             std::printf("  frame effect %d actor %d%s scale %d%s at (%.1f %.1f %.1f) angles (%.1f %.1f %.1f)\n", effect, actor, v ? "" : " (no record)", scale,
                         angled ? " angled" : "", v ? v[0] : 0.0f, v ? v[1] : 0.0f, v ? v[2] : 0.0f, v ? v[3] : 0.0f, v ? v[4] : 0.0f,
                         v ? v[5] : 0.0f);
-        float pitch = 0, roll = 0;
+        float pitch = 0, yaw = 0, roll = 0;
         bool withAngles = false; // (eff3d_set_with_pos_and_ang: FrmPlayEff2 at a record's point - an NPC's goes through eff3d_set)
         if (!actorPos(app, actor, p)) { // not an NPC: where the scene's record has it
             if (!v) return;
             p = {v[0], v[1], v[2]};
-            // FrmPlayEff2 (eff3d_set_with_pos_and_ang) takes its angles too: X and Z stand, the Y
-            // one gives way to the camera - eff3d_set_with_pos and the _and_ang variant both set the
-            // model's camera-facing byte (+0xfc7), and mdl_put puts atan2(camera) in the Y rotation
-            // whenever it is set (an NPC's effect goes through eff3d_set to the same)
-            if (angled) pitch = v[3] * kDeg, roll = v[5] * kDeg, withAngles = true;
+            // FrmPlayEff2 (eff3d_set_with_pos_and_ang) takes its angles too; in a battle the Y one
+            // gives way to the camera (the camera-facing byte +0xfc7, set only with G+0x364 bit 0x20)
+            if (angled) pitch = v[3] * kDeg, yaw = v[4] * kDeg, roll = v[5] * kDeg, withAngles = true;
         }
         const int h = startEffect(app, app.fieldEffects, effect, p, true, float(scale) / 100.0f, 0.0f);
         if (h)
             for (Effect& fx : app.fieldEffects)
-                if (fx.handle == h) fx.pitch = pitch, fx.roll = roll, fx.faceCamera = true, fx.keepDepthWrite = withAngles;
+                if (fx.handle == h) fx.pitch = pitch, fx.yaw = yaw, fx.roll = roll, fx.faceCamera = app.battle.active, fx.keepDepthWrite = withAngles;
         if (h && app.frameEffects.size() < 16) app.frameEffects.push_back({(effect + 1) * (actor + 1), effect, h});
     }
     void stopFrameEffect(int effect, int actor) override {
@@ -4068,9 +4069,9 @@ struct ViewerHost : cr::EventHost {
         cr::Vec3 p;
         if (!actorPos(app, npc, p)) return;
         const int h = startEffect(app, app.fieldEffects, effect, p + cr::Vec3{0, float(dy), 0}, false, 1.0f, 0.0f);
-        if (h) // (Uty_eff3d_set_fld goes through eff3d_set_with_pos: the camera-facing byte set)
+        if (h) // (Uty_eff3d_set_fld goes through eff3d_set_with_pos: the camera-facing byte in a battle only)
             for (Effect& fx : app.fieldEffects)
-                if (fx.handle == h) fx.faceCamera = true;
+                if (fx.handle == h) fx.faceCamera = app.battle.active;
     }
     void mapScroll(int npc, float x, float y, float rate) override {
         ++app.scroll.mapScrolls;
@@ -27570,12 +27571,13 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
     // upscaler's history converges on it)
     const Uint64 frame = Uint64(SDL_NS_PER_SECOND / (app.captureSettleFps > 0 ? float(app.captureSettleFps) : kFramesPerSecond));
     const char* every = SDL_getenv("CR_CAPTURE_EVERY"); // (debugging: each --settle-moving frame as <dir>/sNNNN.bmp)
+    const int everyN = std::max(1, SDL_getenv("CR_CAPTURE_EVERY_N") ? SDL_atoi(SDL_getenv("CR_CAPTURE_EVERY_N")) : 1); // (every nth only)
     for (int f = 0; f < app.captureSettle; ++f) {
         app.lastTicks = app.captureSettleMoving ? SDL_GetTicksNS() - frame : 0;
         drawFrame(app, false);
         int fw = 0, fh = 0;
         std::vector<uint8_t> fp;
-        if (every && app.renderer.readPixels(fp, fw, fh))
+        if (every && f % everyN == 0 && app.renderer.readPixels(fp, fw, fh))
             if (SDL_Surface* fs = SDL_CreateSurface(fw, fh, SDL_PIXELFORMAT_RGBA32)) {
                 for (int y = 0; y < fh; ++y)
                     std::memcpy(static_cast<uint8_t*>(fs->pixels) + size_t(y) * fs->pitch, &fp[size_t(y) * fw * 4], size_t(fw) * 4);
