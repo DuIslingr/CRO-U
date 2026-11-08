@@ -580,6 +580,8 @@ struct App {
         Page shownPage = Main;
         Phase shownPhase = List, prevPhase = List;
         int phaseT = 100;
+        bool barIn = true;                 // the main page's Back bar (window 4) coming on with it: at the Camp's
+                                           // opening and back from Items (the other pages leave it up)
         std::array<cr::Texture, 31> plateArt; // gene_m*c.mct, loaded when a board first shows them
         std::array<cr::Texture, 11> statusArt; // _gkpachFaceImage: the records' Status portraits (j039_L01..)
     } camp;
@@ -7389,6 +7391,7 @@ void stepCamp(App& app) {
     if (c.leaving) { stepCampLeaving(app); return; } // (Scenarios chosen: the windows going)
     if (c.pageOut && ++c.pageOut - 1 >= campPageOutFrames(app)) { // the page's windows gone: the main page's on (CampMain 9)
         c.pageOut = 0;
+        c.barIn = c.page == App::Camp::Items;
         c.page = App::Camp::Main;
         c.phase = App::Camp::List;
         c.anim = 0;
@@ -9739,17 +9742,15 @@ void drawCamp(App& app) {
     // ComUty_BackButtonDraw (after the page's own pieces: over the Status page's portrait, CampMainPut's end): the
     // arrows (mode 2) where the page turns (campArrows), else the plain
     // bar; none during the Items Yes / No, its board and the Emergency Exit
-    // (the Items and Genes lists bring their own and take it with them - Part 13 1171.9-1172.1 s, 1182.1-1182.5 s;
-    // Equip and Status keep the main page's window 4)
-    const float barA = main ? 1 - leave
-                       : items ? std::min(ease, campPhaseEase(app, App::Camp::List))
-                       : c.page == App::Camp::Genes ? ease : 1.0f;
+    // (window 4: CampMain 6 takes it off for Items - the list brings its own and takes it with it, Part 13
+    // 1171.9-1172.1 s, 1182.1-1182.5 s -; Equip, Genes and Status keep the main page's)
+    const float barA = main ? std::min(1 - leave, c.barIn ? ease : 1.0f) : items ? std::min(ease, campPhaseEase(app, App::Camp::List)) : 1.0f;
     if (campBackShown(app)) {
         if (campOkBar(app)) m.backOkBar(kBackX, campBackY(app), 0, barA);
         else if (campArrows(app)) m.backButton(kBackX, campBackY(app), false, 0, barA);
         else m.backBar(kBackX, campBackY(app), false, barA);
     }
-    if ((items || c.page == App::Camp::Genes) && !c.pageOut && ease <= 0) m.backBar(kBackX, campBackY(app), false, 1 - out); // (the main page's going)
+    if (items && !c.pageOut && ease <= 0) m.backBar(kBackX, campBackY(app), false, 1 - outA); // (the main page's going)
     // The title and section lines over everything else of the page: the section's line runs over the HELP
     // window's foot and its ">" over the state board's face (Part 13 1174 s, Part 10 202 s), both in the
     // menu font (MuComFontDisp of slots 0 / 2: "Equip", ">Jewel" a size under the port's old 15)
