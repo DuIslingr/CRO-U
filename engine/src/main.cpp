@@ -5221,9 +5221,13 @@ void drawSaveScreen(App& app) {
     // and play time (ComUty_GameTimeAndPlayTimeDraw) top right and the pair's emblems (pictures
     // 111..113 at (16 + 72k, 224))
     const cr::GameState* shown = ss.load ? (ss.haveSave ? &ss.data.game : nullptr) : &app.game;
+    // (ComUty_CharInfoInit: the boards are the shown game's scenario pair - Vieg and Olgar, or Vieg and
+    // Dante - one while flag 0xfed + scenario holds the second back)
+    const int scn = shown ? std::clamp(shown->scenario, 0, cr::kScenarios - 1) : 0;
     if (shown)
-        for (int k = 0; k < 2; ++k) {
-            const int ch = ss.load ? (ss.data.leader & ~1) + k : (app.playerChar & ~1) + k;
+        for (int k = 0; k < (shown->flag(0xfed + scn) ? 1 : 2); ++k) {
+            const int pc = shown->pairs[size_t(scn)][size_t(k)];
+            const int ch = pc >= 0 && pc < cr::kCharacters ? pc : 0;
             int hp, hpMax, mp, mpMax;
             memberHpMp(app, ch, hp, hpMax, mp, mpMax, shown);
             drawFaceBoard(app, m, 0, 24 + 88.0f * float(k), ch, hp, hpMax, mp, mpMax, a, shown);
