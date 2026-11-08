@@ -108,7 +108,9 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   holds instead of crawling for minutes; a turning camera keeps the original's distance; the defeat
   camera circles for as long as the screen shows; the battle opens on the formation's still view; a
   boss's fall turns its camera over the fall; the victory camera frames the member who last led the
-  order. Attackers step to the original's fixed spots in front of their target (from the formation
+  order. A gene or item now cuts to its target as it lands (the whole side for a side-wide one, the
+  field of battle for a few), and lands at the original's moment of its casting motion; a member's
+  run-up blow sometimes switches to a closer camera as it arrives, as the original's does. Attackers step to the original's fixed spots in front of their target (from the formation
   table, a big monster further back) and face the way they run. A guarding member takes a blow
   without flinching, a miss or a fended-off blow plays no hurt motion (the port played the get-up
   one), a revived member gets up, a fallen member drops and stays down and a beaten monster fades
