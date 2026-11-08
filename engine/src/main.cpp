@@ -11371,8 +11371,11 @@ bool titleAnnounce(App& app) {
     const std::vector<uint32_t> before = g.flags;
     for (int f = 101; f <= 106; ++f) g.setFlag(f, true); // (3.1.0's _gameapp_prc)
     int first = -1, count = 0;
+    // (3.1.0 counts a pack while 0x6f + i is clear - and an uncleared game never sets it, so "New fun
+    // stuff available after clearing the game!" came back at every launch. The owner's choice: once -
+    // before the clear, a pack announced (0x76 + i) is not counted again)
     for (int i = 0; i < 6; ++i)
-        if (g.flag(0x65 + i) && !g.flag(0x6f + i)) {
+        if (g.flag(0x65 + i) && !g.flag(0x6f + i) && (g.flag(0x1f) || !g.flag(0x76 + i))) {
             if (g.flag(0x1f)) g.setFlag(0x6f + i, true);
             g.setFlag(0x76 + i, true);
             if (first < 0) first = i;
@@ -22654,6 +22657,23 @@ int runSelfTest(App& app) {
             mbad += !app.saveScreen.haveSave || app.saveScreen.data.map != 70 || app.saveScreen.data.game.scenario != 0 ||
                     app.saveScreen.data.game.oz != 500 || app.saveScreen.data.game.items[7] != 3;
             app.saveScreen.open = false;
+            // Before the clear: "New fun stuff available" once, not at the next launch (the owner's choice;
+            // 3.1.0 repeats it till the clear)
+            {
+                cr::SaveData ud = d;
+                ud.game.setFlag(0x1f, false);
+                for (int f = 0x65; f <= 0x7b; ++f) ud.game.setFlag(f, false);
+                cr::writeSave(dataPath(app), ud);
+                app.verUpShown = false, app.titleStage = 0, app.titleOpen = true;
+                titleTap(app);
+                mbad += app.titleStage != 2 || app.titleBoard.lines[0] != 57134;
+                for (int k = 0; k < 3 && app.titleStage == 2; ++k) titleBoardTap(app);
+                mbad += app.titleStage != 1;
+                app.verUpShown = false, app.titleStage = 0;
+                titleTap(app);
+                mbad += app.titleStage != 1;
+                app.titleOpen = false;
+            }
             // The title's boards (TitlePrc 3..6): with the clear flag and the trials open, each trial once,
             // then the Info Board; the marks go into data.dat; nothing the second time
             cr::SaveData td = d;
