@@ -198,6 +198,37 @@ is reached with `--new-game --win-battles --frames n CR_CAPTURE_EVENTS=3600:213,
 | Vieg's face labelled "Olgar" on the boards of the second half (MuStr_GetCharNameId / GetViegOlgarCheck) | Part 8 4910.5 s, Part 9 5 s: "Olgar" over Vieg's face, "Vahti" | Consistent: the port names record 0 Olgar once flag 0x468 is set (charNameId) - the same capture's board |
 | A grey line above the Scenarios heading | Part 8 4893 s: rows 40..56 above the heading black (max 14) | At 1280 x 720 the port's rows are black too. At 1024 x 768 a grey row (50) ran over x 141..485 above it - linear filtering reading the atlas row above the picture at the 0.8 scale. Fixed: drawQuadUV takes a piece's edges half a texel in when it is drawn at a fractional number of pixels per texel (the 1280 x 720 capture is unchanged; at 1024 x 768 the row is gone) |
 | The Ark hall's opening pan (j001_t01 0x9603 FrmSetCam 1001, 0x962c FrmAdjCam 1001 over 300 frames, map 191) | Part 1 780.0-794.0 s: the 3D in a 1024-px column, x 128..1152 (y 0..544 above the band), the rotunda's far wall, chandelier and the other pairs small; the shot after (FrmSetCam 1002, 794.5 s) and the rest of the scene fill the width | Open: the port films the pan as every other shot - the stage view (1024, fov 77.4) doubled across the screen - so its frames are close-ups of the near wall. Android's setCamera3D sets the viewport to the stage record's w x h (+0x28 / +0x2a) at the screen's centre, and fldread_prc scales that record once per map (the flag at gac + 0x8ad99 + map - first map; the record reloaded by fldread_stg_init2 when 0x8ad88 bit 2 is set, the flag left) - an unscaled record would give exactly the 1024 column. Why the next shot in the same map is scaled is not found; left as it is |
+| A field quake (`__EvtQuake` -> EndQuake(3, 100 %, 0 %, 40): Quake::update's offset, 75..100 % of the size now against its last direction, both axes; the viewport's corner moved by it, cast to int) - j001_d01 0x47ff..0x4807, back from the fourth puzzle: the white fade in and the quake | Part 2 (bMgJjj3q8GQ) 1179.82-1181.46 s ("The roar flames ... are gone"), the crystals' patch phase-correlated frame by frame at 50 fps: both axes jump 6, 4, then 2 px a game frame, alternating, with the fade; still from 1181.48 s - about 33 game frames | Consistent: `CR_CAPTURE_AT=0x47e4 --event 0 --area 2 --capture d0101_10.cmp ... --settle-moving 80 --settle-fps 20` with `CR_CAPTURE_EVERY`: steps of 5-6, 4, 3, 2 px on both axes, alternating, from the fade's first frames to about 38 frames on (the last ten 1-px, one-sided). The size matches (3 units: 2.8 px at 1280 x 720 against the phone's 3); the video's tail is 2-px steps and a few frames shorter - its offsets land on whole phone pixels (Retina-sized), the port's on logical units: left as is |
+| The field side of an encounter (CRView::prc: SetFade(white, 255, 255, 1 ms)) | Part 2 788.70 -> 788.72 s: the field, then solid white the next frame (no effect, no fade out); white held to 789.12 s, the fade in to 790.12 s | Confirmed: the port cuts to white the same way (startBattle) |
+| Story actors on cue: the Ark arrival's NPCs born for the scene, its cameras and the pair's warp in (j001_t01 0x9554..0x9807) | Part 1 794.5-830 s against `CR_CAPTURE_UNTIL_MSG=1001:n:0:9` captures | Consistent at the compared moments (Vahti, Vieg and Olgar in place for "Hey, c'mon!", the frame matches to a few pixels - the fixed motion above). A scripted walk measured frame by frame: not done (Open: the arrival's moves happen under the capture's message stop) |
+| The 1024-px column after a map load in a scene | Part 1 780-794 s (above), 1372-1376 s (the Agent's hall, after the black load), Part 2 1500 s / 1528 s (the boss's cliff), 1620-1636 s (back from the boss battle: the painted cliff in x 128..1152 while the fight's effects flash) | Open (as above): Android 1.1.6 shows these shots unscaled. fldread_prc (0x6f6b8, state 0x32) scales the stage record only the first time a map loads in the area (gac + 0x8ad99 + map - first map, cleared by the memset at 0x6fa6c), and fldread_stg_init2 reloads the record unscaled when 0x8ad88 bit 2 asks: a revisited map - returning from a battle, a scene's warp - then keeps the 1024 view (and its painting at 1 : 1). A device / platform artifact the port does not copy |
+
+Coverage of Parts 1-7 (contact sheets at one frame every 4 s, 56 sheets, plus the OCR index). Moment
+types and where they are checked:
+
+| Moment type | Parts (time) | Checked by |
+|---|---|---|
+| Logos, title, title menu, resume board, Character Select, save screen | 1 (0-25 s), 9 (0-15 s) | Screens rows above; this section's save board |
+| The opening's space scene: portraits over the parchment, the boxless (0x10) lines | 1 (40-225 s) | Portraits, parchment, next mark, typing - field rows; the boxless style's lines not compared (Open, low: text alone, outlined) |
+| White flashes / white-outs between scenes (Screen to white) | 1 (236-240 s, 488 s), 2 (20 s, 1108 s, 1179 s) | The crystal warp and exit fades (field rows), the encounter cut and the puzzle-return flash (this section) |
+| Painted fields with portraits (the ship's deck, Rachel's room) | 1 (260-345 s), 2 (56-170 s, 1870 s) | Field rows (framing, portraits, parchment) |
+| 3D cut-scenes in letterbox: the 0x20 band, its name and mark | 1 (808-1800 s), 3, 4, 7 | This section (band, streak, mark, Olgar's motion) |
+| The grey panel (0x40) and the tutorial band (0x08) | 1 (1366 s, 2168 s), 2 (1180 s) | Field rows (tutorial band, event Yes / No panel) |
+| Battles: intro, commands, targets, hits, labels, Break, results; boss and story battles; arena fights | all parts | Battle rows (both rounds) |
+| Field HUD, the corner button and bar, MAP / SAVE / CAMP | 1, 2, 3 | Field rows; the save screen (screens rows) |
+| The Camp: equip, genes, items | 2 (840-890 s), 3, 5 | Camp rows |
+| The shop | 1 (2180 s), 4 | Screens rows |
+| Item get bands | 2 (762, 785 s), 3 | Field rows |
+| Puzzle rooms: Start!! / Clear!!, the panel, Retry, the floor view | 2, 3, 5, 6 | Field rows (panel, clear, retry question, clouds); the punishment mark and a failure's reset: not found in Parts 1-7 (every puzzle seen is cleared without a failed move - Open, code reading only) |
+| The dungeon floor map between rooms (the 3D overview with the crystals) | 2 (240 s, 316-388 s), 3, 5, 6 | Its arrival (white in) only; the view's camera not compared (Open) |
+| Area title cards (MAPtitle: "The Dead Draw the Light") | 3 (124 s), 5 (100 s) | Not compared (Open: no capture reaches the card yet) |
+| Loading spinner | 1 (778 s, 1367 s) | This section |
+| Quakes | 2 (1180 s) | This section |
+| Android's achievement banner | 3, 5, 6 | Achievements section |
+| Android system overlays (the notification shade, Part 1 932 s; the YouTube end card) | 1, 2, 4 | Not the game's |
+
+Code reading only here: the puzzle's punishment mark and failure reset (no failed move in Parts 1-7),
+the 0x20 style's iPad streak place (-16, 238).
 
 ## Achievements (agent)
 

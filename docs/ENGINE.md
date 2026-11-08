@@ -349,6 +349,8 @@ c101/c102/c104/m207a, 2026-10-12).
       frames apart; `id:n:p:area` only in that area - ids repeat across the areas' files), with no other taps meanwhile - with
       `CR_CAPTURE_EVENTS=frame:script,...` touching the room's triggers it reaches a scene's page;
       `CR_CAPTURE_ITEM=item[:n]` shows Uty_GetItem's band for that item n frames in (2: settled);
+      `CR_CAPTURE_VARS=k:v,...` sets script variables (before the map's entry and before `--event`'s
+      script); `CR_CAPTURE_AT=<address>` starts `--event`'s script at that address of the area's file instead;
       `CR_CAPTURE_STAFF=mode:n[:fast]` the staff roll n frames in)
 - [x] New game: the opening plays as the original's script stages it (a 3D room filmed by the
       script camera: cuts and moves between shots, framed as `setCamera3D` does - the stage view
