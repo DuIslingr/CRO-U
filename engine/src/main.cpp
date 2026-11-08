@@ -26277,6 +26277,8 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                 std::printf("results: stage %d, line %d, exp shown %.0f of %d, oz %.0f of %d, %zu level-ups, %zu items\n",
                             b.result.stage, b.result.message, b.result.shownExp, b.result.expTotal, b.result.shownOz,
                             b.result.ozTotal, b.result.ups.size(), b.result.items.size());
+            if (results)
+                for (const auto& [item, n] : b.result.items) std::printf("results: item %d '%s' x%d\n", item, itemName(app, item).c_str(), n);
             std::printf("battle view %s: phase %d (frame %d, boss model %d, camera %d, set piece %#x stage %d), round %d, break %d, hp",
                         v.c_str(), int(b.phase), b.phaseFrames, b.bossModel, b.cam, b.setPiece, b.start.stage, b.rules.round, b.rules.breakGauge);
             for (int i = 0; i < 5; ++i) std::printf(" %d/%d", b.rules.f[size_t(i)].hp, b.rules.f[size_t(i)].hpMax);
