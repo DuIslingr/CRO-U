@@ -794,6 +794,9 @@ struct App {
         Popup popups[5];                   // __dmg_set's five numbers (a sixth is dropped)
         std::string banner;                // the top bar: the action, the target prompt, messages
         int bannerFrames = 0;
+        // ... as drawn: a font slot's text shows from the frame after it is set (font_set_utf16; drawfont_btl a
+        // frame on) - Part 9 2973.82 s, Part 11 947.82 s: the camera's cut a frame before "Stress" / "Victory!"
+        std::string bannerShown;
         std::vector<cr::BattleNotice> notices; // G+0xa14: the calcs' messages, one per free banner
         int shownHp[5] = {}, shownMp[5] = {}; // what the HUD shows (changes as the hits land)
         int rollHp[2] = {}, rollMp[2] = {};   // the party board's numbers and bars (+0x60 / +0x68): a fifth of the way a frame
@@ -14837,6 +14840,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     for (App::Battle::Popup& p : b.popups) p = App::Battle::Popup();
     b.banner.clear();
     b.bannerFrames = 0;
+    b.bannerShown.clear();
     b.notices.clear();
     b.levelled.clear();
     b.settled = false;
@@ -16968,6 +16972,7 @@ void stepBattle(App& app) {
         if (hits && !shownHits) std::printf("battle frame %d: action %d's hits shown\n", b.frames, b.turn.action);
         shown = b.banner, shownPhase = int(b.phase), shownHits = hits;
     }
+    b.bannerShown = b.bannerFrames > 0 ? b.banner : std::string(); // (what the last frame set shows from this one)
     ++b.frames;
     ++b.phaseFrames;
     stepEffects(app);
@@ -17774,14 +17779,14 @@ void drawBattleHud(App& app, float W, float H) {
 
     // The banner: the action's name, the target prompt, the messages
     r.setOrigin(r.uiX());
-    if (b.bannerFrames > 0 && !b.banner.empty()) {
+    if (!b.bannerShown.empty()) {
         const float clear[4] = {0, 0, 0, 0}, dark[4] = {0, 0, 0, 0x98 / 255.f};
         const float by = phone ? 32.0f - ey : 0.0f;
         m.quad(88, 4 + by, 24, 24, clear, dark);
         m.quad(112, 4 + by, 351, 24, dark, dark);
         m.quad(463, 4 + by, 24, 24, dark, clear);
         m.setOutline(false); // (drawfont_btl: the banner's text plain)
-        m.textCentred(b.banner, 287 - m.textWidth(b.banner, 14) / 2, 16 + by, false, 1, 14);
+        m.textCentred(b.bannerShown, 287 - m.textWidth(b.bannerShown, 14) / 2, 16 + by, false, 1, 14);
         m.setOutline(true);
     }
 
