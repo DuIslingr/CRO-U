@@ -111,8 +111,10 @@ public:
     // Joint npc, parent, node (Omega's op 60, __EvtJoint): npc's model rides `parent`'s node
     // `node` (mdl +0xf80 / +0xf84); parent < 1 lets it go
     virtual void jointNpc(int /*npc*/, int /*parent*/, int /*node*/) {}
-    virtual void screenFade(float /*grey*/, float /*fromAlpha*/, float /*toAlpha*/, int /*frames*/) {}
-    virtual bool screenFading() { return false; }        // Wait 0xFFFF / 0xFFFC
+    // Screen (op 16) and its back channel (op 58: _SetFade_back, a second full-screen quad with its
+    // own state, waited on with 0xFFFC)
+    virtual void screenFade(float /*grey*/, float /*fromAlpha*/, float /*toAlpha*/, int /*frames*/, bool /*back*/ = false) {}
+    virtual bool screenFading(bool /*back*/ = false) { return false; } // Wait 0xFFFF / 0xFFFC
     virtual void warp(const WarpRequest& /*w*/) {}       // the script continues on the new field
     virtual void playSound(uint32_t /*id*/) {}           // Eff: _effgo(u16 | u16 << 16)
     virtual void playMusic(uint32_t /*v*/) {}            // Bgm: _bgmgo(u16 | u16 << 16)
@@ -139,6 +141,9 @@ public:
     // Uty_LoadPrty: prty_init_new(var 0 - 1, var 1 == 3 ? 3 : 2) - the pair (1..4) and whether the
     // new game carries over the clear data
     virtual void loadParty(int /*pair*/, bool /*clearData*/) {}
+    // Uty_Mode: the npc's table word (0 kind +0xe, 1 +0x10, 2 treasure +0x12, 3 puzzle +0x14) bit `bit`:
+    // op 0 tests (returns 0 / 1), 1 sets, 2 clears - until the area file is read again
+    virtual int npcMode(int /*npc*/, int /*word*/, int /*bit*/, int /*op*/) { return 0; }
     // Cutscene camera (EvtFrmSetCam / FrmAdjCam / FrmPanCam, CameraFree / CameraPlayer): in rooms
     // without a painted background the script moves the 3D camera; `frames` 0 = a cut
     virtual void freeCamera(bool /*on*/) {}

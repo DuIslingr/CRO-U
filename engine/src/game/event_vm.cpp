@@ -30,6 +30,7 @@ struct EventRunner::Vm {
     int eventNo, area, map;
     enum class Wait { None, Frames, Fade, Message, Npc, Choice, Logo, Window } wait = Wait::None;
     int waitFrames = 0, waitNpc = -1;
+    bool waitBackFade = false; // Wait 0xFFFC: the back fade's end (op 58's channel)
     FieldNpc self;             // NPC whose script runs: flag(-1) / flag(-2) name its flags
     size_t pc = 0;
     std::vector<size_t> calls; // Gosub return addresses (64 deep in the original)
@@ -122,7 +123,7 @@ struct EventRunner::Vm {
         case 33: case 34: case 42: break;
         case 38: { // ___ITEM: `item[-1] = n` gives item n, `item[-2] = n` takes one away
             const int n = eval();
-            if (n == -1) { ++gs.items[v]; }
+            if (n == -1) { if (gs.items[v] < 99) ++gs.items[v]; } // (_add_item's 99)
             else if (n == -2) { auto it = gs.items.find(v); if (it != gs.items.end() && it->second > 0) --it->second; }
             break;
         }
@@ -281,7 +282,7 @@ bool EventRunner::step(EventHost* host) {
         switch (vm.wait) {
         case Vm::Wait::Frames: if (--vm.waitFrames > 0) return true; break;
         case Vm::Wait::Fade: // (__EvtWait 0xFFFF: the fade over, one frame more before going on)
-            if (host->screenFading()) return true;
+            if (host->screenFading(vm.waitBackFade)) return true;
             vm.wait = Vm::Wait::Frames, vm.waitFrames = 1;
             return true;
         case Vm::Wait::Message: if (host->messageOpen()) return true; break;
@@ -360,7 +361,10 @@ bool EventRunner::step(EventHost* host) {
             else if (id == 2004 && host) host->fadeNpc(eventNo, 1, 0, 20);                  // mdl_fadeout
             else if (id == 2010 && host) host->fadeNpc(eventNo, 0, 1, 20);                  // mdl_fadein
             else if (id == 2005 && host) host->showItemWindow(vm.var(9));                   // GetItem window
-            else if (id == 2011) { ++state.items[a0]; res.itemsGained.push_back(a0); }       // AddItem
+            else if (id == 2011) { // AddItem (_add_item: a stack stops at 99, the window shows all the same)
+                if (state.items[a0] < 99) ++state.items[a0];
+                res.itemsGained.push_back(a0);
+            }
             else if (id == 2012) { if (state.items[a0] > 0) --state.items[a0]; }            // DelItem
             else if (id == 2013) { // Uty_ChkItem: var (the first push) = how many of the item (the last) - a gold box's key
                 const auto it = state.items.find(vm.arg(1));
@@ -373,7 +377,7 @@ bool EventRunner::step(EventHost* host) {
                 for (auto& e : state.treasure[size_t(std::clamp(state.scenario, 0, kScenarios - 1))])
                     if (e[0] == a0) e[1] = -1;
             }
-            else if (id == 2022 && host) host->loadParty(vm.var(0), vm.var(1) == 3);      // LoadPrty: pair, clear data
+            else if (id == 2022 && host && (vm.var(1) == 2 || vm.var(1) == 3)) host->loadParty(vm.var(0), vm.var(1) == 3); // LoadPrty: pair, mode 2 / 3 only
             // ScnEffect_Init: GetXmpStkData 0 (the last pushed: on / off) and 1 (the effect)
             else if (id == 2009 && host) host->sceneEffect(vm.arg(1) != 0, vm.arg(0));
             else if (id == 2014) { state.vars[0] = 0; if (host) host->warpCrystalCamera(a0); } // Uty_WarpCrystalCamera_Init
@@ -381,7 +385,11 @@ bool EventRunner::step(EventHost* host) {
             else if (id == 2023 && host) host->npcEffect(vm.arg(2), vm.arg(1), vm.arg(0)); // Uty_eff3d_set_fld: effect, npc, dy
             else if (id == 2033 && host) { // Uty_TutoTexDisp
                 int32_t g[12];
-                for (int k = 0; k < 12; ++k) g[k] = vm.arg(11 - k);
+                if (state.vars[2] != 0) { // the 4-push form: rows / frames all -1, pages = StkData(1), x = (2), y = (3)
+                    for (int k = 0; k < 12; ++k) g[k] = -1;
+                    g[0] = 0, g[1] = vm.arg(2), g[10] = vm.arg(1), g[11] = vm.arg(0);
+                } else
+                    for (int k = 0; k < 12; ++k) g[k] = vm.arg(11 - k);
                 host->tutoTexDisp(g);
             }
             else if (id == 2007 && host) { state.setFlag(0, true); host->exclamationMark(); } // Uty_DrawExclamationMark_Init
@@ -426,8 +434,11 @@ bool EventRunner::step(EventHost* host) {
             // Uty_mdl_set_alpha: GetXmpStkData 0..3 = the npc, the alpha from, to (0..255), frames (mdl_set_alpha)
             else if (id == 2019 && host) host->fadeNpc(vm.arg(3), float(vm.arg(2)) / 255.0f, float(vm.arg(1)) / 255.0f, vm.arg(0));
             else if (id == 2034 && host) host->lookAtNpc(a0); // Uty_LookatRect_Init: SetFreeCamera, SetScroll3D to the npc at rate 1
-            // Uty_Mode (2017): an npc's table word (0..3: +0xe .. +0x14) bit tested into var 0 / set / cleared -
-            // used once, clearing an npc's bits right after its Kill: nothing left to change here
+            // Uty_Mode (2017): an npc's table word (0..3: +0xe .. +0x14) bit tested into var 0 / set / cleared
+            else if (id == 2017 && host) {
+                const int r = host->npcMode(vm.arg(3), vm.arg(2), vm.arg(1), vm.arg(0));
+                if (vm.arg(0) == 0) state.vars[0] = r;
+            }
             break;
         }
         case 14: { // Wait: frames, or 0xFFFF/0xFFFC fade, 0xFFFE loading, 0xFFFD + npc
@@ -438,6 +449,7 @@ bool EventRunner::step(EventHost* host) {
                 vm.waitNpc = vm.resolve(vm.u16());
                 if (host) return yield(Vm::Wait::Npc);
             } else if (w == 0xFFFF || w == 0xFFFC) {
+                vm.waitBackFade = w == 0xFFFC;
                 if (host) return yield(Vm::Wait::Fade);
             } else if (host) {
                 vm.waitFrames = w == 0xFFFE || w == 0 ? 1 : w;
@@ -472,7 +484,7 @@ bool EventRunner::step(EventHost* host) {
                 r.pos[0] = float(w[2]); r.pos[1] = float(w[3]); r.pos[2] = float(w[4]); // unsigned in EvtWarp
                 r.angleDegrees = float(int16_t(w[5]));
             }
-            r.valid = r.map >= 0;
+            r.valid = r.map >= 0 || r.map == -1 || r.map == -98; // (-1: this map again at the place; -98: again, where he stands)
             if (!host) return finish(true);
             if (r.valid) host->warp(r);
             // The rest of the script (fade-in) runs on the new field - unless the area (and so
@@ -547,7 +559,8 @@ bool EventRunner::step(EventHost* host) {
                 if (last == 2) host->moveNpc(n, v, v[4], EventHost::Facing::Keep, frames, 2);
                 else host->moveNpc(n, v, v[4], !rot ? EventHost::Facing::Keep : last == 0 ? EventHost::Facing::Snap : EventHost::Facing::Yaw, frames, 0);
             } else {
-                float yaw; const auto f = facingFor(last, yaw);
+                float yaw; auto f = facingFor(last, yaw);
+                if (f == EventHost::Facing::Yaw) f = EventHost::Facing::Snap; // (__EvtFrmAdjc: a degree is written before the move, no turning)
                 host->moveNpc(n, v, yaw, f, frames, 0);
             }
             break;
@@ -597,7 +610,7 @@ bool EventRunner::step(EventHost* host) {
             const uint8_t from = vm.u8(), to = vm.u8();
             const int8_t frames = int8_t(vm.u8());
             if (host && frames < 0) host->toggleFieldHidden();
-            else if (host) host->screenFade(float(colour & 255) / 255.0f, from / 255.0f, to / 255.0f, frames);
+            else if (host) host->screenFade(float(colour & 255) / 255.0f, from / 255.0f, to / 255.0f, frames, op == 58);
             break;
         }
         case 21: { // Util n: the game's menus (0 title, 1 world, 2 shop, 3 yes/no, 4 start, 5/6 save, 7 credits, 8 last battle)

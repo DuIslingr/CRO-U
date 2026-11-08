@@ -938,10 +938,9 @@ window_hd's pixels) at (64, 384) and its centre (1864, 1448, 96 × 96) at (88, 4
 frame. 2002 `init_tex2d` (texture setup) and 2021 `LoadData` (the continue / save data into the
 work area) do nothing visible. 2028: flag 4086 set `NowLoadStart`, else `NowLoadEnd` - `NowLoadProc` draws (820 + 24
 (n % 8), 96, 24 × 24) of the window sheet at tex2d (464, 320), n + 1 a frame. 2030 / 2031
-(`Uty_Btl_ParamUp01` / `02`): bytes +0x13b..+0x13e / +0x8b..+0x8e of the battle work = 6 -
-fighter 1 / 0's attack, defense, speed and luck ups (statuses 2..5, 0xb0 a fighter) for 6 rounds;
-called by the story scripts 201 / 301 of areas 12 and 24 (the port keeps them for the next battle
-when none is on). 2035
+(`Uty_Btl_ParamUp01` / `02`): byte +0x14b / +0x97 of the battle work = 1 - fighter 1 / 0's "doubled"
+mark (the Ward: btlpcparam_* add the stat again), for the battle; called by the first dungeon's
+story script (battle 657; the port keeps the mark for the next battle when none is on). 2035
 (`Uty_Battle_first_anm_Init`): `btl_anm_load(arg)`. The shop (`ShopSet`) keeps var 0 and plays
 track 0x13; `ShopClr` plays the kept track back unless `SetShopBgmNoRecovery` was called.
 `crtool natives` runs every script once and lists the calls met (`CR_NATIVE_ARGS=2016,...` prints

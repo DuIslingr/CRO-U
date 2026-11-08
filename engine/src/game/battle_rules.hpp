@@ -203,6 +203,7 @@ struct BattleTurn {
     bool reflected = false;      // a barrier sent the gene / item back on its users
     std::vector<int> barriers;   // ... whose barriers those were
     bool counter = false;        // skill 154's answer to a hit
+    bool repeat = false;         // a further go of the same entry (the action line isn't said again)
     int message = 0;             // a system message to show for it (57xxx), 0 none
     bool cancelled = false;      // btlque_make_que: it can't be any more - its message, no action
     int messageValue = 0;        // its number (Oz stolen) or the element / kind it names

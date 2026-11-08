@@ -770,6 +770,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
         out.actors[0] = e.actors[0];
         out.actors[1] = e.actors[1];
         out.counter = e.counter;
+        out.repeat = e.paid;
         breakFlags &= ~0x3200u; // btl_main 600: per action
         if (e.kind == kCmdEscape) {
             // btlact_escape_init: certain while the pair holds the Break, else by levels

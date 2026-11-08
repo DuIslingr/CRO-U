@@ -77,6 +77,33 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   its actors with the fighter's own counter action), and speeds are read afresh for every action
   of a round (a Speed Up or Down moves the rest of the round); the AI's fallback targets are the
   original's (a random living opponent).
+- **Scripts across every area** (the opcode and native sets of all eleven files checked against the
+  original's handlers): an actor told to face the way it moves turns as the original computes it
+  (not a true arctangent - a diagonal walk faces 26 degrees), a degree given with a move is set as
+  the move starts, `Anim` cross-fades over two frames, the second scenario's twelve tutorial
+  pictures read their four-word form, `Uty_Mode` edits an object's bits (the sealed door of the
+  third dungeon can't be examined again), the three "first time you hold it" tutorials and their
+  manual pages (items 469..471) come at a scene's end as the original's `chk_tuto_kick` gives them,
+  `Screen`'s second channel (op 58) is its own fade with its own wait, a warp to map -1 / -98
+  reloads the room at the place / where you stand, a warp within one of the 3D rooms reloads it and
+  one elsewhere keeps your facing.
+- **The field's systems:** opened chests lose their badge and can't be examined again; a chest's
+  or script's gift stops at 99 of an item; the shop's Sexy Pose discount is the original's `price -
+  price / 10`, a gene, skill or OMU item you own is greyed and refused, and the second scenario's
+  shop has its fifth Buy plate (the OMU items, one a purchase).
+- **A new game after clearing:** new game+ wears the starting gear and plate again (the old gear
+  waits in the bag) and keeps the manual's pages; the second scenario's new game+ also loses its
+  collection and OMU items as the original's does; "Begin new game." over clear data empties the
+  scenario's bag (the Oz and the shared genes and skills stay); the scenario's encounter switch is
+  reset either way.
+- **Battle voices** (the voiced release, checked against its code): Omega's own list of the story
+  battles' victory lines (groups 651..737 → 600..620; the first game's list never matched), the
+  comeback lines of groups 669..672, an action line for every action of a round (not the first
+  actor's alone) and the sides' speakers picked afresh each action, the right line set for every
+  monster speaker, no doubled line when an action has its own, only the side's speaker reacting to
+  an all-target blow, the victory said by the member who last led the order and "hurt" judged on
+  the speaker, the escape line by either member; on the field a clip the script carries over a
+  page turn (0x1e ffff) goes on, and the closing tap cuts the clip as the original does.
 - **The title:** the title's art stands alone until a tap or key (its sound), then the logo goes and
   the plates slide in, as the original's title does; the "resume from last saved point?" offer
   comes after Start, not before the plates, and its Yes stops the music and fades to black before

@@ -269,6 +269,7 @@ struct App {
     std::vector<std::vector<int>> dialogueVoices; // per page: voice clips it starts (0x1e)
     int dialogueSerial = 0, voicedSerial = -1, voicedPage = -1; // which page's voices were started
     std::vector<int> voiceQueue;           // further clips of the same page
+    bool voiceKeep = false;                // PrcMsg 0x1e 0xffff: the page's clip goes on past the next tap
     int voicesPlayed = 0;                  // for tests
     int soundTestEntry = 0;
     std::vector<int> voiceEntries;         // bank entries marked as voice (sound test, T)
@@ -514,6 +515,8 @@ struct App {
     int itemWindowIcon = -1;
     bool tapPending = false;               // action key while a script waits for a tap
     float fadeGrey = 0, fadeFrom = 0, fadeTo = 0; // Screen
+    float fadeBackGrey = 0, fadeBackFrom = 0, fadeBackTo = 0; // Screen's back channel (op 58, _SetFade_back)
+    int fadeBackFrames = 0, fadeBackT = 0;
     // The menus' mask (MuCom_MenuSetMask / ClrMask: SetFade_back(black, 0 <-> 0xa0, 400 ms) with
     // G+0x39c60 its shape - 0 the screen, 1 its left past a slant, 2 its right, 3 fading downward)
     struct MenuMask {
@@ -662,6 +665,7 @@ struct App {
         bool voiceSpeaks[5] = {};
         bool commandSaid[2] = {};
         int voiceRound = -1;
+        int voiceLeader = 0;               // btl +0xaf2: the party member who last headed the order (the victory's speaker)
         uint32_t voiceRng = 1;
         struct Quake {                     // Quake (StartQuake / EndQuake): the 3D jolts a few pixels
             int mode = 0;                  // 0 still, 1 to its end, 2 held until EndQuake
@@ -1988,13 +1992,23 @@ int triggerAt(const App& app, const cr::Vec3& p) {
 }
 
 // Arrives at a warp destination: loads the map if it changes, places and turns the player.
-bool performWarp(App& app, const cr::WarpRequest& w, int fromEvent) {
+bool performWarp(App& app, const cr::WarpRequest& wIn, int fromEvent) {
+    // __EvtWarp: map -1 reloads this map and puts the player at the place; -98 reloads it with him
+    // where he stands; a warp within the map only moves him - except on maps 13, 29, 47, 66, 71,
+    // 91, 191 and 214, which it reloads (fldread_stg_end / InitFieldScene)
+    cr::WarpRequest w = wIn;
+    const bool keepPlace = w.map == -98, again = w.map < 0;
+    if (w.map < 0) w.map = app.mapNumber;
     const int area = w.area >= 0 ? w.area : app.area;
     if (w.map < 0 || w.map >= cr::kNumMaps) return false;
     const auto it = std::find(app.maps.begin(), app.maps.end(), std::string(cr::kMapCollisionFile[w.map]));
     if (it == app.maps.end()) return false;
     const int fromMap = app.mapNumber;
-    if (w.map != app.mapNumber || area != app.area) {
+    static const int kReloads[] = {13, 29, 47, 66, 71, 91, 152, 191, 214}; // (the 3D rooms)
+    const bool reloads = std::find(std::begin(kReloads), std::end(kReloads), w.map) != std::end(kReloads);
+    if (keepPlace && app.havePlayer) w.pos[0] = app.walker.pos.x, w.pos[1] = app.walker.pos.y, w.pos[2] = app.walker.pos.z,
+                                     w.angleDegrees = app.walker.heading * 180.0f / 3.14159265f;
+    if (w.map != app.mapNumber || area != app.area || again || reloads) {
         showMap(app, int(it - app.maps.begin()), w.map, area);
         // FieldScene::onLoading calls SetMask2(1): retain the outgoing mask's
         // colour and reveal the loaded field over 500 ms. Area-changing scripts
@@ -2025,8 +2039,9 @@ bool performWarp(App& app, const cr::WarpRequest& w, int fromEvent) {
                 }
         p = q;
     }
+    const bool moved = w.map != fromMap || area != app.area || again || reloads; // (a same-map warp writes the position alone)
     app.walker.pos = p;
-    app.walker.heading = w.angleDegrees * 3.14159265f / 180.0f; // FieldPCCtrl::reset: DegToRad
+    if (moved) app.walker.heading = w.angleDegrees * 3.14159265f / 180.0f; // FieldPCCtrl::reset: DegToRad
     app.walker.gait = cr::Gait::Stand;
     app.lastKick = triggerAt(app, p); // don't fire a box we arrive in
     app.lastWarp = "warp: event " + std::to_string(fromEvent) + " map " + std::to_string(fromMap) + " -> " +
@@ -2047,6 +2062,10 @@ const cr::FieldNpc* interactTarget(const App& app) {
     for (const cr::FieldNpc& n : app.npcs) {
         if (!(n.kind & 8) || !npcActive(app, n)) continue;
         if (n.pos[1] >= 900.0f || (n.id >= 400 && n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) continue; // (story actors waiting)
+        if (n.treasure & 3) { // FollowWindow::set: an opened box (its lid, id + 1, hidden) gets no badge and no examine
+            cr::NpcRow lid;
+            if (app.events.npcRow(n.id + 1, lid) && lid.flagHide >= 0 && app.game.flag(lid.flagHide)) continue;
+        }
         const float k = n.model <= 1 ? 1.0f : 0.0f;
         const float cx = n.pos[0] + k * n.offset[0] + n.offset[0], cz = n.pos[2] + k * n.offset[2] + n.offset[2];
         const float hx = n.box[0] / 2 + app.walker.radius + 1.5f, hz = n.box[2] / 2 + app.walker.radius + 1.5f;
@@ -3005,7 +3024,11 @@ struct ViewerHost : cr::EventHost {
         if (auto a = app.actorSlots.find(id); a != app.actorSlots.end())
             if (auto it = a->second.find(slot); it != a->second.end()) action = it->second;
         for (auto* d : npc(id)) {
-            if (d->action != action) { d->action = action; d->time = 0; } // the same action keeps running
+            if (d->action != action) { // the same action keeps running; a new one blends in over 2 frames (mdl_set_act_motion_loop)
+                const LoadedModel& lm = app.npcModels[d->model];
+                d->action = action, d->time = 0;
+                d->blend.restart(action, 0, 2, lm.actions);
+            }
             d->once = loopFrom < 0;
             d->loopFrom = loopFrom;
             d->loopTo = loopTo;
@@ -3125,10 +3148,11 @@ struct ViewerHost : cr::EventHost {
         buildNpcDraws(app);
         buildWalkCollision(app);
     }
-    void screenFade(float grey, float from, float to, int frames) override {
+    void screenFade(float grey, float from, float to, int frames, bool back) override {
+        if (back) { app.fadeBackGrey = grey; app.fadeBackFrom = from; app.fadeBackTo = to; app.fadeBackFrames = std::max(frames, 1); app.fadeBackT = 0; return; }
         app.fadeGrey = grey; app.fadeFrom = from; app.fadeTo = to; app.fadeFrames = std::max(frames, 1); app.fadeT = 0;
     }
-    bool screenFading() override { return app.fadeT < app.fadeFrames; }
+    bool screenFading(bool back) override { return back ? app.fadeBackT < app.fadeBackFrames : app.fadeT < app.fadeFrames; }
     void warp(const cr::WarpRequest& w) override { performWarp(app, w, app.runner.eventNo()); }
     void playSound(uint32_t id) override {
         const bool speech = (id & 0x400000) || app.sound.isVoice(int(id & 0xfff));
@@ -3202,6 +3226,14 @@ struct ViewerHost : cr::EventHost {
         else if (!on) app.nowLoading.on = false;
     }
     static constexpr float kDeg = 3.14159265f / 180.0f;
+    // _NpcSetDirConv (dir 2000, "face the way it moves"): turns = (1 - dz / len) / 4, and 1 - that
+    // when dx < 0 - not atan2: a 45-degree walk faces 26.4 degrees
+    static float travelYaw(float dx, float dz) {
+        const float len = std::sqrt(dx * dx + dz * dz);
+        float t = (1.0f - dz / len) * 0.25f;
+        if (dx < 0) t = 1.0f - t;
+        return t * 2.0f * 3.14159265f;
+    }
     void placeNpc(int id, const float* v, float yawDeg, Facing facing) override {
         cr::Vec3 old;
         if (!actorPos(app, id, old)) return;
@@ -3209,7 +3241,7 @@ struct ViewerHost : cr::EventHost {
         float yaw = yawDeg * kDeg;
         if (facing == Facing::Travel) {
             if (std::fabs(p.x - old.x) + std::fabs(p.z - old.z) < 1e-4f) facing = Facing::Keep;
-            else yaw = std::atan2(p.x - old.x, p.z - old.z);
+            else yaw = travelYaw(p.x - old.x, p.z - old.z);
         }
         setActor(app, id, p, facing == Facing::Keep ? nullptr : &yaw, false);
     }
@@ -3222,7 +3254,7 @@ struct ViewerHost : cr::EventHost {
         m.frames = std::max(frames, 1);
         float yawNow = id == 0 ? app.walker.heading : findNpc(app, id)->angle;
         if (facing == Facing::Travel && std::fabs(m.to.x - m.from.x) + std::fabs(m.to.z - m.from.z) > 1e-4f) {
-            const float yaw = std::atan2(m.to.x - m.from.x, m.to.z - m.from.z);
+            const float yaw = travelYaw(m.to.x - m.from.x, m.to.z - m.from.z);
             setActor(app, id, m.from, &yaw, true);
         } else if (facing == Facing::Snap) { // (FrmAdjc2 mode 0: the record's angles set as it starts)
             const float yaw = yawDeg * kDeg;
@@ -3318,6 +3350,20 @@ struct ViewerHost : cr::EventHost {
             p.frames = std::max(1, std::abs(n)), p.t = 0;
         }
         if (p.dying && p.t >= p.frames && p.aT >= p.aFrames) { app.renderer.destroy(p.tex); p = App::Portrait(); } // nothing to wait for
+    }
+    int npcMode(int id, int word, int bit, int op) override { // Uty_Mode
+        int r = 0;
+        for (cr::FieldNpc& n : app.npcs) {
+            if (n.id != id) continue;
+            uint16_t* w = word == 0 ? &n.kind : word == 2 ? &n.treasure : word == 3 ? &n.puzzle : nullptr;
+            if (!w) continue;
+            const uint16_t m = uint16_t(1u << (bit & 15));
+            if (op == 1) *w |= m;
+            else if (op == 2) *w &= uint16_t(~m);
+            else r = (*w & m) ? 1 : 0;
+        }
+        if (op != 0) buildNpcDraws(app);
+        return r;
     }
     void loadParty(int pair, bool clearData) override { // Uty_LoadPrty: prty_init_new(pair - 1, mode)
         if (pair >= 1 && pair <= 4) newPairParty(app, pair, clearData);
@@ -5121,8 +5167,10 @@ void saveScreenClick(App& app, float px, float py) {
 namespace shopui {
 constexpr int kMainWords[3] = {26, 27, 28};          // Talk, Buy, Sell
 constexpr int kMainIcons[3] = {20, 22, 23};          // kanIconNoTbl - 1
-constexpr int kCategoryWords[4] = {8, 29, 30, 31};   // Items, Weapons, Armor, Jewel
-constexpr int kCategoryIcons[4] = {8, 24, 25, 26};
+constexpr int kCategoryWords[5] = {8, 29, 30, 31, 35}; // Items, Weapons, Armor, Jewel; scenario 1's fifth Buy plate (_kgnCommandNameTbl)
+constexpr int kCategoryIcons[5] = {8, 24, 25, 26, 8};
+// __CategoryComDraw: five plates from y 0x30 when buying in scenario 1 (its OMU items), else four from 0x60
+inline int categories(const App& app) { return !app.shop.selling && app.game.scenario != 0 ? 5 : 4; }
 constexpr float kRowX = 192, kRowY = 92, kRowH = 48;
 constexpr int kRows = 4;                              // rows shown
 constexpr float kBackX = 192, kBackY = 288;
@@ -5151,13 +5199,16 @@ int shopUnitPrice(const App& app, int item) {
     // 173 Sexy Pose on either member of the pair (MuCom_IsSkillEquip(0 / 1): the records Uty_SetPrtyNo named): 10% off
     const auto& pair = app.game.pairs[size_t(std::clamp(app.game.scenario, 0, cr::kScenarios - 1))];
     const bool pose = cr::hasSkill(app.game, pair[0], 173) || cr::hasSkill(app.game, pair[1], 173);
-    return pose ? cr::buyPrice(*p) * 9 / 10 : cr::buyPrice(*p);
+    return pose ? cr::buyPrice(*p) - cr::buyPrice(*p) / 10 : cr::buyPrice(*p); // (ShopPrc: price - price / 10)
 }
 
 int shopMaxCount(const App& app, int item) {
     if (app.shop.selling) return std::clamp(ownedCount(app, item) - cr::wornCount(app.game, item), 0, cr::kMaxItemCount);
     const int n = cr::maxPurchase(shopUnitPrice(app, item), app.game.oz, ownedCount(app, item));
-    // ShopPrc: the genes' and skills' stock (81..198) and the OMU items (521..540) are bought one at a time
+    // ShopPrc: a gene, skill or OMU item (kinds 4 / 5 / 11) already owned is greyed and refused; the
+    // genes' and skills' stock (81..198) and the OMU items (521..540) are bought one at a time
+    const cr::ItemParam* p = app.itemTable.item(item);
+    if (p && (p->kind == 4 || p->kind == 5 || p->kind == 11) && ownedCount(app, item) > 0) return 0;
     return (item >= 81 && item <= 198) || (item >= 521 && item <= 540) ? std::min(n, 1) : n;
 }
 
@@ -5470,8 +5521,8 @@ void drawShop(App& app) {
         m.textCentred(s.selling ? "Sell" : "Buy", 12, 47, false, 1, 15); // (FontDisp's 12, 40: the box's top)
         m.picture(15, 0, 56, 1);
         if (list || asking) {
-            static const char* const kCategory[4] = {"Items", "Weapons", "Armor", "Jewel"};
-            m.textCentred(std::string(">") + kCategory[std::clamp(s.category, 0, 3)], 40, 65, false, 1, 15);
+            static const char* const kCategory[5] = {"Items", "Weapons", "Armor", "Jewel", "Omega"};
+            m.textCentred(std::string(">") + kCategory[std::clamp(s.category, 0, 4)], 40, 65, false, 1, 15);
             m.picture(16, 24, 72, 1);
         }
     }
@@ -5497,8 +5548,8 @@ void drawShop(App& app) {
         for (int i = 0; i < 3; ++i)
             m.plate(328 + 240 * slide, 144 + 48.0f * float(i), kMainIcons[i], kMainWords[i], s.cursor == i, a, false);
     if (s.phase == App::Shop::Category)
-        for (int i = 0; i < 4; ++i)
-            m.plate(328 + 240 * slide, 96 + 48.0f * float(i), kCategoryIcons[i], kCategoryWords[i], s.category == i, a, false);
+        for (int i = 0; i < categories(app); ++i)
+            m.plate(328 + 240 * slide, (categories(app) == 5 ? 48 : 96) + 48.0f * float(i), kCategoryIcons[i], kCategoryWords[i], s.category == i, a, false);
     if (list) {
         if (s.list.empty())
             m.text(s.selling ? "Nothing to sell." : "Nothing for sale.", kRowX + 56, kRowY + 16, false, a, 15);
@@ -5577,7 +5628,7 @@ void shopKey(App& app, SDL_Keycode key) {
         else if (back) shopBack(app);
         break;
     case App::Shop::Category:
-        if (up || down) { s.category = (s.category + (up ? 3 : 1)) % 4; menuSound(app, se::kCursor); }
+        if (up || down) { s.category = (s.category + (up ? shopui::categories(app) - 1 : 1)) % shopui::categories(app); menuSound(app, se::kCursor); }
         else if (enter) shopChooseCategory(app, s.category);
         else if (back) shopBack(app);
         break;
@@ -8193,16 +8244,13 @@ void newPairParty(App& app, int pair, bool clearData) {
     for (int k = 0; k < 3; ++k) {
         const size_t c = size_t(4 + 3 * p + k);
         cr::PartyMember m = fresh[c];
-        if (fromClear && clearData) {
+        if (fromClear && clearData) { // mode 3 copies the six bonus fields only: the starting gear and plate are worn again
             const cr::PartyMember& old = g.party[c];
             std::copy(std::begin(old.seeds), std::end(old.seeds), m.seeds);
             std::copy(std::begin(old.boosts), std::end(old.boosts), m.boosts);
-            std::copy(std::begin(old.equip), std::end(old.equip), m.equip);
-            std::copy(std::begin(old.genes), std::end(old.genes), m.genes);
-        } else {
-            cr::addScenarioItem(g, app.itemTable, p, m.genes[0], 1);
-            for (int e = 0; e < 2; ++e) cr::addScenarioItem(g, app.itemTable, p, cr::startItem(int(c), e), 1);
         }
+        cr::addScenarioItem(g, app.itemTable, p, m.genes[0], 1); // (add_item2, every mode)
+        for (int e = 0; e < 2; ++e) cr::addScenarioItem(g, app.itemTable, p, cr::startItem(int(c), e), 1);
         m.hp = m.mp = -1;
         g.party[c] = m;
     }
@@ -8224,13 +8272,27 @@ void newPairParty(App& app, int pair, bool clearData) {
         for (int f = 3000; f < 3016; ++f) g.setFlag(f, false);
         for (int f = 3300; f < 3380; ++f) g.setFlag(f, false);
     }
-    if (fromClear && clearData)
+    if (fromClear && clearData) {
+        // mode 3 walks the scenario's own bag for kinds 3 and 9 - only kind 3 (61..80) lives there,
+        // the manual's pages (kind 9) are in the shared bag and stay; scenario 1 also loses its
+        // collection (551..631), the OMU items (521..541), 219, 309, 385..387, 394 and vars 0x28 / 0x29
         for (auto it = g.items.begin(); it != g.items.end();) {
             const cr::ItemParam* ip = app.itemTable.item(it->first);
-            if (ip && (ip->kind == 3 || ip->kind == 9)) it = g.items.erase(it);
+            const int n = it->first;
+            const bool gone = (ip && ip->kind == 3) ||
+                              (p == 1 && ((n >= 551 && n <= 631) || (n >= 521 && n <= 541) || n == 219 || n == 309 ||
+                                          (n >= 385 && n <= 387) || n == 394));
+            if (gone) it = g.items.erase(it);
             else ++it;
         }
-    if (!fromClear) g.walkExp = {}, g.noEncounters = {};
+        if (p == 1) g.vars[0x28] = 0, g.vars[0x29] = 0;
+    } else if (fromClear) { // mode 2 over clear data: the scenario's bag is emptied (the Oz and the shared genes / skills stay)
+        for (auto it = g.items.begin(); it != g.items.end();)
+            if (!cr::sharedItem(app.itemTable, it->first)) it = g.items.erase(it);
+            else ++it;
+    }
+    if (!fromClear) g.walkExp = {};
+    if (size_t(p) < g.noEncounters.size()) g.noEncounters[size_t(p)] = false; // (both modes: the scenario's unencountflg)
     app.game = std::move(g);
     app.playerChar = app.game.leaders[size_t(p)];
 }
@@ -9318,6 +9380,11 @@ float screenFadeAlpha(const App& app) {
     const float t = std::min(1.0f, float(app.fadeT) / float(app.fadeFrames));
     return app.fadeFrom + (app.fadeTo - app.fadeFrom) * t;
 }
+float screenFadeBackAlpha(const App& app) { // op 58's quad (PutMask's second)
+    if (app.fadeBackFrames <= 0) return 0;
+    const float t = std::min(1.0f, float(app.fadeBackT) / float(app.fadeBackFrames));
+    return app.fadeBackFrom + (app.fadeBackTo - app.fadeBackFrom) * t;
+}
 
 // One 20 Hz frame of the running script and of the things it set going.
 // Voiced builds: a page's clips start when the page is shown (PrcMsg reaching code 0x1e), one
@@ -9325,6 +9392,10 @@ float screenFadeAlpha(const App& app) {
 void updateVoices(App& app) {
     if (app.dialogue.empty()) {
         app.voiceQueue.clear(); // a closed/replaced scene cannot restart its remaining clips
+        if (app.voicedPage >= 0 && app.sound.hasVoices()) { // PrcMsg: the closing tap cuts the clip (unless 0x1e 0xffff kept it)
+            if (!app.voiceKeep) app.sound.stopLine();
+            app.voiceKeep = false, app.voicedPage = -1;
+        }
         return;
     }
     if (!app.sound.hasVoices()) return;
@@ -9333,12 +9404,18 @@ void updateVoices(App& app) {
         app.voicedSerial = app.dialogueSerial;
         app.voicedPage = page;
         app.voiceQueue.clear();
-        app.sound.stopLine(); // an unvoiced page replaces the previous page too
+        if (!app.voiceKeep) app.sound.stopLine(); // an unvoiced page replaces the previous page too (a kept clip goes on)
+        app.voiceKeep = false;
         if (page < int(app.dialogueVoices.size()) && !app.dialogueVoices[page].empty()) {
-            const auto& clips = app.dialogueVoices[page];
-            app.sound.playLine(clips[0]);
-            ++app.voicesPlayed;
-            app.voiceQueue.assign(clips.begin() + 1, clips.end());
+            std::vector<int> clips;
+            for (int c : app.dialogueVoices[page])
+                if (c < 0) app.voiceKeep = true; // the page's 0x1e 0xffff
+                else clips.push_back(c);
+            if (!clips.empty()) {
+                app.sound.playLine(clips[0]);
+                ++app.voicesPlayed;
+                app.voiceQueue.assign(clips.begin() + 1, clips.end());
+            }
         }
     }
     if (!app.voiceQueue.empty() && !app.sound.linePlaying()) {
@@ -10364,6 +10441,7 @@ void stepEvents(App& app) {
     stepTutoTex(app);
     stepMsgWin(app);
     if (app.fadeT < app.fadeFrames) ++app.fadeT;
+    if (app.fadeBackT < app.fadeBackFrames) ++app.fadeBackT;
     for (auto& d : app.npcDraws)
         if (d.fadeLeft > 0) {
             --d.fadeLeft;
@@ -10455,6 +10533,23 @@ void stepEvents(App& app) {
     // Finished: report, and refresh what the script's flags changed (an opened box loses its lid)
     app.messageSkip = false; // (__EvtAbort clears G+0x2d; a Return leaves it, but the scenes turn it back on before ending)
     trackerSceneEnd(app);
+    { // _chk_tuto_kick (__EvtReturn / __EvtAbort): the first of these not yet seen gives its item and
+      // runs EvrStart 3 with var 0 naming the tutorial - 170 held: flag 69, item 469, 51; 191: 70,
+      // 470, 52; flag 1602: 71, 471, 53
+        int kick = 0;
+        auto has = [&](int item) { auto it = app.game.items.find(item); return it != app.game.items.end() && it->second > 0; };
+        if (!app.game.flag(69) && has(170)) app.game.setFlag(69, true), kick = 469;
+        else if (!app.game.flag(70) && has(191)) app.game.setFlag(70, true), kick = 470;
+        else if (!app.game.flag(71) && app.game.flag(1602)) app.game.setFlag(71, true), kick = 471;
+        if (kick) {
+            if (app.game.items[kick] < 99) ++app.game.items[kick];
+            app.game.vars[0] = 51 + (kick - 469);
+            if (const uint32_t at = app.events.returnEntry(3); at && app.runner.startAt(app.events, at, 3, app.game, app.area, app.mapNumber)) {
+                app.runnerWhat = "tutorial kick " + std::to_string(kick);
+                return;
+            }
+        }
+    }
     const cr::EventResult& r = app.runner.result();
     if (!r.error.empty())
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "event (%s, area %d map %d): %s", app.runnerWhat.c_str(), app.area,
@@ -11972,7 +12067,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     b.voiceRng = uint32_t(SDL_GetTicks()) | 1u;
     for (int& v : b.voiceVariant) { b.voiceRng = b.voiceRng * 1103515245u + 12345u; v = int((b.voiceRng >> 16) % 3); } // reset_variants
     for (bool& c : b.commandSaid) c = false;
-    b.voiceRound = -1;
+    b.voiceRound = -1, b.voiceLeader = 0;
     b.flash = {};
     b.stageAction = 0;
     b.breakPop = 0;
@@ -12930,16 +13025,19 @@ void pickSpeakers(App& app) {
     if (!foes.empty()) b.voiceSpeaks[size_t(foes[size_t(rnd(app, int(foes.size())))])] = true;
 }
 
-bool mayReact(const App& app, int k) { // a side acting as a pair reacts through its speaker only
+bool mayReact(const App& app, int k) { // a side acting as a pair, or hit by an all-target action (scope 3 / 5), reacts through its speaker only
     const App::Battle& b = app.battle;
     const bool pairSide = k < 2 ? b.rules.pair : b.rules.enemyPair;
-    return !pairSide || b.voiceSpeaks[size_t(k)];
+    const cr::BattleActionDef* a = app.battleActions.get(b.turn.action);
+    const bool allOf = a && (a->scope == 3 || a->scope == 5);
+    return (!pairSide && !allOf) || b.voiceSpeaks[size_t(k)];
 }
 
 // _btlvoice_listed_battle: these battles' monsters coming back say 0x1f..0x21 instead
-bool listedBattle(const App& app) {
-    static const int kList[] = {260, 261, 262, 280, 281, 282, 300, 374, 302, 320, 321, 322};
-    return std::find(std::begin(kList), std::end(kList), app.battle.start.group) != std::end(kList);
+bool listedBattle(const App& app, int k) { // Omega: groups 669..672, a strong-growth monster
+    static const int kList[] = {669, 670, 671, 672};
+    const cr::Fighter& f = app.battle.rules.f[size_t(std::clamp(k, 0, 4))];
+    return f.def && f.def->strongGrowth && std::find(std::begin(kList), std::end(kList), app.battle.start.group) != std::end(kList);
 }
 
 // _btlvoice_hp_change (from btlcalc_chk_dead): fighter k's HP goes from `before` to `after`
@@ -12948,7 +13046,7 @@ void hpChange(App& app, int k, int before, int after) {
     const cr::Fighter& f = app.battle.rules.f[size_t(k)];
     if (after <= 0) play(app, k, 0x22, 0x23, 0x24); // down
     else if (before <= 0) {
-        if (k >= 2 && listedBattle(app)) play(app, k, 0x1f, 0x20, 0x21);
+        if (k >= 2 && listedBattle(app, k)) play(app, k, 0x1f, 0x20, 0x21);
         else play(app, k, 0x1c, 0x1d, 0x1e);
     } else if (before > f.hpMax / 4) play(app, k, 0x16, 0x17, 0x18); // hit
     else play(app, k, 0x19, 0x1a, 0x1b);                             // hit, low already
@@ -12965,6 +13063,12 @@ void healed(App& app, int k) { // _btlvoice_healed: to full, or not
 // guard, 4 a strong one fell
 void attack(App& app, const cr::BattleTurn& t) {
     if (!on(app) || speaker(app, t.actors[0]) < 0) return;
+    { // only when the action had no line of its own (its slot is -1); else the turn line was the voice
+        const cr::BattleActionDef* a = app.battleActions.get(t.action);
+        const int sp = speaker(app, t.actors[0]);
+        const bool own = (sp >= 0 && sp <= 2) || (sp >= 19 && sp <= 26) || t.actors[0] < 2;
+        if (a && a->voice[own ? 0 : 3] != -1) return;
+    }
     int how = 0;
     for (const cr::BattleHit& h : t.hits) {
         const cr::Fighter& f = app.battle.rules.f[size_t(std::clamp(h.target, 0, 4))];
@@ -13012,7 +13116,7 @@ void turn(App& app, int k, int action) {
     const cr::BattleActionDef* a = app.battleActions.get(action);
     const int sp = speaker(app, k);
     if (!a || sp < 0) return;
-    const bool own = sp < 8 || k < 2;
+    const bool own = (sp >= 0 && sp <= 2) || (sp >= 19 && sp <= 26) || k < 2; // (_btlvoice_turn's mask: speakers 0..2, 19..26)
     const int who = own ? chooseSpeaker(app, k) : (app.battle.rules.enemyPair && (k == 2 || k == 3) ? eitherOf(app, 2, 3) : k);
     const int* v = own ? a->voice : a->voice + 3;
     play(app, who, v[0], v[1], v[2]);
@@ -13023,22 +13127,23 @@ void turn(App& app, int k, int action) {
 void victory(App& app) {
     if (!on(app)) return;
     App::Battle& b = app.battle;
-    static const short kScripted[4][13][2] = {
-        {{260, 621}, {261, 622}, {340, 623}, {348, 624}, {344, 625}, {352, 626}, {356, 627}, {357, 627}, {358, 627}, {359, 627}, {368, 628}, {262, 629}, {-1, 0}},
-        {{280, 621}, {281, 622}, {341, 623}, {283, 624}, {349, 625}, {345, 626}, {353, 627}, {356, 628}, {357, 628}, {358, 628}, {359, 628}, {368, 629}, {282, 630}},
-        {{300, 621}, {374, 622}, {342, 623}, {346, 624}, {377, 625}, {354, 626}, {356, 627}, {357, 627}, {358, 627}, {359, 627}, {368, 628}, {302, 629}, {-1, 0}},
-        {{320, 621}, {321, 622}, {343, 623}, {351, 624}, {347, 625}, {355, 626}, {356, 627}, {357, 627}, {358, 627}, {359, 627}, {368, 628}, {322, 629}, {-1, 0}}};
-    const int route = std::clamp(app.playerChar / 2, 0, 3);
+    // Omega's one list (0xe2b90 in the voiced release): the story battles' lines 600..620
+    static const short kScripted[][2] = {{651, 600}, {652, 601}, {737, 602}, {656, 603}, {657, 604}, {658, 605}, {659, 606},
+                                         {660, 607}, {663, 608}, {666, 609}, {667, 610}, {664, 611}, {665, 611}, {676, 613},
+                                         {677, 614}, {669, 615}, {670, 616}, {671, 617}, {673, 618}, {672, 619}, {668, 612},
+                                         {674, 620}};
     int line = 0;
-    for (const auto& e : kScripted[route])
+    for (const auto& e : kScripted)
         if (e[0] == b.start.group) line = e[1];
-    const int who = chooseSpeaker(app, 99);
+    const int who = chooseSpeaker(app, b.voiceLeader); // (+0xaf2: the member who last headed the order)
     const int sp = speaker(app, who);
     if (sp < 0) return;
     if (!line) {
+        // "hurt": the speaker down or at a quarter of its HP or less - both members only as a pair
         bool hurt = false;
         for (int k = 0; k < 2; ++k)
-            if (b.rules.f[size_t(k)].present) hurt |= !living(app, k) || b.rules.f[size_t(k)].hp <= b.rules.f[size_t(k)].hpMax / 4;
+            if (b.rules.f[size_t(k)].present && (k == who || b.rules.pair))
+                hurt |= !living(app, k) || b.rules.f[size_t(k)].hp <= b.rules.f[size_t(k)].hpMax / 4;
         int& v = b.voiceVariant[size_t(who)];
         line = (hurt ? 503 : 500) + v;
         v = (v + 1) % 3;
@@ -13089,12 +13194,13 @@ int attackSlot(App& app, const cr::BattleTurn& t, int k, int cls, bool& inPlace)
 void startTurn(App& app) {
     App::Battle& b = app.battle;
     const cr::BattleTurn& t = b.turn;
-    if (b.voiceRound != b.rules.round) { // btlque_make_que: the round's order made
+    if (!t.repeat) { // btlque_make_que (once an action): the actor's action line, the sides' speakers picked afresh
         b.voiceRound = b.rules.round;
+        if (t.actors[0] >= 0 && t.actors[0] < 2) b.voiceLeader = t.actors[0];
         btlvoice::turn(app, t.actors[0], t.action);
         btlvoice::pickSpeakers(app);
     }
-    if (t.kind == cr::kCmdEscape && t.escaped) btlvoice::playSide(app, 0, 0x13, 0x14, 0x15); // btlact_escape_init
+    if (t.kind == cr::kCmdEscape && t.escaped) btlvoice::playSide(app, 99, 0x13, 0x14, 0x15); // btlact_escape_init (either member)
     else if (t.kind == cr::kCmdAttack) btlvoice::attack(app, t);                 // btlact_attack_init
     if (t.kind == cr::kCmdAttack) { // btlact_attack_init's __effgo: actions 0x12f / 0x129, 0x12e, each attacker's swing
         if (t.action == 0x12f) app.sound.play(0xb8);
@@ -13814,6 +13920,7 @@ void stepBattle(App& app) {
         return;
     }
     if (app.fadeT < app.fadeFrames) ++app.fadeT; // the screen's fade (stepEvents' while a talk runs)
+    if (app.fadeBackT < app.fadeBackFrames) ++app.fadeBackT;
     switch (b.phase) {
     case App::Battle::Intro: // the fade and the opening camera (btl_main 200 / 300): 30 frames, a boss's (formation 2) 60
         // with its camera 0x21b from the second; a strike's or ambush's announcement (sys texts 0x36 /
@@ -14985,6 +15092,8 @@ void drawFrame(App& app, bool present = true) {
     }
     if (app.mode == Mode::Maps) {
         if (app.fieldHidden && !app.booting) r.fillRect(0, 0, SW, H, 0, 0, 0, 1); // Screen's toggle: the field not drawn (drawBack / mdl_put skipped)
+        const float ab = screenFadeBackAlpha(app); // Screen's back channel first, then the front
+        if (ab > 0.001f) r.fillRect(0, 0, SW, H, app.fadeBackGrey, app.fadeBackGrey, app.fadeBackGrey, ab);
         const float a = screenFadeAlpha(app); // Screen: fades to / from a grey level
         if (a > 0.001f) r.fillRect(0, 0, SW, H, app.fadeGrey, app.fadeGrey, app.fadeGrey, a);
         for (app.menuMask.clock += dt; app.menuMask.clock >= 1.0f / kFramesPerSecond; app.menuMask.clock -= 1.0f / kFramesPerSecond)
@@ -18215,7 +18324,7 @@ int runSelfTest(App& app) {
         app.game = cr::GameState();
         host.loadParty(1, true);
         const cr::PartyMember& e0 = app.game.party[4];
-        int carry = (e0.seeds[2] == 7) + (e0.genes[2] == 485) + (e0.equip[cr::kJewel] == 426) + (app.game.party[0].seeds[2] == 7) +
+        int carry = (e0.seeds[2] == 7) + (e0.genes[2] == 0) + (e0.equip[cr::kJewel] == 0) + (app.game.party[0].seeds[2] == 7) + // (mode 3: the starting plate / gear worn again)
                     (app.game.items[7] == 3) + !app.game.items.count(storyItem) + (app.game.oz == 777) + !app.game.flag(1100) +
                     app.game.flag(2000) + !app.game.flag(3000) + app.game.flag(3020) + !app.game.flag(3310) +
                     (app.game.pairs[0] == std::array<int, 2>{0, 1});

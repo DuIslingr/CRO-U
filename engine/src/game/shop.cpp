@@ -107,6 +107,10 @@ std::vector<int> shopStock(const GameState& gs, const ItemTable& items, int char
         for (int k = 0; k < level - 1; ++k) out.push_back(369 + k);
         if (extra) out.push_back(kExtraJewel);
         break;
+    case 4: // scenario 1's fifth Buy plate: the OMU items, one a purchase (no Equip prompt)
+        if (gs.scenario != 0)
+            for (int n = 521; n <= 540; ++n) out.push_back(n);
+        break;
     default: break;
     }
     out.erase(std::remove_if(out.begin(), out.end(), [&](int n) { return !items.item(n); }), out.end());
