@@ -346,7 +346,8 @@ c101/c102/c104/m207a, 2026-10-12).
       share a map, `--set-flags a,b` sets story flags first, `--win-battles` wins the battles it
       starts, `CR_CAPTURE_TRACE=1` prints the script's state as it changes, `CR_CAPTURE_UNTIL_MSG=id[:n]`
       ends a `--frames` run n frames (60) after message id comes up, with no taps meanwhile - with
-      `CR_CAPTURE_EVENTS=frame:script,...` touching the room's triggers it reaches a scene's page)
+      `CR_CAPTURE_EVENTS=frame:script,...` touching the room's triggers it reaches a scene's page;
+      `CR_CAPTURE_ITEM=item[:n]` shows Uty_GetItem's band for that item n frames in (2: settled))
 - [x] New game: the opening plays as the original's script stages it (a 3D room filmed by the
       script camera: cuts and moves between shots, framed as `setCamera3D` does - the stage view
       doubled and centred, so the screen shows its middle), then the hall's characters can be talked

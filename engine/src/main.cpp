@@ -8492,7 +8492,10 @@ void drawItemWindow(App& app) {
     const float left = app.renderer.phoneLayout() ? 0.0f : -16.0f;
     m.quad(left - r.uiX() / 2, top, 512 - 2 * left + r.uiX(), 32, black, black);
     constexpr float kSize = 16;
-    const float w = m.textWidth(app.itemWindowText, kSize), tx = 240 - w / 2;
+    // (Android 1.1.6 (0x5da30): x 240 - ceil((width - ox) / 2 / scale) - its centre ox / 2 right of
+    // the screen's: Part 3 342.5 s and 783.0 s, "You got Key!" and "You got Billiken Clover!"
+    // centred on x 720 of the 1280 x 720 phone)
+    const float w = m.textWidth(app.itemWindowText, kSize), tx = 240 - w / 2 + androidEdgeX(app) / 2;
     if (app.itemWindowIcon >= 0)
         m.piece(tx - 34, top + 1, float(app.itemWindowIcon % 16) * 32, 248 + float(app.itemWindowIcon / 16) * 32, 32, 32, ta);
     m.text(app.itemWindowText, tx, top + 8, false, ta, kSize);
@@ -25713,6 +25716,20 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             app.tapPending = true;
             if (app.itemWindowOpen) app.game.setFlag(0, true);
         }
+    }
+    if (const char* it = SDL_getenv("CR_CAPTURE_ITEM")) { // "item[:frames]": Uty_GetItem's band, frames (3) in
+        int item = 0, frames = 3;
+        std::sscanf(it, "%d:%d", &item, &frames);
+        openItemWindow(app, item);
+        app.game.setFlag(0, false); // (_Uty_GetItem_Init: ClrFlag(0))
+        // (stepEvents' Uty_GetItem_Proc: no script runs here, which would close it) - n > 2: the tap's,
+        // a row and a fade step a frame
+        for (int f = 0; f < frames; ++f) {
+            if (app.itemWindowRow < 2) ++app.itemWindowRow;
+            else if (f >= 2) ++app.itemWindowRow, ++app.itemWindowFade;
+        }
+        std::printf("item window: %s, row %d, fade %d, \"%s\"\n", app.itemWindowOpen ? "open" : "closed", app.itemWindowRow,
+                    app.itemWindowFade, app.itemWindowText.c_str());
     }
     if (app.captureTalk >= 0) { // the opening to its end, then the hall's people until a portrait is up
         for (int f = 0; f < 20000 && (app.runner.running() || app.pendingEntry != App::Entry::None); ++f) {
