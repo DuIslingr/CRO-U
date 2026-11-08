@@ -13357,7 +13357,8 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
             // _CmdFont_waku outlines white text only: after 0x16 1 it is plain black, j001_d06 6818)
             outline = (style & 0x10) != 0 && app.msgColour != 1;
         } else if (style & 0x20) { // a black band across the bottom (tex2d y 252..352), the name on its edge
-            r.fillRect(left, 2.0f * 252 + 64, width, 768 - (2.0f * 252 + 64), 0, 0, 0, wa);
+            // (draw_vista; Android: x - ox .. 480 + ox, the phone's whole width)
+            r.fillRect(left - ex, 2.0f * 252 + 64, width + 2 * ex, 768 - (2.0f * 252 + 64), 0, 0, 0, wa);
             if (!speaker.empty() && textOn) { // PutMsg: drawfont_l at tex2d (16, 236), just above the band
                 drawFrontFade(app); // (the name: text, over the front fade)
                 const float nx = 2.0f * 16 + 32, ny = 2.0f * 236 + 64 - 11; // (the larger box's offset)
@@ -13367,13 +13368,15 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
                 app.nameHud.drawAt(r, {speaker}, nx - namePad, ny, kNameScale, 0, 0, 0.0f);
             }
         } else if (style & 8) { // a tutorial's band: dark, its edges soft (8 / 88 / 8 tex2d), the text further left
-            const float a = 0.75f * wa, y1 = wy + 16, y2 = wy + 192;
+            // (draw_abeblack: 0xc0 at the window's alpha; Android: x - ox .. 480 + ox, the phone's whole
+            // width - Part 3 352.0 s, Part 9 653.0 s)
+            const float a = 0.75f * wa, y1 = wy + 16, y2 = wy + 192, bl = left - ex, bw = width + 2 * ex;
             for (int k = 0; k < 8; ++k) { // the 2D path has no per-vertex colour: the edges in strips
                 const float t = (float(k) + 0.5f) / 8.0f;
-                r.fillRect(left, wy + 2.0f * float(k), width, 2.0f, 0, 0, 0, a * t);
-                r.fillRect(left, y2 + 2.0f * float(k), width, 2.0f, 0, 0, 0, a * (1 - t));
+                r.fillRect(bl, wy + 2.0f * float(k), bw, 2.0f, 0, 0, 0, a * t);
+                r.fillRect(bl, y2 + 2.0f * float(k), bw, 2.0f, 0, 0, 0, a * (1 - t));
             }
-            r.fillRect(left, y1, width, y2 - y1, 0, 0, 0, a);
+            r.fillRect(bl, y1, bw, y2 - y1, 0, 0, 0, a);
             // _PutMsg: x 8 for the languages _MuComFontSet doesn't take as CJK (3.1.0: English, French,
             // German, Spanish; 1.0.0: English), else 36
             if (multilingualData(app) ? !cjkLanguage(app.language) : app.language == 1) tx = 2.0f * 8 + 32;
@@ -25736,6 +25739,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
     }
     const bool traceRunner = SDL_getenv("CR_CAPTURE_TRACE") != nullptr; // the script's state each frame it changes
     std::string lastWhere;
+    int lastMsgShown = -1;
     // CR_CAPTURE_EVENTS="frame:script,...": from that frame on, once nothing runs, start the room's
     // script (as the player touching its trigger would) - to play on past the free walks
     std::vector<std::pair<int, int>> touches;
@@ -25749,13 +25753,15 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         }
     // CR_CAPTURE_UNTIL_MSG="id[:n]": stop the --frames run n frames (60 if not given) after message id
     // comes up, with no taps meanwhile
-    int untilMsg = -1, untilAfter = 60, untilLeft = -1;
-    if (const char* um = SDL_getenv("CR_CAPTURE_UNTIL_MSG")) std::sscanf(um, "%d:%d", &untilMsg, &untilAfter);
+    // ("id:n:p": p pages turned first, 45 frames apart)
+    int untilMsg = -1, untilAfter = 60, untilPages = 0, untilLeft = -1;
+    if (const char* um = SDL_getenv("CR_CAPTURE_UNTIL_MSG")) std::sscanf(um, "%d:%d:%d", &untilMsg, &untilAfter, &untilPages);
     for (int f = 0; f < app.captureFrames; ++f) { // --frames: play the scripts, reading each page for 45 frames
         if (untilMsg >= 0 && untilLeft < 0 && app.lastMessageId == untilMsg && !app.dialogue.empty()) {
-            untilLeft = untilAfter;
+            untilLeft = untilAfter + 45 * untilPages;
             std::printf("frame %d: message %d up\n", f, untilMsg);
         }
+        if (untilLeft > untilAfter && (untilLeft - untilAfter) % 45 == 0 && !app.dialogue.empty()) advanceDialogue(app);
         if (untilLeft >= 0 && untilLeft-- == 0) break;
         if (!touches.empty() && f >= touches.front().first && !app.runner.running() && app.dialogue.empty()) {
             const int sc = touches.front().second;
@@ -25795,6 +25801,8 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                                       " gate " + std::to_string(app.runner.gate());
             if (where != lastWhere) std::printf("frame %d: %s\n", f, where.c_str());
             lastWhere = where;
+            if (app.lastMessageId != lastMsgShown) std::printf("frame %d: message %d\n", f, app.lastMessageId);
+            lastMsgShown = app.lastMessageId;
         }
         animateNpcs(app, 1.0f / kFramesPerSecond);
         followPlayerScroll(app, 1.0f); // (drawFrame's, every frame the game shows: a capture draws only its last)
