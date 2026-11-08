@@ -99,6 +99,9 @@ public:
     void setAdditive(bool on); // 2D quads added onto what's there (src alpha, one) until switched off
     float aspect() const { return screenW_ / kLogicalH; }
     float screenW() const { return screenW_; }         // logical width of the whole screen
+    // The logical screen for a window of this size without drawing a frame (the captures' --frames runs
+    // step the game before their first frame: the field's scroll clamps read screenW)
+    void fitScreen(int windowW, int windowH);
     float uiX() const { return (screenW_ - kLogicalW) * 0.5f; } // where the 1024-wide layout starts
     void setOrigin(float x) { originX_ = x; }          // added to every 2D quad's x
     float origin() const { return originX_; }

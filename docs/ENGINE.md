@@ -344,7 +344,7 @@ c101/c102/c104/m207a, 2026-10-12).
       `--capture … --talk-portrait n` captures the n-th hall conversation moment with a portrait
       up, `--event n` starts the room's script n (`--area n` picks the event file where routes
       share a map, `--set-flags a,b` sets story flags first, `--win-battles` wins the battles it
-      starts, `CR_CAPTURE_TRACE=1` prints the script's state as it changes, `CR_CAPTURE_UNTIL_MSG=id[:n[:p]]`
+      starts, `CR_CAPTURE_TRACE=1` prints the script's state as it changes, `CR_CAPTURE_SIZE=WxH` sets the window's size first (e.g. 1280x720 for a phone's 16:9; the logical screen is fitted before any step), `CR_CAPTURE_UNTIL_MSG=id[:n[:p]]`
       ends a `--frames` run n frames (60) after message id comes up (p of its pages turned first, 45
       frames apart), with no other taps meanwhile - with
       `CR_CAPTURE_EVENTS=frame:script,...` touching the room's triggers it reaches a scene's page;
