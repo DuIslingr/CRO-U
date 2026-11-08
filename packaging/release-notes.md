@@ -108,14 +108,20 @@ original.
 
 ### Thanks to metastigma
 
-Thanks to [metastigma](https://github.com/metastigma) for reports and testing that led straight to
-fixes in this release:
+Thanks to [metastigma](https://github.com/metastigma) for their reports, fixes and testing:
 
 - [issue #1](https://github.com/DuIslingr/CRO-U/issues/1), the broken cutscenes report, which the
   cutscene fixes above answer;
 - their fork's work exposed opened treasure boxes growing the save, the controller-driven field bar
   on the Vita layout, the right-stick touch in puzzle rooms, and the X key not skipping a battle's
-  talk.
+  talk;
+- contributed fixes (first shipped in v0.4.5): attackers step in only over their model's own
+  movement window ([9f4a0ed](https://github.com/DuIslingr/CRO-U/commit/9f4a0ed)); the menus update
+  when HD Textures is turned on in settings.ini ([014d019](https://github.com/DuIslingr/CRO-U/commit/014d019));
+  the player stands still as a scene starts and an item window no longer answers the question before
+  it ([eb5da9e](https://github.com/DuIslingr/CRO-U/commit/eb5da9e)); and, found in their fork, the
+  opening battle ends as the story intends instead of in a game over
+  ([825dc4e](https://github.com/DuIslingr/CRO-U/commit/825dc4e)).
 
 ## Downloads
 
