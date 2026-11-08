@@ -16,8 +16,8 @@ namespace {
 constexpr int kGlyph = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE; // 8 px
 constexpr int kLineGap = 2;
 constexpr int kPad = 4;
-// TrueType sizes per unit of `scale`: CJK needs more room than the 8x8 cell
-constexpr float kEm = 8.5f;
+// TrueType line step per unit of `scale` (the glyphs' size: Hud::setEm, 8.5 by default): CJK
+// needs more room than the 8x8 cell
 constexpr float kFontLine = 12.0f;
 
 // Rasterises lines (white on transparent) with the software renderer.
@@ -66,10 +66,10 @@ bool Hud::update(Renderer& r, const std::vector<std::string>& lines, float scale
     const void* fontKey = ttf ? static_cast<const void*>(font_) : nullptr;
     const int generation = ttf ? font_->generation() : -1;
     if (tex_.id && lines == cached_ && scale == cachedScale_ && density == cachedDensity_ && fontKey == cachedFont_ &&
-        generation == cachedGeneration_)
+        generation == cachedGeneration_ && em_ == cachedEm_)
         return true;
     Image img;
-    const bool ok = ttf ? font_->rasterise(lines, kEm * scale * density, kFontLine * scale * density,
+    const bool ok = ttf ? font_->rasterise(lines, em_ * scale * density, kFontLine * scale * density,
                                            int(std::lround(kPad * scale * density)), img)
                         : rasterise(lines, img);
     if (!ok) return false;
@@ -77,6 +77,7 @@ bool Hud::update(Renderer& r, const std::vector<std::string>& lines, float scale
     tex_ = r.upload(img);
     cached_ = lines;
     cachedScale_ = scale;
+    cachedEm_ = em_;
     cachedDensity_ = density;
     cachedFont_ = fontKey;
     cachedGeneration_ = generation;

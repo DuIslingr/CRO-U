@@ -118,7 +118,7 @@ MenuPainter::Cached& MenuPainter::rasterise(const std::string& s, float size) {
 
 void MenuPainter::text(const std::string& s, float x, float y, bool dark, float alpha, float size) {
     if (!r_ || s.empty() || alpha <= 0.001f) return;
-    Cached& c = rasterise(s, size * K());
+    Cached& c = rasterise(s, menuSize(size) * K());
     if (!c.tex.id) return;
     const float k = dark ? 0.0f : 1.0f;
     r_->drawQuad(c.tex, X(x) * kScale, Y(y) * kScale, c.w, c.h, k, k, k, alpha);
@@ -126,20 +126,20 @@ void MenuPainter::text(const std::string& s, float x, float y, bool dark, float 
 
 void MenuPainter::textTint(const std::string& s, float x, float y, float r, float g, float b, float alpha, float size) {
     if (!r_ || s.empty() || alpha <= 0.001f) return;
-    Cached& c = rasterise(s, size * K());
+    Cached& c = rasterise(s, menuSize(size) * K());
     if (!c.tex.id) return;
     r_->drawQuad(c.tex, X(x) * kScale, Y(y) * kScale, c.w, c.h, r, g, b, alpha);
 }
 
 void MenuPainter::textCentred(const std::string& s, float x, float y, bool dark, float alpha, float size) {
     if (!r_ || s.empty()) return;
-    const Cached& c = rasterise(s, size * K());
+    const Cached& c = rasterise(s, menuSize(size) * K());
     text(s, x, y - c.h / kScale / K() / 2, dark, alpha, size);
 }
 
 float MenuPainter::textWidth(const std::string& s, float size) {
     if (!r_ || s.empty()) return 0;
-    return rasterise(s, size * K()).w / kScale / K();
+    return rasterise(s, menuSize(size) * K()).w / kScale / K();
 }
 
 void MenuPainter::rowBar(float x, float y, const std::string& label, float alpha, bool highlight) {

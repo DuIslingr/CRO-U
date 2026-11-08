@@ -29,6 +29,14 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   hit where they stand now, from their own height up (a box high above lets the leader pass under),
   and j001_p01's floor plates lift the leader onto them. The encounter count uses the distance the
   leader actually moved after the pushes.
+- **Messages paged and typed as 3.1.0's:** a wait for a tap no longer clears the window - lines
+  stay up when the text goes on below them, and text that goes on along the same line comes out at
+  once; a tap brings the rest out up to the next pause or line break instead of the whole page, and
+  pauses last the original's frames. 75 voiced lines per language (3.1.0 data) got their voice clip
+  back instead of a stray character, and two their name plate; lines the game marks unskippable
+  can't be hurried. 3.1.0's font sizes (16 pt text, 14 pt names, 13 pt menus in English, French,
+  German and Spanish), the tutorial band's left margin for every Latin language, plain black text
+  without an outline where a message says so, and Korean "∼" drawn instead of "?".
 - **FSR 3.1.6:** the built-in FSR is updated from 3.1.4 to AMD's FSR SDK 2.4 passes.
 - **FSR 4 (Linux and Windows, AMD GPUs):** a new Upscaler choice. AMD ships FSR 4 for Vulkan only as
   its own Windows DLLs, so they aren't included: put AMD's two SDK DLLs, the driver's

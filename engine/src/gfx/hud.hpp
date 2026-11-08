@@ -24,6 +24,9 @@ public:
     // Text colour (the rasterised glyphs are white): e.g. dark ink on the parchment window
     void setTint(float r, float g, float b) { tint_[0] = r, tint_[1] = g, tint_[2] = b; }
     void tint(float* out) const { out[0] = tint_[0], out[1] = tint_[1], out[2] = tint_[2]; }
+    // TrueType glyph size per unit of `scale` (8.5 unless set: a font size other than the line
+    // step's own - the line step stays 12 per unit)
+    void setEm(float em) { em_ = em; }
     void destroy(Renderer& r) { r.destroy(tex_); }
     // The width `lines` take at `scale` (rasterising them), and the distance between lines
     float measure(Renderer& r, const std::vector<std::string>& lines, float scale);
@@ -32,7 +35,8 @@ public:
 private:
     bool update(Renderer& r, const std::vector<std::string>& lines, float scale);
     std::vector<std::string> cached_;
-    float cachedScale_ = 0, cachedDensity_ = 0;
+    float cachedScale_ = 0, cachedDensity_ = 0, cachedEm_ = 0;
+    float em_ = 8.5f;
     float density_ = 1; // texture pixels per logical pixel
     const Font* font_ = nullptr;
     const void* cachedFont_ = nullptr;

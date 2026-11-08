@@ -51,6 +51,11 @@ public:
     // ... a parallelogram: the bottom edge (x, y + h)..(x + w, y + h), the top `lean` to the right
     // (tex2d_add4's four corners: the battle's HP / MP bars)
     void slant(float x, float y, float w, float h, float lean, const float* left, const float* right);
+    // The menu font's size, which `size` 14 stands for: _MuComFontFromIdRegist /
+    // _MuComFontWindowFromIdRegist / _MuComFontChangeTex - 14, or 3.1.0's 13 for English,
+    // French, German and Spanish
+    void setMenuFont(float size) { menuFont_ = size; }
+    float menuSize(float size) const { return size == 14 ? menuFont_ : size; }
     // Text with its top-left at (x, y), 14 units high; dark = black (style 1), else white
     void text(const std::string& s, float x, float y, bool dark, float alpha = 1, float size = 14);
     float textWidth(const std::string& s, float size = 14);
@@ -84,6 +89,7 @@ public:
 
 private:
     float sx_ = 0, sy_ = 0, k_ = 1, dx_ = 0, dy_ = 0, fx_ = 0, fy_ = 0, fk_ = 1;
+    float menuFont_ = 14;
     float X(float x) const { return fx_ + (sx_ + (x - sx_) * k_ + dx_) * fk_; }
     float Y(float y) const { return fy_ + (sy_ + (y - sy_) * k_ + dy_) * fk_; }
     float K() const { return k_ * fk_; }

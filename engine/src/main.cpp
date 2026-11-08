@@ -197,7 +197,7 @@ struct App {
     std::string lastWarp;                  // shown in the status line
     std::string lastEvent;                 // last examined object / items, for the status line
     cr::Hud dialogueHud, promptHud, itemHud;
-    std::array<cr::Hud, 8> lineHud;        // the message window's lines one by one (some centred)
+    std::array<cr::Hud, 16> lineHud;       // the message window's lines one by one (some centred; _PutMsg's 16 slots)
     cr::EventRunner runner;                // the script being played, a frame at a time
     cr::SoundSystem sound;                 // sndeff.bin through SDL audio
     cr::MusicPlayer music;                 // bgmNN.caf (AAC) through FAAD2 + SDL audio
@@ -583,10 +583,11 @@ struct App {
     std::vector<std::vector<std::string>> dialogue; // pages of the messages the last event showed
     size_t dialoguePage = 0;
     std::vector<cr::MessageInfo> dialogueInfo; // per page: the speaker's name plate and side
-    // PrcMsg's typing: the page's characters out so far (one a frame), a 0x1a pause or the closing
-    // wait's frames left, the next pause, and whether the page is closing by itself (0x14)
+    // PrcMsg's typing: the page's characters out so far (one a frame), a 0x1a pause's or the page
+    // turn's frames left, the next pause; dialogueInstant: the typing flag (G+0x8887b) down - a tap
+    // or the skip corner brought the rest out at once (still held by pauses, line breaks and voices)
     int dialogueTyped = 0, dialogueHold = 0, dialoguePause = 0;
-    bool dialogueClosing = false;
+    bool dialogueInstant = false;
     bool typeOn = true;                    // false: pages appear whole (tests, captures)
     int textLimit = 1 << 30;               // drawMessageLines: how many characters it draws
     std::vector<std::string> lastPage;     // the page just read: stays up while a choice asks about it
@@ -2341,12 +2342,19 @@ bool languageUsable(const App& app, int language) {
     return (language >= 1 && language <= 4) || app.font.loaded();
 }
 
+// 3.1.0's data: eight text sections (1.0.0 has Japanese and English only)
+bool multilingualData(const App& app) { return app.systemText.hasLanguage(2); }
+// _MuComFontSet (3.1.0 @0x3d058): the language is Japanese, Chinese or Korean
+bool cjkLanguage(int language) { return language == 0 || language >= 5; }
+
 // The font face for the language: the collection's regional Han forms (Noto Sans CJK JP / SC /
-// TC / KR); Latin text uses the Japanese face like the Japanese release's system font.
+// TC / KR); Latin text uses the Japanese face like the Japanese release's system font. The
+// menus' text (_MuComFont*Regist) is 14 pt, in 3.1.0 13 for the Latin languages.
 void applyLanguage(App& app) {
     if (!languageUsable(app, app.language)) app.language = 1;
     static const char* const kRegion[cr::kLanguages] = {"JP", "JP", "JP", "JP", "JP", "SC", "TC", "KR"};
     app.font.selectRegion(kRegion[app.language]);
+    app.menu.setMenuFont(multilingualData(app) && !cjkLanguage(app.language) ? 13.0f : 14.0f);
 }
 
 std::string itemName(const App& app, int item) {
@@ -2359,7 +2367,7 @@ std::string itemName(const App& app, int item) {
 // Turns the dialogue page (E / Enter); the last page read stays available for a following choice.
 void resetTyping(App& app) {
     app.dialogueTyped = app.dialogueHold = app.dialoguePause = 0;
-    app.dialogueClosing = false;
+    app.dialogueInstant = false;
 }
 
 // PrcWin a frame: __WinOpen / __WinOpen2 take the window's alpha 0 -> 255 over 4 frames (t 4..0),
@@ -2392,7 +2400,15 @@ void advanceDialogue(App& app, bool tapped = true) {
     if (tapped) app.game.setFlag(4075, true); // PrcMsg: a page turned (or the last one closed) - MsgUty_TexDispProc's cue
     resetTyping(app);
     if (++app.dialoguePage < app.dialogue.size()) {
-        app.dialogueHold = 2; // (PrcMsg: the 0x12's frame, then the 0x10's, then the next page's first character)
+        // A page keeping the lines before it (0x12 without 0x10) starts with them out, typing on
+        // (0x11) or out at once (anything else: _PrcMsg leaves the typing flag down)
+        const cr::MessageInfo* next = app.dialoguePage < app.dialogueInfo.size() ? &app.dialogueInfo[app.dialoguePage] : nullptr;
+        const int keep = next ? next->keep : 0;
+        app.dialogueTyped = keep;
+        app.dialogueInstant = next && next->instant;
+        // (PrcMsg: the 0x12's frame, then the 0x10's, then the next page's first character; a kept
+        // page's 0x11 is its first unit)
+        app.dialogueHold = keep > 0 ? 1 : 2;
         return;
     }
     app.lastPage = app.dialogue.back();
@@ -2408,6 +2424,18 @@ int pageChars(const std::vector<std::string>& page) {
     for (const std::string& l : page)
         for (unsigned char ch : l) n += (ch & 0xC0) != 0x80 && ch != 0x01;
     return n;
+}
+
+// Whether the page's unit `at` (as pageChars counts them) is a line break
+bool pageBreakAt(const std::vector<std::string>& page, int at) {
+    for (size_t k = 0; k < page.size(); ++k) {
+        int n = 0;
+        for (unsigned char ch : page[k]) n += (ch & 0xC0) != 0x80 && ch != 0x01;
+        if (at < n) return false;
+        at -= n;
+        if (k + 1 < page.size() && at-- == 0) return true;
+    }
+    return false;
 }
 
 // The page cut to its first `limit` characters (the \x01 marks kept; a line break counts as one)
@@ -2431,52 +2459,77 @@ const cr::MessageInfo* pageInfo(const App& app) {
     return pi < app.dialogueInfo.size() ? &app.dialogueInfo[pi] : nullptr;
 }
 
+// Out: every character typed and every pause over (a 0x1a before the wait holds the "next" mark too)
 bool pageTyped(const App& app) {
-    return app.dialogue.empty() || !app.typeOn ||
-           app.dialogueTyped >= pageChars(app.dialogue[std::min(app.dialoguePage, app.dialogue.size() - 1)]);
+    if (app.dialogue.empty() || !app.typeOn) return true;
+    const cr::MessageInfo* info = pageInfo(app);
+    return app.dialogueTyped >= pageChars(app.dialogue[std::min(app.dialoguePage, app.dialogue.size() - 1)]) &&
+           (!info || app.dialoguePause >= int(info->pauses.size())) && app.dialogueHold == 0;
 }
+
+// G+0x88882 (0x1b) where the typing is: the tap and the skip corner can't bring the page out at once
+bool dialogueNoSkip(const App& app) {
+    if (app.dialogue.empty()) return false;
+    const cr::MessageInfo* info = pageInfo(app);
+    if (!info) return false;
+    bool on = info->noSkipOn;
+    for (const auto& t : info->noSkip) on ^= t.at <= app.dialogueTyped;
+    return on;
+}
+
+// _PrcMsg's 0x1a n: the next unit comes n frames after the one before (its counter set to n - 1
+// on reaching it, down a frame at a time, on at 0 - for n 0 it starts at -1: two frames)
+int pauseHold(int frames) { return frames == 0 ? 1 : frames - 1; }
 
 bool stepVoiceCue(App& app);
 
-// PrcMsg a frame: the next character (0x1a pauses it; a 0x1e waits for the clip before it); a page
-// ending the message with 0x14 closes by itself once out
+// PrcMsg a frame: the next character, or - the typing flag down (a tap) - every character up to the
+// next stop: a 0x1a pause, a line break (0x11 ends _PrcMsg's frame), a 0x1e waiting for the clip
+// before it, the page's end. A page ending the message with 0x14 (or one the window clears by
+// itself, 0x1a then 0x10) goes once out and its pauses are over
 void stepTyping(App& app) {
     if (app.dialogue.empty()) return;
     if (app.msgWin.state == 1 || app.msgWin.state == 2) return; // PrcMsg: nothing until the window is up (state 3)
     const cr::MessageInfo* info = pageInfo(app);
-    const int total = pageChars(app.dialogue[std::min(app.dialoguePage, app.dialogue.size() - 1)]);
-    if (!app.typeOn) app.dialogueTyped = total;
+    const std::vector<std::string>& page = app.dialogue[std::min(app.dialoguePage, app.dialogue.size() - 1)];
+    const int total = pageChars(page);
+    if (!app.typeOn) app.dialogueTyped = total, app.dialoguePause = info ? int(info->pauses.size()) : 0;
     if (app.dialogueHold > 0 && --app.dialogueHold > 0) return;
-    if (stepVoiceCue(app)) return;
-    if (app.dialogueTyped >= total) {
-        if (!info || info->closeAfter < 0 || app.choiceFlag >= 0) return;
-        if (!app.dialogueClosing) {
-            app.dialogueClosing = true;
-            app.dialogueHold = info->closeAfter;
+    for (;;) {
+        if (stepVoiceCue(app)) return;
+        if (info && app.dialoguePause < int(info->pauses.size()) && info->pauses[size_t(app.dialoguePause)].at <= app.dialogueTyped) {
+            app.dialogueHold = pauseHold(info->pauses[size_t(app.dialoguePause++)].frames);
             if (app.dialogueHold > 0) return;
+            continue;
         }
-        advanceDialogue(app, false);
-        // PrcMsg 0x14: the message is done (the script goes on) but its text stays in the window
-        // until Close, the next message or the script's end
-        if (app.dialogue.empty()) app.heldPage = true;
-        return;
+        if (app.dialogueTyped >= total) {
+            if (!info || info->closeAfter < 0 || app.choiceFlag >= 0) return;
+            advanceDialogue(app, false);
+            // PrcMsg 0x14: the message is done (the script goes on) but its text stays in the window
+            // until Close, the next message or the script's end; 0x10: the window clears, the next
+            // page's first character comes the frame after
+            if (app.dialogue.empty()) app.heldPage = true;
+            else app.dialogueHold = 0;
+            return;
+        }
+        const bool lineBreak = pageBreakAt(page, app.dialogueTyped);
+        ++app.dialogueTyped;
+        if (!app.dialogueInstant || lineBreak) return;
     }
-    if (info && app.dialoguePause < int(info->pauses.size()) && info->pauses[size_t(app.dialoguePause)].at <= app.dialogueTyped) {
-        app.dialogueHold = info->pauses[size_t(app.dialoguePause++)].frames;
-        if (app.dialogueHold > 0) return;
-    }
-    ++app.dialogueTyped;
 }
 
-// The player's tap on a page: one still typing comes out whole (PrcMsg +0x33433), one out turns;
-// a page closing by itself takes no tap
+// The typing flag down (_PrcMsg's top: a tap, or the skip corner, while it types - not under 0x1b)
+void hurryDialogue(App& app) {
+    if (!app.dialogue.empty() && !pageTyped(app) && !dialogueNoSkip(app)) app.dialogueInstant = true;
+}
+
+// The player's tap on a page: one still typing comes out at once up to its next stop (PrcMsg
+// +0x8887b; not while 0x1b holds it), one out turns; a page closing by itself takes no tap
 void tapDialogue(App& app) {
     if (app.dialogue.empty()) return;
     const cr::MessageInfo* info = pageInfo(app);
     if (!pageTyped(app)) {
-        app.dialogueTyped = pageChars(app.dialogue[std::min(app.dialoguePage, app.dialogue.size() - 1)]);
-        app.dialogueHold = 0;
-        app.dialoguePause = info ? int(info->pauses.size()) : 0;
+        hurryDialogue(app);
         return;
     }
     if (info && info->closeAfter >= 0) return;
@@ -2538,7 +2591,11 @@ void openItemWindow(App& app, int item) {
 
 void showMessages(App& app, const std::vector<int>& ids) {
     app.heldPage = false;
-    if (app.dialogue.empty()) { app.dialogueInfo.clear(); app.dialogueVoices.clear(); ++app.dialogueSerial; resetTyping(app); }
+    if (app.dialogue.empty()) {
+        app.dialogueInfo.clear(), app.dialogueVoices.clear(), app.dialoguePage = 0;
+        ++app.dialogueSerial;
+        resetTyping(app);
+    }
     for (int id : ids) {
         std::vector<std::vector<std::string>> pages;
         cr::MessageInfo info;
@@ -2549,22 +2606,32 @@ void showMessages(App& app, const std::vector<int>& ids) {
         else
             pages = {{"[message " + std::to_string(id) + "]"}}, app.dialogue.push_back(pages[0]);
         app.dialogueInfo.resize(app.dialogue.size() - pages.size());
+        // A code on page k at `at` - one after the last page's text belongs to it, and one past a
+        // page's end (its trailing empty lines dropped) comes as it is out
+        auto onPage = [&](int page, size_t k) { return page == int(k) || (k + 1 == pages.size() && page >= int(pages.size())); };
+        auto clampAt = [&](int at, size_t k) { return std::min(at, pageChars(pages[k])); };
+        bool noSkip = false; // (0x1b: the message's flag as each page starts)
         for (size_t k = 0; k < pages.size(); ++k) { // each page its own pauses; the last the closing
             cr::MessageInfo pi = info;
             pi.pauses.clear();
             for (const auto& pz : info.pauses)
-                if (pz.page == int(k)) pi.pauses.push_back(pz);
+                if (onPage(pz.page, k)) pi.pauses.push_back({pz.page, clampAt(pz.at, k), pz.frames});
             if (k + 1 < pages.size()) pi.closeAfter = -1;
             for (const auto& t : info.turns) // (a page the window clears by itself after its pause turns so)
                 if (t.page == int(k) && k + 1 < pages.size()) pi.closeAfter = t.frames;
+            for (const auto& kp : info.kept) // (0x12 without 0x10: the lines before stay)
+                if (kp.page == int(k)) pi.keep = std::min(kp.chars, pageChars(pages[k])), pi.instant = kp.instant;
+            pi.noSkipOn = noSkip;
+            pi.noSkip.clear();
+            for (const auto& t : info.noSkip)
+                if (onPage(t.page, k)) pi.noSkip.push_back({t.page, clampAt(t.at, k)}), noSkip = !noSkip;
             app.dialogueInfo.push_back(pi);
         }
         app.dialogueVoices.resize(app.dialogue.size() - pages.size());
         for (size_t k = 0; k < pages.size(); ++k) {
             std::vector<App::VoiceCue> clips;
-            for (const auto& v : info.voices) // (a cue after the last page's text: as that page is out)
-                if (v.page == int(k)) clips.push_back({v.at, v.clip});
-                else if (k + 1 == pages.size() && v.page >= int(pages.size())) clips.push_back({pageChars(pages[k]), v.clip});
+            for (const auto& v : info.voices)
+                if (onPage(v.page, k)) clips.push_back({clampAt(v.at, k), v.clip});
             app.dialogueVoices.push_back(clips);
         }
     }
@@ -11890,9 +11957,14 @@ void stepEvents(App& app) {
         for (const cr::FieldNpc& n : app.npcs)
             if (n.native == 15 && npcActive(app, n)) app.game.vars[0] = n.id, natives.fireWall(n.id); // (the only one the rows use)
     }
-    // fast-forward while the skip is held: every page turns at once (choices still wait for an answer)
-    if (app.skipScene && app.runner.running() && !app.dialogue.empty()) advanceDialogue(app);
+    // fast-forward while the skip is held (_PrcMsg: FUN_00031978, the corner, as a tap every frame):
+    // the typing out at once - not under 0x1b - and each page turned the frame it is out (choices
+    // still wait for an answer; pauses, line breaks and voice clips still take their frames)
+    const bool skipping = app.skipScene && app.runner.running() && !app.dialogue.empty();
+    if (skipping) hurryDialogue(app);
     stepTyping(app);
+    if (skipping && !app.dialogue.empty() && pageTyped(app) && !(pageInfo(app) && pageInfo(app)->closeAfter >= 0))
+        advanceDialogue(app);
     if (app.titleOpen) ++app.titleAnim; // the title menu fades in
     app.titleOut = app.titleOpen && (app.resumeNotice || app.resumePrompt) ? app.titleOut + 1 : 0; // (its plates going for the offer)
     stepResume(app); // the Progress Tracker's offer: its message, windows, and the load / Start after the answer
@@ -12635,8 +12707,14 @@ constexpr float kWinBadge[4] = {936, 880, 88, 96};         // the "!" bubble ove
 // PutMsg / CmdFont: a line every 24 tex2d units, the glyphs 16 - doubled on the iPad (and the iPhone's
 // Retina screen) as all of Omega's tex2d is: 48 px a line (CR1's iPad-native layout had half that)
 constexpr float kMsgScale = 4.0f;
-// drawfont_text's name (its -8): about three quarters of the lines' size, as the reference shows it
+// The name plate's line (one line: its glyphs' size from namePt)
 constexpr float kNameScale = 3.1f;
+// The lines' font size (_CmdFont / _CmdFont_waku's _setfont_utf16_text): 16 pt in 3.1.0; 1.0.0's
+// 17, 16 in style 0x20
+float messagePt(const App& app) { return multilingualData(app) || (app.msgStyle & 0x20) ? 16.0f : 17.0f; }
+// The name plate's (_PrcMsg 0x15's _font_setfont_utf16_line1): 14 pt; in style 0x20 16 for
+// Japanese, Chinese and Korean, 17 for the rest (both releases)
+float namePt(const App& app) { return app.msgStyle & 0x20 ? (cjkLanguage(app.language) ? 16.0f : 17.0f) : 14.0f; }
 void drawMessageLines(App& app, const std::vector<std::string>& page, float x, float y, float scale, bool centreAll) {
     cr::Renderer& r = app.renderer;
     bool any = centreAll;
@@ -12656,6 +12734,7 @@ void drawMessageLines(App& app, const std::vector<std::string>& page, float x, f
         h.setTint(tint[0], tint[1], tint[2]);
         const float w = h.measure(r, {text}, scale);
         const float lx = flip != centreAll ? cr::Renderer::kLogicalW / 2 - w / 2 : x;
+        if (k >= shown.size()) break; // (not typed yet)
         const std::string& part = shown[k];
         const std::string drawn = flip && !part.empty() ? part.substr(1) : part;
         if (!drawn.empty()) h.drawAt(r, {drawn}, lx, y + step * float(k), scale, 0, 0, 0.0f);
@@ -12714,6 +12793,11 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
     const int ws = app.msgWin.state;
     const bool fading = ws == 1 || ws == 2 || ws == 4 || ws == 5, textOn = !fading;
     const float wa = fading ? app.msgWin.alpha : 1.0f;
+    // The glyphs' sizes (the lines keep their 24 tex2d step): kMsgScale makes 2 logical px a point
+    const float em = messagePt(app) / 2;
+    app.dialogueHud.setEm(em);
+    for (cr::Hud& h : app.lineHud) h.setEm(em);
+    app.nameHud.setEm(namePt(app) * 2 / kNameScale);
     if (!app.windowTex.id) { // no window art: a plain box
         app.dialogueHud.setTint(1, 1, 1);
         app.dialogueHud.drawAt(r, typedPage(page, app.textLimit), 60, H - 210, 2.0f, W - 120, 170);
@@ -12731,8 +12815,9 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         const float wy = 2.0f * rect[0] + 64, ty = 2.0f * (rect[0] + rect[1]) + 64;
         float tx = 2.0f * 36 + 32;
         bool outline = false;
-        if (style & 0x80 || style & 0x210) { // no window: the text alone (0x10: outlined in black)
-            outline = (style & 0x10) != 0;
+        if (style & 0x80 || style & 0x210) { // no window: the text alone (0x10: outlined in black -
+            // _CmdFont_waku outlines white text only: after 0x16 1 it is plain black, j001_d06 6818)
+            outline = (style & 0x10) != 0 && app.msgColour != 1;
         } else if (style & 0x20) { // a black band across the bottom (tex2d y 252..352), the name on its edge
             r.fillRect(left, 2.0f * 252 + 64, width, 768 - (2.0f * 252 + 64), 0, 0, 0, wa);
             if (!speaker.empty() && textOn) { // PutMsg: drawfont_l at tex2d (16, 236), just above the band
@@ -12750,7 +12835,9 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
                 r.fillRect(left, y2 + 2.0f * float(k), width, 2.0f, 0, 0, 0, a * (1 - t));
             }
             r.fillRect(left, y1, width, y2 - y1, 0, 0, 0, a);
-            if (app.language == 1) tx = 2.0f * 8 + 32;
+            // _PutMsg: x 8 for the languages _MuComFontSet doesn't take as CJK (3.1.0: English, French,
+            // German, Spanish; 1.0.0: English), else 36
+            if (multilingualData(app) ? !cjkLanguage(app.language) : app.language == 1) tx = 2.0f * 8 + 32;
         } else if (style & 0x40) { // the grey panel (960 x 192 at its rect)
             drawWinPiece(app, kWinMessagePanel, 32, wy, 960, 192, wa);
             if (!speaker.empty() && textOn) {
@@ -12767,7 +12854,9 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
                 drawMessageLines(app, page, tx + d[k][0], ty + d[k][1], kMsgScale, centreAll);
             }
         }
-        app.dialogueHud.setTint(1, 1, 1);
+        // _SetMsg: the text black (0xff000000), white for the styles with bits 0x78
+        if (style & 0x78) app.dialogueHud.setTint(1, 1, 1);
+        else app.dialogueHud.setTint(0, 0, 0);
         ink();
         if (textOn) drawMessageLines(app, page, tx, ty, kMsgScale, centreAll);
         (void)pageNo; // (PutMsg draws no page count)
@@ -23409,9 +23498,9 @@ int runSelfTest(App& app) {
     }
     mapErrors += fieldEventsSelfTest(app);
     mapErrors += storyLossSelfTest(app);
-    { // PrcMsg's typing: a character a frame, a tap brings the page out whole and the next turns
-      // it; 0x1a pauses it; 0x14 closes the message by itself (Omega's j001_d06 6717: three pauses,
-      // then it closes after the last)
+    { // PrcMsg's typing: a character a frame, a tap brings the page out (up to its next stop) and the
+      // next turns it; 0x1a pauses it; 0x14 closes the message by itself (Omega's j001_d06 6717:
+      // three pauses, then it closes after the last)
         int problems = 0;
         const cr::EventFile keepEvents = app.events;
         const bool keepType = app.typeOn;
@@ -23422,6 +23511,7 @@ int runSelfTest(App& app) {
         for (int f = 0; f < 10; ++f) stepTyping(app);
         const bool rate = chars > 10 && app.dialogueTyped == 10 && !pageTyped(app);
         tapDialogue(app);
+        for (size_t f = 0; f < 8 && !app.dialogue.empty() && !pageTyped(app); ++f) stepTyping(app); // (a frame a line)
         const bool whole = pageTyped(app) && !app.dialogue.empty();
         tapDialogue(app);
         const bool turned = app.dialogue.empty();
@@ -23439,16 +23529,14 @@ int runSelfTest(App& app) {
                 }
             }
             showMessages(app, {typedId});
-            for (size_t k = 0; k < app.dialogueInfo.size() && k < app.dialogue.size(); ++k) // (one after the last
-                for (const auto& pz : app.dialogueInfo[k].pauses)                           // character is the closing wait)
-                    if (pz.at < pageChars(app.dialogue[k])) ++pauses, pauseFrames += pz.frames;
+            for (size_t k = 0; k < app.dialogueInfo.size() && k < app.dialogue.size(); ++k) // (those at a page's end
+                for (const auto& pz : app.dialogueInfo[k].pauses)                           // hold its turn or closing)
+                    ++pauses, pauseFrames += pauseHold(pz.frames);
             for (const auto& pg : app.dialogue) total += pageChars(pg);
             closeAfter = app.dialogueInfo.empty() ? -2 : app.dialogueInfo.back().closeAfter;
             const size_t pages = app.dialogue.size();
             int& turns = turnsSeen; // pages the window clears by itself (0x1a then 0x10)
             for (size_t k = 0; k + 1 < app.dialogueInfo.size() && k + 1 < pages; ++k) turns += app.dialogueInfo[k].closeAfter >= 0;
-            for (size_t k = 0; k + 1 < app.dialogueInfo.size() && k + 1 < pages; ++k)
-                if (app.dialogueInfo[k].closeAfter > 0) closeAfter += app.dialogueInfo[k].closeAfter;
             for (; frames < 4000 && !app.dialogue.empty(); ++frames) {
                 stepTyping(app);
                 const cr::MessageInfo* pinfo = pageInfo(app);
@@ -23460,16 +23548,130 @@ int runSelfTest(App& app) {
             }
             closed = app.dialogue.empty() && size_t(taps + turns) + 1 == pages;
         }
-        const int least = total + pauseFrames + std::max(0, closeAfter);
-        problems += pauses + turnsSeen == 0 || closeAfter <= 0 || !closed || frames < least || frames > least + 2 * (taps + turnsSeen + 2);
+        const int least = total + pauseFrames;
+        problems += pauses == 0 || closeAfter <= 0 || !closed || frames < least || frames > least + 2 * (taps + turnsSeen + 2);
         std::printf("message typing: a character a frame %s, a tap brings it out %s, the next turns it %s; %d: %d "
-                    "characters, %d pauses (%d frames), then closes by itself %d frames after the last %s in %d frames; %d problems\n",
+                    "characters, %d pauses (%d frames), then closes by itself (%d frames after the last) %s in %d frames; %d problems\n",
                     rate ? "yes" : "NO", whole ? "yes" : "NO", turned ? "yes" : "NO", typedId, total, pauses, pauseFrames, closeAfter,
                     closed ? "yes" : "NO", frames, problems);
         mapErrors += problems;
         app.dialogue.clear();
         app.events = keepEvents;
         app.typeOn = keepType;
+    }
+    { // _PrcMsg's pages (3.1.0 decomp 28468-28780): 0x1a's length, a tap stopping at the next pause /
+      // line break, 0x1b, 0x12 keeping the lines (0x11 after it) or going on along the same line out
+      // at once (anything else after it), and the 0x1b messages' voice and name
+        int problems = 0;
+        auto check = [&](bool ok, const char* what) {
+            if (!ok) ++problems, std::printf("message pages FAILED: %s\n", what);
+        };
+        const cr::EventFile keepEvents = app.events;
+        const bool keepType = app.typeOn;
+        const int keepLanguage = app.language;
+        const App::MsgWin keepWin = app.msgWin;
+        app.typeOn = true, app.language = 1, app.msgWin = App::MsgWin();
+        auto page = [&](const std::vector<std::string>& lines, const std::vector<cr::MessageInfo::Pause>& pz, bool noSkip) {
+            app.dialogue = {lines};
+            app.dialoguePage = 0;
+            cr::MessageInfo mi;
+            mi.pauses = pz, mi.noSkipOn = noSkip;
+            app.dialogueInfo = {mi};
+            app.dialogueVoices = {{}};
+            ++app.dialogueSerial;
+            resetTyping(app);
+        };
+        page({"abcdef"}, {{0, 2, 0}, {0, 4, 5}}, false);
+        std::vector<int> at; // the frame each character comes out
+        for (int f = 0; f < 20 && !pageTyped(app); ++f) {
+            const int before = app.dialogueTyped;
+            stepTyping(app);
+            if (app.dialogueTyped > before) at.push_back(f);
+        }
+        check(at == std::vector<int>{0, 1, 3, 4, 9, 10}, "0x1a n: the next character n frames after the one before (2 for n = 0)");
+        page({"abcdef", "ghij"}, {{0, 3, 10}}, false);
+        stepTyping(app);
+        tapDialogue(app);
+        stepTyping(app);
+        const bool atPause = app.dialogueTyped == 3 && app.dialogueInstant && !pageTyped(app);
+        for (int f = 0; f < 9; ++f) stepTyping(app);
+        const bool atBreak = app.dialogueTyped == 7 && !pageTyped(app);
+        stepTyping(app);
+        check(atPause && atBreak && pageTyped(app), "a tap: out at once up to the next pause, after it up to the line break, then the rest");
+        page({"abcdef"}, {}, true);
+        stepTyping(app);
+        tapDialogue(app);
+        stepTyping(app);
+        check(!app.dialogueInstant && app.dialogueTyped == 2 && !pageTyped(app), "0x1b: a tap can't bring the typing out at once");
+        auto typeOut = [&] { for (int f = 0; f < 400 && !app.dialogue.empty() && !pageTyped(app); ++f) stepTyping(app); };
+        // c101_d07 3434: "What the--!?" 0x12 0x11 "You mean it was a trap!?" - the second page keeps the first line
+        bool keptLines = false, keptTyping = false;
+        if (app.events.load(app.dataDir, 8)) {
+            app.dialogue.clear();
+            showMessages(app, {3434});
+            if (app.dialogue.size() == 2 && app.dialogueInfo.size() == 2) {
+                const std::vector<std::string> first = app.dialogue[0];
+                const int keep = pageChars(first);
+                typeOut();
+                tapDialogue(app);
+                keptLines = app.dialoguePage == 1 && app.dialogue[1].size() == first.size() + 1 &&
+                            app.dialogueTyped == keep && typedPage(app.dialogue[1], app.dialogueTyped) == first;
+                stepTyping(app); // (the line break)
+                stepTyping(app);
+                keptTyping = !app.dialogueInstant && app.dialogueTyped == keep + 2;
+            }
+        }
+        check(keptLines && keptTyping, "c101_d07 3434: 0x12 0x11 keeps the lines above and types on from the next");
+        // j001_d06 4811: "Vahti... Vieg" 0x12 (3.1.0: 0x1e 1601) "... Kill us..." - on along the line, out at once
+        bool sameLine = false, atOnce = false;
+        if (app.events.load(app.dataDir, 7)) {
+            app.dialogue.clear();
+            showMessages(app, {4811});
+            if (app.dialogue.size() == 2 && app.dialogueInfo.size() == 2) {
+                const std::vector<std::string> first = app.dialogue[0];
+                typeOut();
+                tapDialogue(app);
+                const std::vector<std::string>& second = app.dialogue[1];
+                sameLine = app.dialoguePage == 1 && second.size() == 1 && first.size() == 1 && second[0].size() > first[0].size() &&
+                           second[0].compare(0, first[0].size(), first[0]) == 0 && app.dialogueInstant;
+                stepTyping(app);
+                atOnce = pageTyped(app);
+            }
+        }
+        check(sameLine && atOnce, "j001_d06 4811: a 0x12 without 0x10 / 0x11 goes on along the same line, out at once");
+        // 3.1.0: c101_t01 1000 "0x1b 0x1e 362 0x1c 1 0x15 40 What the...?" and j001_d06 3400 "0x1b 0x15 39 VAHTI"
+        bool noSkipVoice = true, noSkipName = true, noSkipTap = true;
+        if (multilingualData(app)) {
+            std::vector<std::vector<std::string>> pg;
+            cr::MessageInfo mi;
+            noSkipVoice = app.events.load(app.dataDir, 10) && app.events.message(1000, 1, nullptr, pg, &mi) && mi.voices.size() == 1 &&
+                          mi.voices[0].clip == 362 && mi.voices[0].at == 0 && mi.nameId == 58000 + 0x95 + 40 && mi.noSkip.size() == 1 &&
+                          !pg.empty() && !pg[0].empty() && pg[0][0].compare(0, 4, "What") == 0;
+            if (noSkipVoice) {
+                app.dialogue.clear();
+                app.sound.stopLine(), app.voiceKeep = false; // (no earlier clip to wait for)
+                showMessages(app, {1000});
+                stepTyping(app);
+                tapDialogue(app);
+                stepTyping(app);
+                noSkipTap = !app.dialogueInstant && app.dialogueTyped == 2;
+            }
+            noSkipName = app.events.load(app.dataDir, 7) && app.events.message(3400, 1, nullptr, pg, &mi) &&
+                         mi.nameId == 58000 + 0x95 + 39 && !pg.empty() && !pg[0].empty() && pg[0][0].compare(0, 5, "VAHTI") == 0;
+        }
+        check(noSkipVoice && noSkipTap, "c101_t01 1000: 0x1b a word alone - its voice clip 362, no stray glyph, the tap can't hurry it");
+        check(noSkipName, "j001_d06 3400: 0x1b then the name plate");
+        std::printf("message pages: 0x1a's frames, a tap out to the next pause / line break, 0x12 0x11 keeping the lines %s, "
+                    "0x12 on along the line %s, 0x1b %s; %d problems\n", keptLines && keptTyping ? "yes" : "NO",
+                    sameLine && atOnce ? "yes" : "NO",
+                    !multilingualData(app) ? "(none in this data)" : noSkipVoice && noSkipName && noSkipTap ? "yes" : "NO", problems);
+        mapErrors += problems;
+        app.dialogue.clear();
+        app.dialogueInfo.clear();
+        app.dialogueVoices.clear();
+        resetTyping(app);
+        app.events = keepEvents;
+        app.typeOn = keepType, app.language = keepLanguage, app.msgWin = keepWin;
     }
     { // The calcs' queued messages (btl_add_msgque / menub_mainPut): a monster's poison queues
       // "<name> was poisoned!" for its target (one per fighter); the banner shows each 60 frames
@@ -24963,6 +25165,8 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                         l.size() > 1 ? (unsigned char)l[1] : 0, l.size() > 2 ? (unsigned char)l[2] : 0, l.size());
     if (const char* ty = SDL_getenv("CR_CAPTURE_TYPED")) { // the page n frames into its typing
         resetTyping(app);
+        if (const cr::MessageInfo* info = app.dialogue.empty() ? nullptr : pageInfo(app)) // (a page keeping the lines before it)
+            app.dialogueTyped = info->keep, app.dialogueInstant = info->instant;
         for (int f = SDL_atoi(ty); f > 0 && !app.dialogue.empty(); --f) stepTyping(app);
         std::printf("typed: %d of %d characters\n", app.dialogueTyped,
                     app.dialogue.empty() ? 0 : pageChars(app.dialogue[std::min(app.dialoguePage, app.dialogue.size() - 1)]));
@@ -25805,6 +26009,30 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
                     for (size_t p = 0; p < pages.size(); ++p)
                         for (size_t l = 0; l < pages[p].size(); ++l) all += (p && !l ? " || " : l ? " | " : "") + pages[p][l];
                 std::printf("%s: %s\n", argv[k], all.c_str());
+            }
+            return SDL_APP_SUCCESS;
+        }
+        if (SDL_strcmp(argv[i], "--print-msgs") == 0 && i + 2 < argc) { // --print-msgs area language: every event message (tools)
+            // decoded - its pages (" | " between lines, " || " between pages) and what MessageInfo says
+            cr::EventFile ef;
+            if (!ef.load(app->dataDir, SDL_atoi(argv[i + 1]))) return SDL_APP_FAILURE;
+            const int language = SDL_atoi(argv[i + 2]);
+            for (int id = 1000; id < 51000; ++id) {
+                std::vector<std::vector<std::string>> pages;
+                cr::MessageInfo mi;
+                if (!ef.message(id, language, nullptr, pages, &mi)) continue;
+                std::string all;
+                for (size_t p = 0; p < pages.size(); ++p)
+                    for (size_t l = 0; l < pages[p].size(); ++l) all += (p && !l ? " || " : l ? " | " : "") + pages[p][l];
+                std::printf("%d\t%s\tname=%d\tvoices=", id, all.c_str(), mi.nameId);
+                for (const auto& v : mi.voices) std::printf("%d@%d:%d,", v.clip, v.page, v.at);
+                std::printf("\tkept=");
+                for (const auto& k : mi.kept) std::printf("%d:%d:%d,", k.page, k.chars, k.instant ? 1 : 0);
+                std::printf("\tnoskip=");
+                for (const auto& t : mi.noSkip) std::printf("%d:%d,", t.page, t.at);
+                std::printf("\tpauses=");
+                for (const auto& pz : mi.pauses) std::printf("%d@%d:%d,", pz.frames, pz.page, pz.at);
+                std::printf("\n");
             }
             return SDL_APP_SUCCESS;
         }

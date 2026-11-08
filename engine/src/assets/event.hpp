@@ -97,10 +97,11 @@ struct MessageInfo {
     // the typing waits there (FUN_00009408), so a page's several clips follow one another
     struct VoiceCue { int page; int at; int clip; };
     std::vector<VoiceCue> voices;
-    // PrcMsg types a page out a character a frame. 0x1a n: the typing stops n frames before the
-    // page's character `at` (counted over its lines). 0x14 ends the message without waiting for a
-    // tap: the last page closes `closeAfter` frames (the 0x1a just before it) once it's out; -1
-    // waits for the tap (0 / 0x13)
+    // PrcMsg types a page out a character a frame. 0x1a n: the typing stops before the page's
+    // unit `at` (main.cpp pageChars: a line break counts one) - that unit comes n frames after the
+    // one before it (2 for n = 0), tapped or not. 0x14 ends the message without waiting for a
+    // tap: the last page closes once it's out and its pauses are over (`closeAfter`: the 0x1a just
+    // before it, 0 none); -1 waits for the tap (0 / 0x13)
     struct Pause { int page; int at; int frames; };
     std::vector<Pause> pauses;
     int closeAfter = -1;
@@ -108,6 +109,20 @@ struct MessageInfo {
     struct Turn { int page; int frames; };
     std::vector<Turn> turns;
     int colour = -1;   // 0x16 n: the text's colour from there on (PrcMsg +0x884c0: 0 white, 1 black), -1 as the window has it
+    // 0x12 waits for a tap and clears nothing (only 0x10 does). After the tap: 0x10 clears the
+    // window (a new page); 0x11 keeps the lines and types on from the next one; anything else
+    // goes on along the same line, out at once (the typing flag G+0x8887b stays 0). Such a page
+    // starts with `chars` (pageChars-counted: line breaks count one) of the page before it out
+    struct Kept { int page; int chars; bool instant; };
+    std::vector<Kept> kept;
+    // 0x1b (one word): the tap / skip corner can't bring the typing out at once while set
+    // (G+0x88882: _SetMsgAttr sets it for a message opening with 0x1b, _PrcMsg flips it later on)
+    struct Toggle { int page; int at; };
+    std::vector<Toggle> noSkip;
+    // The page's own (showMessages, from the lists above): its first `keep` characters already
+    // out, the rest out at once (`instant`), the 0x1b flag at its start
+    int keep = 0;
+    bool instant = false, noSkipOn = false;
 };
 
 constexpr int kLanguages = 8; // text sections: ja, en, fr, de, es, zh-Hans, zh-Hant, ko (1.0.1: ja, en)
