@@ -308,7 +308,7 @@ c101/c102/c104/m207a, 2026-10-12).
       Saved: flags, variables, items, opened boxes, area / map / position / facing, the leader,
       play time, the date. Loading arrives as a warp would (the room's entry scripts run).
       `CR_SAVE_DIR` puts the files elsewhere; `--camp`, `--save-screen save|load`, `--char-select`,
-      `--scenarios` (`--at y` scrolls), `--manual` (`--at n p` opens topic n's page p) capture them, `--title-new p` goes through the title as a player would (pair 1 / 2, New)
+      `--scenarios` (`--at y` scrolls), `--manual` (`--at n p` opens topic n's page p) capture them, `--title-new p` goes through the title as a player would (pair 1 / 2, New) (`CR_TITLE_NEW_STOP=chars|save|ask` stops on Character Select, the save screen or New's "Begin new game?")
 - [x] **Shops** (Util 2, `__menuu_Shop*`; the Ark's shopkeeper, script 251 of areas 7/13/19/25):
       Talk / Buy / Sell, then Items / Weapons / Armor / Jewel, the list, how many with Yes / No,
       and "Equip it?" after buying gear - laid out from ShopPut and the ComUty_* pieces it calls

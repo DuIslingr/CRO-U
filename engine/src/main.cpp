@@ -1862,6 +1862,7 @@ void drawShopNumber(cr::MenuPainter& m, int value, float x, float y, int digits,
                     bool left = false);
 void openCharSelect(App& app);
 void drawCharArt(App& app, float alpha, bool banner, float grey = 1);
+int pictAnimFrame(int draws, int ticks, int frames);
 int plateIcon(int word);
 // Control Hints (Options, Game; F3): the port's own menu help. The iPhone layout has no room below.
 bool keyHints(const App& app);
@@ -5593,9 +5594,11 @@ void drawSaveScreen(App& app) {
     if (art) r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 1);
     r.setOrigin(r.uiX());
     // On the title (__menuu_SaveLoadPut, mode 1) the scenario's Select Scenario art behind it all:
-    // picture 24 (iPhone 22) of slot 0x10 (0x12, chara3, for the second scenario) at (-32, -64), z -10
-    // (dimmed a little for the plates and text)
-    if (art) drawCharArt(app, 1, false, 0.65f); // (else the menu mask, drawFrame's)
+    // picture 24 (iPhone 22) of slot 0x10 (0x12, chara3, for the second scenario) at (-32, -64), z -10,
+    // in white - under the menu mask (SaveLoadSet's ChgBackMaskDrawOrder / MuCom_MenuOneFrSetMask:
+    // black at 0xa0), so 0x5f of it shows (Part 1 21.3 s against 18 s: the art at 0.33..0.43 of its
+    // Character Select brightness; the port had 0.65)
+    if (art) drawCharArt(app, 1, false, 1 - 0xA0 / 255.0f); // (else the menu mask, drawFrame's)
     r.setOrigin(r.uiX());
     const float a = std::min(1.0f, ss.anim / 8.0f);
     // Widescreen: the heading, face boards, emblems to the screen's left; the date, the plates to
@@ -5633,12 +5636,16 @@ void drawSaveScreen(App& app) {
     } else { // SaveLoadPut, in every layout (Omega's iPad screen is the iPhone's doubled): the message
         // board (ComUty_MsgBoardDraw, picture 12) at (0, 220), lines from (24, 234); Yes / No the
         // plates at window 6 + (336, 104) / (336, 160) (ComUty_YesNoChoiceDraw)
+        // (ComUty_MsgBoardDraw: its mark going out and back, the lines in the menu font - Part 1 21.3 s
+        // "Begin new game?", Part 6 1130.3 s "Save data?")
         m.picture(12, 0, 220, a);
+        const short* mark = cr::kMenuPicture[13];
+        m.piece(458, 298, float(mark[0] + 20 * pictAnimFrame(ss.anim, 1, 4)), mark[1], mark[2], mark[3], a);
         const std::string msg = ss.message > 0 ? sysText(app, ss.message) : std::string("The save couldn't be written.");
-        m.text(msg.empty() ? "?" : msg, 24, 234, false, a, 14);
+        m.text(msg.empty() ? "?" : msg, 24, 234, false, a, 13);
         int extra = 0;
         for (int l : ss.lines)
-            if (l > 0) m.text(sysText(app, l), 24, 234 + 16.0f * float(++extra), false, a, 14);
+            if (l > 0) m.text(sysText(app, l), 24, 234 + 16.0f * float(++extra), false, a, 13);
         if (ss.phase == 1) {
             m.plate(336, 104, 0, 0, ss.confirm == 0, a, false);
             m.plate(336, 160, 1, 1, ss.confirm == 1, a, false);
@@ -9609,7 +9616,8 @@ int pictAnimFrame(int draws, int ticks, int frames) {
 }
 
 // ComUty_MsgBoardDraw at (0, y): picture 12, the mark (picture 13, 20 px a frame) at (458, y + 78),
-// and its lines from (24, y + 14), 16 apart - those only while the window stands still
+// and its lines from (24, y + 14), 16 apart in the menu font (13: Part 8 4936.5 s, "You have save
+// data from your last session." 509 px wide of 1280) - those only while the window stands still
 void drawMsgBoard(App& app, cr::MenuPainter& m, float y, int frame, float a, bool still, std::initializer_list<int> lines) {
     m.picture(12, 0, y, a);
     const short* p = cr::kMenuPicture[13];
@@ -9617,7 +9625,7 @@ void drawMsgBoard(App& app, cr::MenuPainter& m, float y, int frame, float a, boo
     if (!still) return;
     float ly = y + 14;
     for (int id : lines) {
-        if (id > 0) m.text(sysText(app, id), 24, ly, false, a, 14);
+        if (id > 0) m.text(sysText(app, id), 24, ly, false, a, 13);
         ly += 16;
     }
 }
@@ -25811,7 +25819,10 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         if (stopAt != "chars") {
             charSelectKey(app, SDLK_RETURN);
             for (int f = 0; f < 300 && !app.saveScreen.open; ++f) stepEvents(app);
-            if (stopAt != "save") {
+            if (stopAt == "ask") { // (CR_TITLE_NEW_STOP=ask: on New's "Begin new game?")
+                saveScreenKey(app, SDLK_RETURN);
+                app.saveScreen.anim = 100;
+            } else if (stopAt != "save") {
                 saveScreenKey(app, SDLK_RETURN);
                 saveScreenKey(app, SDLK_RETURN);
                 app.saveDirOverride.clear();
