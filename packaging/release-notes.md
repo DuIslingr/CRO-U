@@ -123,6 +123,16 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   an all-target blow, the victory said by the member who last led the order and "hurt" judged on
   the speaker, the escape line by either member; on the field a clip the script carries over a
   page turn (0x1e ffff) goes on, and the closing tap cuts the clip as the original does.
+- **Battle voices, the 3.1.0 code re-read:** a blow's reaction goes by the damage dealt and the HP
+  left (one line when nothing was taken, another for a fall - the strong monsters of groups 669..672
+  their own), none for a status tick or for an action's cost in its users' HP, the Counter skill's
+  answer has its own line, and action 437's gate; the lines the port never said - Steal Oz's by the
+  robbed monster, Steal Item's by the thief, a gene learned from the fallen, a barrier turning a
+  gene back, 437's 1000-damage form; the attack's result line judged by the fighter's side; the
+  victory's variants with a strong-growth monster in the battle, and either member may say it
+  though down; the win waits for a line still playing in the five story groups that do; every line
+  stops as the commands close; on the field a page's second clip starts where its code sits and the
+  typing waits there for the first to finish, as PrcMsg does.
 - **The title:** the title's art stands alone until a tap or key (its sound), then the logo goes and
   the plates slide in, as the original's title does; the "resume from last saved point?" offer
   comes after Start, not before the plates, and its Yes stops the music and fades to black before
@@ -163,6 +173,19 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
   folder whose name uses another alphabet - a Cyrillic user name on a Russian Windows, for example.
 
 Thanks to [metastigma](https://github.com/metastigma) for the report, those fixes and testing. All of it was checked against the original iPad code.
+- **The Camp's gene plates, as the original's** (CampMainPrc read in the 3.1.0 code): choosing a plate
+  no longer wears it - it opens the plate's known entries, with the board switched from the entry
+  names to the plate's picture, and only that list's Equip plate wears it (none while the member
+  already wears it); Back returns to the plate list where it was. The plate list is the original's:
+  the bag's plates with a known entry (the Human Genes slot lists its 474..480 whatever is known), a
+  plate the other member wears listed in its worn colour instead of hidden, and Remove last, only
+  while the slot is worn, acting at once; jewels get the same Remove. The slot list refuses (dim,
+  with the buzzer) the empty plate slots 2-4 until a common skill is known from a plate in the bag,
+  the Human Genes 474..476 in the first scenario, and the empty jewel slot while no jewel is free. The
+  Genes page lists every plate in the bag in id order, refuses one with nothing known and opens the
+  others' entries the same way. The Status page keeps the pair's plates beside the details and drops
+  the small record picture from the board; the Items page leaves out the held-back member's one worn
+  jewel, as the original does.
 
 ## Downloads
 

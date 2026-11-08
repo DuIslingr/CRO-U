@@ -86,8 +86,10 @@ struct MessageInfo {
     int nameId = -1;   // system message holding the speaker's name, -1 = no plate
     int side = 0;      // 0x1c: 1 = the left-hand portrait speaks (the right dims), 2 = the right, 0 = none
     // 0x1e n: a voice clip (voiced builds: the 2.2.0 iPhone release and the Vita). n is the entry of
-    // voiceevnt.bin, numbered across all areas; 65535 = none. 1.0.1 skips the code.
-    struct VoiceCue { int page; int clip; };
+    // voiceevnt.bin, numbered across all areas; 65535 = none. 1.0.1 skips the code. PrcMsg reaches
+    // it as the typing does (`at` characters of the page out): while a previous clip still plays
+    // the typing waits there (FUN_00009408), so a page's several clips follow one another
+    struct VoiceCue { int page; int at; int clip; };
     std::vector<VoiceCue> voices;
     // PrcMsg types a page out a character a frame. 0x1a n: the typing stops n frames before the
     // page's character `at` (counted over its lines). 0x14 ends the message without waiting for a

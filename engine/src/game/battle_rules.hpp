@@ -175,6 +175,7 @@ struct BattleHit {
     int status = -1;      // a status it set (BattleStatus), -1 none
     bool revived = false; // calc 19 brought it back
     bool critical = false; // que +0xab: it was a critical, whatever the type says now (the Break's event 8)
+    bool silent = false;   // btlcalc_chk_dead's kind 99 (0404's quarter of the users' HP, 0412's give-up): no voice reaction
 };
 
 enum BattleCommandKind { kCmdNone = 0, kCmdAttack = 1, kCmdGene = 2, kCmdItem = 3, kCmdDefend = 4, kCmdEscape = 5 };
@@ -203,6 +204,7 @@ struct BattleTurn {
     bool reflected = false;      // a barrier sent the gene / item back on its users
     std::vector<int> barriers;   // ... whose barriers those were
     bool counter = false;        // skill 154's answer to a hit
+    bool counterSkill = false;   // que +0xc5: skill 189 answered this blow before it landed (its targets' reaction is the counter line)
     bool repeat = false;         // a further go of the same entry (the action line isn't said again)
     int message = 0;             // a system message to show for it (57xxx), 0 none
     bool cancelled = false;      // btlque_make_que: it can't be any more - its message, no action

@@ -842,6 +842,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             if (has(t, 136) && !dodgeGene_ && random(100) < (holdsBreak(t) ? 20 : 10)) dodgeGene_ = true;
             if (has(t, 189) && a->dodgeable && random(100) < 5) {
                 dodgeHit_ = dodgeGene_ = true;
+                out.counterSkill = true; // (que +0xc5)
                 if (counterBy < 0 && !e.counter && e.actors[0] >= 0 && (t < 2) != (e.actors[0] < 2)) counterBy = t;
             }
         }
@@ -998,6 +999,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                             Fighter& u = f[size_t(k)];
                             BattleHit self;
                             self.target = k;
+                            self.silent = true; // (chk_dead kind 99)
                             self.amount = u.hp / 4;
                             self.amount = floored(k, self.amount);
                             if (self.amount > 0) breakEvent(e.actors[0], 2, t);
@@ -1205,6 +1207,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                 if (k >= 0 && f[size_t(k)].alive()) {
                     BattleHit self;
                     self.target = k;
+                    self.silent = true; // (chk_dead kind 99)
                     self.amount = f[size_t(k)].hp - 1;
                     f[size_t(k)].hp = 1;
                     out.hits.push_back(self);

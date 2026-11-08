@@ -276,9 +276,10 @@ struct App {
     int hdModelsLoaded = 0;                // since startup
     int language = 1;                      // text language (cr::kLanguageName): English by default
     cr::Font font;                         // system font for the game's text (all languages)
-    std::vector<std::vector<int>> dialogueVoices; // per page: voice clips it starts (0x1e)
+    struct VoiceCue { int at = 0, clip = -1; }; // PrcMsg 0x1e at `at` characters of the page (clip -1: 0xffff, keep)
+    std::vector<std::vector<VoiceCue>> dialogueVoices; // per page: the voice clips it starts, in typing order
     int dialogueSerial = 0, voicedSerial = -1, voicedPage = -1; // which page's voices were started
-    std::vector<int> voiceQueue;           // further clips of the same page
+    size_t voiceCue = 0;                   // the page's next cue (the typing waits at it while a clip still plays)
     bool voiceKeep = false;                // PrcMsg 0x1e 0xffff: the page's clip goes on past the next tap
     int voicesPlayed = 0;                  // for tests
     int soundTestEntry = 0;
@@ -478,11 +479,14 @@ struct App {
     cr::Texture charSelectArt, charSelectArt2; // Select Scenario's sheets: chara1 / chara2 (slot 0x10), chara3 (0x12)
     struct Camp {                          // the Camp menu's page and cursors (__menuu_CampMain*)
         enum Page { Main, Items, Equip, Status, Genes } page = Main;
-        enum Phase { List, Member, Slot, Ask } phase = List; // Status: Slot = the member's details
+        enum Phase { List, Member, Slot, Ask, Entries } phase = List; // Status: Slot = the member's details;
+                                           // Entries: a plate's known-entry list (CampMainPrc 0x1a-0x1d, Genes 4-5)
         int cursor = 0;                    // Main: the plate
         int category = 0;                  // Items: campui::kCategoryKind index
         std::vector<int> list;
         int listCursor = 0, listTop = 0;
+        int plate = 0;                     // Entries: the plate chosen (DAT_000ec71c / DAT_000ec770)
+        int plateCursor = 0, plateTop = 0; // ... and where the plate list was, for Back
         int member = 0;                    // the pair's first or second
         int slot = 0;                      // Equip: weapon, armor, jewel, Human Genes, gene plates 1-3
         int slotTop = 0;                   // the slot list's first row shown (a MuScrList of seven, four rows)
@@ -677,6 +681,7 @@ struct App {
         int voiceRound = -1;
         int voiceLeader = 0;               // btl +0xaf2: the party member who last headed the order (the victory's speaker)
         uint32_t voiceRng = 1;
+        int winWait = 0;                   // frames the win has held for a line still playing (btl_main 799, FUN_000926d8)
         struct Quake {                     // Quake (StartQuake / EndQuake): the 3D jolts a few pixels
             int mode = 0;                  // 0 still, 1 to its end, 2 held until EndQuake
             float amp = 0, now = 0, from = 0, to = 0; // pixels; percent of them now, from, to
@@ -2182,7 +2187,7 @@ void stepMsgWin(App& app) {
 void advanceDialogue(App& app, bool tapped = true) {
     if (app.dialogue.empty()) return;
     app.sound.stopDialogueVoices();
-    app.voiceQueue.clear();
+    app.voiceCue = 0;
     if (tapped) app.game.setFlag(4075, true); // PrcMsg: a page turned (or the last one closed) - MsgUty_TexDispProc's cue
     resetTyping(app);
     if (++app.dialoguePage < app.dialogue.size()) {
@@ -2230,8 +2235,10 @@ bool pageTyped(const App& app) {
            app.dialogueTyped >= pageChars(app.dialogue[std::min(app.dialoguePage, app.dialogue.size() - 1)]);
 }
 
-// PrcMsg a frame: the next character (0x1a pauses it); a page ending the message with 0x14
-// closes by itself once out
+bool stepVoiceCue(App& app);
+
+// PrcMsg a frame: the next character (0x1a pauses it; a 0x1e waits for the clip before it); a page
+// ending the message with 0x14 closes by itself once out
 void stepTyping(App& app) {
     if (app.dialogue.empty()) return;
     if (app.msgWin.state == 1 || app.msgWin.state == 2) return; // PrcMsg: nothing until the window is up (state 3)
@@ -2239,6 +2246,7 @@ void stepTyping(App& app) {
     const int total = pageChars(app.dialogue[std::min(app.dialoguePage, app.dialogue.size() - 1)]);
     if (!app.typeOn) app.dialogueTyped = total;
     if (app.dialogueHold > 0 && --app.dialogueHold > 0) return;
+    if (stepVoiceCue(app)) return;
     if (app.dialogueTyped >= total) {
         if (!info || info->closeAfter < 0 || app.choiceFlag >= 0) return;
         if (!app.dialogueClosing) {
@@ -2352,9 +2360,10 @@ void showMessages(App& app, const std::vector<int>& ids) {
         }
         app.dialogueVoices.resize(app.dialogue.size() - pages.size());
         for (size_t k = 0; k < pages.size(); ++k) {
-            std::vector<int> clips;
-            for (const auto& v : info.voices)
-                if (v.page == int(k) || (k + 1 == pages.size() && v.page >= int(pages.size()))) clips.push_back(v.clip);
+            std::vector<App::VoiceCue> clips;
+            for (const auto& v : info.voices) // (a cue after the last page's text: as that page is out)
+                if (v.page == int(k)) clips.push_back({v.at, v.clip});
+                else if (k + 1 == pages.size() && v.page >= int(pages.size())) clips.push_back({pageChars(pages[k]), v.clip});
             app.dialogueVoices.push_back(clips);
         }
     }
@@ -5518,8 +5527,9 @@ void drawShopBar(cr::MenuPainter& m, float x, float y, float value, float most, 
     m.quad(x + 4, y + 1, 140 * f, 3, l, rr);
 }
 
-// ComUty_StateBoardDraw at (bx, by) for character c; `item` (if > 0) shows what wearing it changes
-void drawShopBoard(App& app, float bx, float by, int c, int item, float a) {
+// ComUty_StateBoardDraw at (bx, by) for character c; `item` (if > 0) shows what wearing it changes;
+// `record` draws the small record picture over the name (param_11: the Status page leaves it out)
+void drawShopBoard(App& app, float bx, float by, int c, int item, float a, bool record = true) {
     using namespace shopui;
     cr::MenuPainter& m = app.menu;
     const cr::PartyMember& pm = app.game.party[size_t(c)];
@@ -5527,7 +5537,7 @@ void drawShopBoard(App& app, float bx, float by, int c, int item, float a) {
     m.quad(bx + 12, by, 143, 16, white, white); // the name
     const std::string name = sysText(app, 58000 + charNameId(app, c)); // (ComUty_StateBoardChrName)
     m.textCentred(name, bx + 12 + (143 - m.textWidth(name, 14)) / 2, by + 8, true, a, 14);
-    m.picture(148 + std::clamp(c, 0, cr::kCharacters - 1), bx - 8, by - 32, a); // ComUty_StateBoardDraw: 0x94 + record
+    if (record) m.picture(148 + std::clamp(c, 0, cr::kCharacters - 1), bx - 8, by - 32, a); // ComUty_StateBoardDraw: 0x94 + record
     m.quad(bx + 12, by + 32, 143, 15, white, white); // LV
     m.picture(82, bx + 50, by + 36, a);
     drawShopNumber(m, pm.level, bx + 80, by + 33, 3, 12, a, 2, true);
@@ -5847,6 +5857,8 @@ constexpr int kRows = 4;
 constexpr float kBackX = 192, kBackY = 344;
 constexpr float kPhoneBackY = 286; // 2.2.0's (__MuCamp_NextProc's box (192, 286, 256, 34)); it has no Save plate
 constexpr uint32_t kSoundEquip = 0x91 + 21, kSoundUse = 0x91 + 20; // __ChangeEquipItem's 0xa6, an item used (CampMainPrc 7)'s 0xa5
+constexpr int kRemove = 200;                                   // the lists' "Remove" entry (item 200, __ChangeEquipItem)
+constexpr float kEntriesEquipY = 44;                           // the entry list's Equip plate (the list's -5 row), over the rows
 } // namespace campui
 
 bool keyHints(const App& app) { return app.showHud && !app.renderer.phoneLayout(); }
@@ -5957,11 +5969,18 @@ void memberHpMp(const App& app, int c, int& hp, int& hpMax, int& mp, int& mpMax,
 }
 
 // MuComMakeItemHaveData: what the bag holds of a category (the pair's own weapons and armor)
+// MuComMakeItemHaveData: when the second member is held back (flag 0xfed + scenario), the one
+// jewel they wear stays out of the bag's list (a second copy of it is listed)
+int campAbsentJewel(const App& app) {
+    return campMembers(app) > 1 ? 0 : app.game.party[size_t(campCharacter(app, 1))].equip[cr::kJewel];
+}
+
 std::vector<int> campItems(const App& app, int category) {
     std::vector<int> out;
     // make_item_list's ranges (Omega); MuComMakeItemHaveData keeps weapons / armor of their kind
     int from = 1, to = 60;
-    switch (campui::kCategoryKind[std::clamp(category, 0, campui::kCategories - 1)]) {
+    const int kind = campui::kCategoryKind[std::clamp(category, 0, campui::kCategories - 1)];
+    switch (kind) {
     case 3: from = 61, to = 80; break;
     case 6: case 7: from = 201, to = 368; break;
     case 8: from = 369, to = 418; break;
@@ -5970,36 +5989,87 @@ std::vector<int> campItems(const App& app, int category) {
     case 12: from = 551, to = 630; break;
     default: break;
     }
+    const int absentJewel = kind == 8 ? campAbsentJewel(app) : 0;
     for (int n = from; n <= to; ++n) {
-        if (ownedCount(app, n) <= 0) continue;
+        const int count = ownedCount(app, n);
+        if (count <= 0) continue;
         const cr::ItemParam* p = app.itemTable.item(n);
         if (category == 2 && (!p || p->kind != cr::kKindWeapon)) continue;
         if (category == 3 && (!p || p->kind != cr::kKindArmor)) continue;
+        if (n == absentJewel && count == 1) continue;
         out.push_back(n);
     }
     return out;
 }
 
-// What can go in member c's slot: the bag's items of the slot's kind that c may wear
+// The plates in the bag, 474.. in id order: the Genes page's list (MuComMakeGenePlate(10, 1), no
+// Remove) - a plate without a known entry is listed but refused (MuScrList_GetChoiceListNo 0xb)
+std::vector<int> campGeneList(const App& app) {
+    std::vector<int> out;
+    for (int p = cr::kFirstPlate; p < cr::kFirstPlate + cr::kPlates; ++p)
+        if (ownedCount(app, p) > 0) out.push_back(p);
+    return out;
+}
+// The plate's known entries (make_item_list 0xf: its table's entries the bag counts)
+std::vector<int> campKnownEntries(const App& app, int plate) {
+    std::vector<int> out;
+    if (!cr::isPlate(plate)) return out;
+    for (int e : cr::plateContents(plate))
+        if (e > 0 && ownedCount(app, e) > 0) out.push_back(e);
+    return out;
+}
+// MuCom_GetCommonSkill: a known entry 89..113 / 139..186 of a plate the bag holds
+// (GetPlateNumFromSkill) - until there is one the empty plate slots 2-4 stay shut
+bool campCommonSkill(const App& app) {
+    for (int p = cr::kFirstPlate; p < cr::kFirstPlate + cr::kPlates; ++p) {
+        if (ownedCount(app, p) <= 0) continue;
+        for (int e : cr::plateContents(p))
+            if (((e >= 0x59 && e <= 0x71) || (e >= 0x8b && e <= 0xba)) && ownedCount(app, e) > 0) return true;
+    }
+    return false;
+}
+bool campWears(const App& app, int character, int plate) { // MuScrList_IsNowEquip (a plate)
+    const cr::PartyMember& pm = app.game.party[size_t(character)];
+    return plate > 0 && std::find(std::begin(pm.genes), std::end(pm.genes), plate) != std::end(pm.genes);
+}
+// MuScrList_GetChoiceListNo -4 for the slot list (SetIdInfo kind 4): an empty plate slot 2-4
+// (0x1c8..0x1ca) before a common skill is known, the Human Genes 474..476 in the first scenario,
+// and the empty jewel slot (0x1c6) while no jewel is free (__IsJewelChoiceMainCheck)
+bool campSlotLocked(const App& app, int member, int slot) {
+    const cr::PartyMember& pm = app.game.party[size_t(campCharacter(app, member))];
+    if (slot >= 4 && pm.genes[slot - 3] <= 0) return !campCommonSkill(app);
+    if (slot == 3 && campRoute(app) == 0 && pm.genes[0] >= 474 && pm.genes[0] <= 476) return true;
+    if (slot == cr::kJewel && pm.equip[cr::kJewel] <= 0) {
+        int jewels = 0;
+        for (int n = 369; n <= 418; ++n) jewels += ownedCount(app, n);
+        if (jewels > 1) return false;
+        return jewels == 0 || app.game.party[size_t(campCharacter(app, member ^ 1))].equip[cr::kJewel] > 0;
+    }
+    return false;
+}
+// ... -4 for a plate row (kinds 6 / 0xb): none of its entries known
+bool campPlateLocked(const App& app, int item) { return cr::isPlate(item) && cr::plateLearned(app.game, item) == 0; }
+
+// What can go in member c's slot. __ChangeEquipItem's Remove (item 200) comes last: for a jewel
+// or a plate 2-4 while the slot is worn (MuComMakeItemData / MuComMakeGenePlate's flag), for the
+// Human Genes always (__MuCampScrListComInit(0xd, 0))
 std::vector<int> campEquipList(const App& app, int c, int slot) {
     std::vector<int> out;
-    if (slot >= 3) { // gene plates: the bag's, but not one either member wears already - MuComMakeGenePlate:
-        // the Human Genes slot the characters' own (kind 13: 474..480), the others the rest (481..)
-        const cr::PartyMember& pm = app.game.party[size_t(c)];
-        if (slot > 3 && pm.genes[slot - 3] > 0) out.push_back(0); // take it off
+    const cr::PartyMember& pm = app.game.party[size_t(c)];
+    if (slot >= 3) { // MuComMakeGenePlate: the Human Genes slot lists the bag's 474..480 (0xd), the
+        // others 481.. with a known entry (0xe); a plate the other member wears stays listed
         const int from = slot == 3 ? cr::kFirstPlate : cr::kFirstPlate + 7, to = slot == 3 ? cr::kFirstPlate + 7 : cr::kFirstPlate + cr::kPlates;
         for (int p = from; p < to; ++p) {
             if (ownedCount(app, p) <= 0) continue;
-            bool worn = false;
-            for (int k = 0; k < 2; ++k)
-                for (int g : app.game.party[size_t(campCharacter(app, k))].genes) worn |= g == p;
-            if (!worn) out.push_back(p);
+            if (slot > 3 && cr::plateLearned(app.game, p) == 0) continue;
+            out.push_back(p);
         }
+        if (slot == 3 || pm.genes[slot - 3] > 0) out.push_back(campui::kRemove);
         return out;
     }
     const int kind = slot == cr::kWeapon ? cr::kKindWeapon : slot == cr::kArmor ? cr::kKindArmor : cr::kKindJewel;
-    if (slot == cr::kJewel && app.game.party[size_t(c)].equip[cr::kJewel] > 0) out.push_back(0); // take it off
     const int other = campMembers(app) > 1 ? campCharacter(app, campCharacter(app, 0) == c ? 1 : 0) : -1;
+    const int absentJewel = slot == cr::kJewel ? campAbsentJewel(app) : 0;
     for (int n = 201; n <= 418; ++n) { // (Omega: weapons and armor 201..368, jewels 369..418)
         const cr::ItemParam* p = app.itemTable.item(n);
         if (!p || p->kind != kind || ownedCount(app, n) <= 0 || !(p->owners & (1 << c))) continue;
@@ -6007,14 +6077,16 @@ std::vector<int> campEquipList(const App& app, int c, int slot) {
         if (other >= 0 && other != c && ownedCount(app, n) - int(std::count(std::begin(app.game.party[size_t(other)].equip),
                                                                            std::end(app.game.party[size_t(other)].equip), n)) <= 0)
             continue;
+        if (n == absentJewel && ownedCount(app, n) == 1) continue;
         out.push_back(n);
     }
+    if (slot == cr::kJewel && pm.equip[cr::kJewel] > 0) out.push_back(campui::kRemove);
     return out;
 }
 
 bool campUsable(int item) { return (item >= 3 && item <= 6) || (item >= 24 && item <= 27); }
 
-void campMessage(App& app, const std::string& text) {
+[[maybe_unused]] void campMessage(App& app, const std::string& text) {
     app.camp.message = text;
     app.camp.messageFrames = text.empty() ? 0 : 90;
 }
@@ -6029,7 +6101,7 @@ float campListX(const App& app) {
 bool campSlotList(const App& app) { return app.camp.page == App::Camp::Equip && app.camp.phase == App::Camp::Slot; }
 bool campScrollable(const App& app) {
     return campSlotList(app) || ((app.camp.page == App::Camp::Items || app.camp.page == App::Camp::Equip ||
-                                app.camp.page == App::Camp::Genes) && app.camp.phase == App::Camp::List);
+                                app.camp.page == App::Camp::Genes) && (app.camp.phase == App::Camp::List || app.camp.phase == App::Camp::Entries));
 }
 int campScrollCount(const App& app) { return campSlotList(app) ? campui::kEquipSlots : int(app.camp.list.size()); }
 int campScrollTop(const App& app) { return campSlotList(app) ? app.camp.slotTop : app.camp.listTop; }
@@ -6061,8 +6133,10 @@ void openCamp(App& app) {
 
 void campRefreshList(App& app) {
     App::Camp& c = app.camp;
-    if (c.page == App::Camp::Items) c.list = campItems(app, c.category);
+    if (c.phase == App::Camp::Entries) c.list = campKnownEntries(app, c.plate);
+    else if (c.page == App::Camp::Items) c.list = campItems(app, c.category);
     else if (c.page == App::Camp::Equip) c.list = campEquipList(app, campCharacter(app, c.member), c.slot);
+    else if (c.page == App::Camp::Genes) c.list = campGeneList(app);
     c.listCursor = std::clamp(c.listCursor, 0, std::max(0, int(c.list.size()) - 1));
     c.listTop = std::clamp(c.listTop, std::max(0, c.listCursor - campui::kRows + 1), c.listCursor);
 }
@@ -6079,6 +6153,22 @@ void campNextCategory(App& app, int dir) {
         }
     }
     c.listCursor = c.listTop = 0;
+    campRefreshList(app);
+}
+
+void campOpenEntries(App& app, int plate) {
+    App::Camp& c = app.camp;
+    c.plate = plate;
+    c.plateCursor = c.listCursor, c.plateTop = c.listTop;
+    c.phase = App::Camp::Entries;
+    c.listCursor = c.listTop = 0;
+    campRefreshList(app);
+}
+void campCloseEntries(App& app) {
+    App::Camp& c = app.camp;
+    c.plate = 0;
+    c.phase = App::Camp::List;
+    c.listCursor = c.plateCursor, c.listTop = c.plateTop;
     campRefreshList(app);
 }
 
@@ -6104,10 +6194,8 @@ void campOpenPage(App& app, int i) {
     case 2: // Genes: the plates in the bag, the board showing the cursor's
         c.page = App::Camp::Genes;
         c.phase = App::Camp::List;
-        c.list.clear();
-        for (int p = cr::kFirstPlate; p < cr::kFirstPlate + cr::kPlates; ++p)
-            if (ownedCount(app, p) > 0) c.list.push_back(p);
         c.listCursor = c.listTop = 0;
+        campRefreshList(app);
         break;
     case 3: c.page = App::Camp::Status; c.phase = App::Camp::Member; break;
     case 4: openOptions(app, 0); break;
@@ -6127,6 +6215,7 @@ void campBack(App& app) {
         else { c.page = App::Camp::Main; c.anim = 0; }
         return;
     case App::Camp::Equip:
+        if (c.phase == App::Camp::Entries) { campCloseEntries(app); return; } // (0x1d's -1: the plate list again)
         if (c.phase == App::Camp::List) { c.phase = App::Camp::Slot; return; }
         if (c.phase == App::Camp::Slot) { c.phase = App::Camp::Member; return; }
         c.page = App::Camp::Main;
@@ -6137,7 +6226,11 @@ void campBack(App& app) {
         c.page = App::Camp::Main;
         c.anim = 0;
         return;
-    case App::Camp::Genes: c.page = App::Camp::Main; c.anim = 0; return;
+    case App::Camp::Genes:
+        if (c.phase == App::Camp::Entries) { campCloseEntries(app); return; } // (Genes 5 -> 6: the plate list again)
+        c.page = App::Camp::Main;
+        c.anim = 0;
+        return;
     }
 }
 
@@ -6199,32 +6292,49 @@ void campChoose(App& app) {
             if (c.list.empty()) campNextCategory(app, 0);
         }
         return;
-    case App::Camp::Equip:
+    case App::Camp::Equip: {
+        cr::PartyMember& pm = app.game.party[size_t(campCharacter(app, c.member))];
         if (c.phase == App::Camp::Member) { menuSound(app, se::kChoose); c.phase = App::Camp::Slot; c.slot = 0, c.slotTop = 0; }
         else if (c.phase == App::Camp::Slot) {
+            if (campSlotLocked(app, c.member, c.slot)) { menuSound(app, se::kBuzzer); return; } // (MuScrList_GetChoiceListNo -4)
             c.listCursor = c.listTop = 0;
             campRefreshList(app);
-            if (c.list.empty()) { // the Human Genes, or nothing to wear
-                if (c.slot == 3) campMessage(app, sysText(app, 58064));
-                menuSound(app, se::kBuzzer);
-                return;
-            }
+            if (c.list.empty()) { menuSound(app, se::kBuzzer); return; } // nothing to wear
             menuSound(app, se::kChoose);
             c.phase = App::Camp::List;
         } else if (c.phase == App::Camp::List && !c.list.empty() && c.slot >= 3) { // a gene plate
-            app.game.party[size_t(campCharacter(app, c.member))].genes[c.slot - 3] = item;
+            if (item == campui::kRemove) { // CampMainPrc 0x19: Remove acts at once (__ChangeEquipItem 200)
+                pm.genes[c.slot - 3] = 0;
+                menuSound(app, campui::kSoundEquip);
+                c.phase = App::Camp::Slot;
+            } else if (campPlateLocked(app, item)) menuSound(app, se::kBuzzer);
+            else { // 0x93, then the plate's known entries (0x1a) with the board in picture mode
+                menuSound(app, se::kChoose);
+                campOpenEntries(app, item);
+            }
+        } else if (c.phase == App::Camp::Entries) { // 0x1d: the list's Equip row (-5) - none while the member wears it
+            if (campWears(app, campCharacter(app, c.member), c.plate)) { menuSound(app, se::kBuzzer); return; }
+            pm.genes[c.slot - 3] = c.plate;
             menuSound(app, campui::kSoundEquip);
+            c.plate = 0;
             c.phase = App::Camp::Slot;
         } else if (c.phase == App::Camp::List && !c.list.empty()) {
-            app.game.party[size_t(campCharacter(app, c.member))].equip[c.slot] = item; // (the bag as it was: __ChangeEquipItem)
+            pm.equip[c.slot] = item == campui::kRemove ? 0 : item; // (the bag as it was: __ChangeEquipItem)
             menuSound(app, campui::kSoundEquip);
             c.phase = App::Camp::Slot;
         }
         return;
+    }
     case App::Camp::Status:
         if (c.phase == App::Camp::Member) { menuSound(app, se::kChoose); c.phase = App::Camp::Slot; }
         return;
-    case App::Camp::Genes: menuSound(app, se::kBuzzer); return; // browsing only: plates are worn from Equip
+    case App::Camp::Genes: // browsing: a plate opens its known entries (Genes 3 -> 4), a plate with none is refused (kind 0xb)
+        if (c.phase == App::Camp::List && !c.list.empty()) {
+            if (campPlateLocked(app, item)) { menuSound(app, se::kBuzzer); return; }
+            menuSound(app, se::kChoose);
+            campOpenEntries(app, item);
+        } else if (c.phase == App::Camp::Entries) menuSound(app, se::kChoose); // (the list's own SE; Back alone leaves it)
+        return;
     }
 }
 
@@ -6246,7 +6356,7 @@ void campKey(App& app, SDL_Keycode key) {
     case App::Camp::Items:
     case App::Camp::Equip:
     case App::Camp::Genes:
-        if (c.phase == App::Camp::List) {
+        if (c.phase == App::Camp::List || c.phase == App::Camp::Entries) {
             const int n = int(c.list.size());
             if (step && n > 0) {
                 c.listCursor = (c.listCursor + step + n) % n;
@@ -6332,6 +6442,13 @@ void campClick(App& app, float px, float py) {
             if (index < int(c.list.size())) { c.listCursor = index; campChoose(app); }
         } else if (c.page == App::Camp::Items && inAt(lx0, 0, 40, 180, 40))
             campNextCategory(app, 1), menuSound(app, se::kPage);
+        return;
+    }
+    if (c.phase == App::Camp::Entries) {
+        if (in(campListX(app), kRowY, 256, kRowH * kRows)) {
+            const int index = c.listTop + int((my - kRowY) / kRowH);
+            if (index < int(c.list.size())) { c.listCursor = index; if (c.page == App::Camp::Genes) campChoose(app); }
+        } else if (c.page == App::Camp::Equip && in(336, kEntriesEquipY, 136, 40)) campChoose(app); // Equip
         return;
     }
     if (c.phase == App::Camp::Ask) {
@@ -6438,9 +6555,11 @@ void drawCampScrollBar(cr::MenuPainter& m, int top, int n, float a) {
     m.picture(106, sx, kRowY + (h - 40) * float(top) / float(n - kRows), a);
 }
 
-// ComUty_GeneBoardDraw at (x, y): the plate's name, its picture (gene_m*c.mct), "n / 6" known, then
-// its abilities and skills (unknown ones as ???)
-void drawGeneBoard(App& app, cr::MenuPainter& m, float x, float y, int plate, float a) {
+// ComUty_GeneBoardDraw at (x, y): the plate's name and "n / 6" known, then EITHER (mode 1, while the
+// plate list is browsed) the names of its known entries - ComUty_GeneAbilityStrChange's, up to six,
+// each centred in 128 px from (x + 12, y + 75) 18 apart - OR (mode 2, a plate chosen) its picture
+// (gene_m*c.mct) at (x + 12, y + 68)
+void drawGeneBoard(App& app, cr::MenuPainter& m, float x, float y, int plate, float a, int mode = 1) {
     if (!cr::isPlate(plate)) return;
     const float dark[4] = {0, 0, 0, 0.6f * a}, white[4] = {1, 1, 1, 0.85f * a}, clear[4] = {1, 1, 1, 0};
     m.quad(x, y, 163, 236, dark, dark);
@@ -6466,17 +6585,21 @@ void drawGeneBoard(App& app, cr::MenuPainter& m, float x, float y, int plate, fl
         cr::Image img;
         if (loadImage(app, kArt[size_t(plate - cr::kFirstPlate)].c_str(), img)) art = app.renderer.upload(img);
     }
-    if (art.id) { // the picture fitted into 76 x 76 under the bar
-        const float w = float(art.width), h = float(art.height), k = std::min(76 / std::max(w, 1.0f), 76 / std::max(h, 1.0f));
-        m.image(art, x + (163 - w * k) / 2, y + 44, w * k, h * k, a);
+    if (mode == 2) {
+        if (art.id) { // the picture, within 128 x 128 (the iPhone sheet's size)
+            const float w = float(art.width), h = float(art.height), k = std::min(1.0f, std::min(128 / std::max(w, 1.0f), 128 / std::max(h, 1.0f)));
+            m.image(art, x + 12, y + 68, w * k, h * k, a);
+        }
+        return;
     }
-    float ly = y + 126;
+    float ly = y + 75;
+    int shown = 0;
     for (int e : cr::plateContents(plate)) {
-        if (e <= 0) continue;
-        const bool known = ownedCount(app, e) > 0;
-        m.text(known ? itemName(app, e) : std::string("???"), x + 12, ly, false, known ? a : a * 0.5f, 12);
-        m.text(cr::isSkill(e) ? "Skill" : "Gene", x + 124, ly + 1, false, a * 0.55f, 10);
+        if (e <= 0 || ownedCount(app, e) <= 0 || shown >= 6) continue;
+        const std::string name = itemName(app, e);
+        m.text(name, x + 12 + (128 - m.textWidth(name, 12)) / 2, ly, false, a, 12);
         ly += 18;
+        ++shown;
     }
 }
 
@@ -8160,21 +8283,33 @@ void drawCamp(App& app) {
             for (int k = 0; k < kRows && c.slotTop + k < kEquipSlots; ++k) {
                 const int slot = c.slotTop + k, worn = slot < 3 ? pm.equip[slot] : pm.genes[slot - 3];
                 const int shown = worn > 0 ? worn : slot == 2 ? 0x1c6 : slot >= 3 ? 0x1c7 + (slot - 3) : 0;
-                drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), shown, 0, c.slot == slot, ease);
+                // (a row MuScrList_GetChoiceListNo refuses, -4, is drawn dim)
+                drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), shown, 0, c.slot == slot, campSlotLocked(app, c.member, slot) ? ease * 0.6f : ease);
             }
             drawCampScrollBar(m, c.slotTop, kEquipSlots, ease);
             left();
-        } else if (c.slot >= 3) { // a gene plate for the slot: its board beside the list
-            drawGeneBoard(app, m, 12, 92, item > 0 ? item : pm.genes[c.slot - 3], ease);
+        } else if (c.slot >= 3 && c.phase == App::Camp::Entries) { // CampMainPrc 0x1c: the chosen plate's picture, its known
+            // entries listed, the Equip plate (the list's -5 row) unless the member wears it
+            drawGeneBoard(app, m, 14, 92, c.plate, ease, 2);
             right();
             for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
                 const int index = c.listTop + k, it = c.list[size_t(index)];
-                const bool worn = std::find(std::begin(pm.genes), std::end(pm.genes), it) != std::end(pm.genes);
-                if (cr::isPlate(it)) drawGeneRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, index == c.listCursor, worn, ease);
+                drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, 0, index == c.listCursor, ease, cr::isSkill(it) ? "Skill" : "Gene");
+            }
+            drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
+            if (!campWears(app, ch, c.plate)) m.plate(336, kEntriesEquipY, -1, -1, true, ease, false, sysText(app, 58059));
+            left();
+        } else if (c.slot >= 3) { // a gene plate for the slot: its board (the cursor's known entries) beside the list
+            drawGeneBoard(app, m, 14, 92, cr::isPlate(item) ? item : pm.genes[c.slot - 3], ease, 1);
+            right();
+            for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
+                const int index = c.listTop + k, it = c.list[size_t(index)];
+                const bool worn = campWears(app, ch, it) || (campMembers(app) > 1 && campWears(app, campCharacter(app, c.member ^ 1), it));
+                if (cr::isPlate(it)) drawGeneRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, index == c.listCursor, worn, campPlateLocked(app, it) ? ease * 0.6f : ease);
                 else drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, 0, index == c.listCursor, ease);
             }
             drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
-            helpBoard(item);
+            helpBoard(cr::isPlate(item) ? item : 0);
         } else {
             drawShopBoard(app, 12, 92, ch, item > 0 ? item : 0, ease);
             right();
@@ -8189,15 +8324,25 @@ void drawCamp(App& app) {
         break;
     }
     case App::Camp::Genes:
-        drawGeneBoard(app, m, 14, 92, item, ease);
+        if (c.phase == App::Camp::Entries) { // Genes 4-5: the chosen plate's picture and its known entries
+            drawGeneBoard(app, m, 14, 92, c.plate, ease, 2);
+            right();
+            for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
+                const int index = c.listTop + k, it = c.list[size_t(index)];
+                drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, 0, index == c.listCursor, ease, cr::isSkill(it) ? "Skill" : "Gene");
+            }
+            drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
+            left();
+            break;
+        }
+        drawGeneBoard(app, m, 14, 92, item, ease, 1); // (browsing: the cursor's known entries by name)
         right();
         if (c.list.empty()) m.text("No gene plates.", kRowX + 56, kRowY + 16, false, ease, 15);
         for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
             const int index = c.listTop + k, it = c.list[size_t(index)];
-            const cr::PartyMember& gm = app.game.party[size_t(ch)];
-            const bool worn = std::find(std::begin(gm.genes), std::end(gm.genes), it) != std::end(gm.genes);
-            if (cr::isPlate(it)) drawGeneRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, index == c.listCursor, worn, ease);
-            else drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, 0, index == c.listCursor, ease);
+            bool worn = false;
+            for (int g = 0; g < campMembers(app); ++g) worn |= campWears(app, campCharacter(app, g), it);
+            drawGeneRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, index == c.listCursor, worn, campPlateLocked(app, it) ? ease * 0.6f : ease);
         }
         drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
         break;
@@ -8217,8 +8362,9 @@ void drawCamp(App& app) {
             }
             left();
             outPicture(m, art, 4, 0 - 140 * (1 - ease), 64, ease);
+            memberPlates(false); // (__CampCommon_CharChoice with DAT_000ec590 = -1: the plates stay, none lit)
             right();
-            drawShopBoard(app, 308 + 200 * (1 - ease), 68, ch, 0, ease);
+            drawShopBoard(app, 308 + 200 * (1 - ease), 68, ch, 0, ease, false); // (StateBoardDraw param_11 = 0)
             left();
         }
         break;
@@ -9563,11 +9709,20 @@ float screenFadeBackAlpha(const App& app) { // op 58's quad (PutMask's second)
 }
 
 // One 20 Hz frame of the running script and of the things it set going.
-// Voiced builds: a page's clips start when the page is shown (PrcMsg reaching code 0x1e), one
-// after another; a new page's line replaces one still playing.
+// Voiced builds: a page's clips start as the typing reaches their 0x1e (stepVoiceCue); a page turn
+// cuts the one still playing unless 0x1e 0xffff kept it, and so does the closing tap.
+void voicePageSync(App& app) {
+    const int page = int(std::min(app.dialoguePage, app.dialogue.size() - 1));
+    if (app.dialogueSerial == app.voicedSerial && page == app.voicedPage) return;
+    app.voicedSerial = app.dialogueSerial;
+    app.voicedPage = page;
+    app.voiceCue = 0;
+    if (!app.voiceKeep) app.sound.stopLine(); // an unvoiced page replaces the previous page too (a kept clip goes on)
+    app.voiceKeep = false;
+}
 void updateVoices(App& app) {
     if (app.dialogue.empty()) {
-        app.voiceQueue.clear(); // a closed/replaced scene cannot restart its remaining clips
+        app.voiceCue = 0; // a closed/replaced scene cannot restart its remaining clips
         if (app.voicedPage >= 0 && app.sound.hasVoices()) { // PrcMsg: the closing tap cuts the clip (unless 0x1e 0xffff kept it)
             if (!app.voiceKeep) app.sound.stopLine();
             app.voiceKeep = false, app.voicedPage = -1;
@@ -9575,30 +9730,25 @@ void updateVoices(App& app) {
         return;
     }
     if (!app.sound.hasVoices()) return;
-    const int page = int(std::min(app.dialoguePage, app.dialogue.size() - 1));
-    if (app.dialogueSerial != app.voicedSerial || page != app.voicedPage) {
-        app.voicedSerial = app.dialogueSerial;
-        app.voicedPage = page;
-        app.voiceQueue.clear();
-        if (!app.voiceKeep) app.sound.stopLine(); // an unvoiced page replaces the previous page too (a kept clip goes on)
-        app.voiceKeep = false;
-        if (page < int(app.dialogueVoices.size()) && !app.dialogueVoices[page].empty()) {
-            std::vector<int> clips;
-            for (int c : app.dialogueVoices[page])
-                if (c < 0) app.voiceKeep = true; // the page's 0x1e 0xffff
-                else clips.push_back(c);
-            if (!clips.empty()) {
-                app.sound.playLine(clips[0]);
-                ++app.voicesPlayed;
-                app.voiceQueue.assign(clips.begin() + 1, clips.end());
-            }
-        }
-    }
-    if (!app.voiceQueue.empty() && !app.sound.linePlaying()) {
-        app.sound.playLine(app.voiceQueue.front());
-        ++app.voicesPlayed;
-        app.voiceQueue.erase(app.voiceQueue.begin());
-    }
+    voicePageSync(app);
+}
+// _PrcMsg's 0x1e, reached by the typing: 0xffff marks the page's clip kept over the next page turn;
+// any other, while a field clip still plays (this page's last, or one kept from the page before:
+// FUN_00009408), holds the typing there, and starts once it is quiet. True: holding
+bool stepVoiceCue(App& app) {
+    if (app.dialogue.empty() || !app.sound.hasVoices()) return false;
+    voicePageSync(app);
+    const size_t page = std::min(app.dialoguePage, app.dialogue.size() - 1);
+    if (page >= app.dialogueVoices.size()) return false;
+    const std::vector<App::VoiceCue>& cues = app.dialogueVoices[page];
+    if (app.voiceCue >= cues.size() || cues[app.voiceCue].at > app.dialogueTyped) return false;
+    const int clip = cues[app.voiceCue].clip;
+    if (clip < 0) { app.voiceKeep = true; ++app.voiceCue; return false; }
+    if (app.sound.linePlaying()) return true;
+    app.sound.playLine(clip);
+    ++app.voicesPlayed;
+    ++app.voiceCue;
+    return false;
 }
 
 // ---- Puzzle rooms (PuzzleScene, PuzzleManager, the touch abilities, the PuzzleObjects) ----
@@ -12211,7 +12361,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
         return;
     }
     app.sound.stopDialogueVoices();
-    app.voiceQueue.clear();
+    app.voiceCue = 0;
     b.active = true;
     b.start = start;
     b.flags = flags;
@@ -12243,7 +12393,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     b.voiceRng = uint32_t(SDL_GetTicks()) | 1u;
     for (int& v : b.voiceVariant) { b.voiceRng = b.voiceRng * 1103515245u + 12345u; v = int((b.voiceRng >> 16) % 3); } // reset_variants
     for (bool& c : b.commandSaid) c = false;
-    b.voiceRound = -1, b.voiceLeader = 0;
+    b.voiceRound = -1, b.voiceLeader = 0, b.winWait = 0;
     b.flash = {};
     b.stageAction = 0;
     b.breakPop = 0;
@@ -12387,7 +12537,7 @@ void settleBattle(App& app) {
 // area's EvrStart 2 script (run after battles)
 void endBattle(App& app, bool won) {
     app.renderer.resetHistory(); // a cut: the upscaler starts over
-    app.sound.stopBattleLines(); // _btlvoice_stop_all
+    app.sound.stopBattleLines(); // FUN_00092744 (btl_main 0x238b: after the results, as the party is written back)
     App::Battle& b = app.battle;
     settleBattle(app);
     std::string names;
@@ -12478,6 +12628,7 @@ void battleOpenTargets(App& app, int action) {
 void battleStartRound(App& app) {
     App::Battle& b = app.battle;
     b.rules.beginRound(b.cmds, app.battleActions);
+    app.sound.stopBattleLines(); // __menub_mainPrc 0x270e (the commands close): FUN_00092744, every line stopped
     for (int k = 0; k < 2; ++k) // defending holds the guard pose through the round
         if (b.rules.f[size_t(k)].guarding)
             if (App::Battle::Actor* a = battleActor(app, k)) playSlot(app, *a, btlui::kSlotGuard);
@@ -13182,7 +13333,7 @@ int eitherOf(App& app, int x, int y) {
 // _btlvoice_choose_speaker: 99 either of the party; a side acting as a pair, either of it
 int chooseSpeaker(App& app, int k) {
     const cr::BattleRules& r = app.battle.rules;
-    if (k == 99) return r.f[1].present ? eitherOf(app, 0, 1) : 0;
+    if (k == 99) return r.f[1].present && rnd(app, 2) ? 1 : 0; // (FUN_00092d18: a coin flip whenever member 1 is there, down or not)
     if (k >= 2 && r.enemyPair && (k == 2 || k == 3)) return eitherOf(app, 2, 3);
     if (k < 2 && r.pair) return eitherOf(app, 0, 1);
     return k;
@@ -13209,22 +13360,28 @@ bool mayReact(const App& app, int k) { // a side acting as a pair, or hit by an 
     return (!pairSide && !allOf) || b.voiceSpeaks[size_t(k)];
 }
 
-// _btlvoice_listed_battle: these battles' monsters coming back say 0x1f..0x21 instead
-bool listedBattle(const App& app, int k) { // Omega: groups 669..672, a strong-growth monster
+// _btlvoice_listed_battle (FUN_00092830): these battles' strong-growth monsters falling say 0x1f..0x21 instead
+bool listedBattle(const App& app, int k) { // Omega: groups 669..672
     static const int kList[] = {669, 670, 671, 672};
     const cr::Fighter& f = app.battle.rules.f[size_t(std::clamp(k, 0, 4))];
     return f.def && f.def->strongGrowth && std::find(std::begin(kList), std::end(kList), app.battle.start.group) != std::end(kList);
 }
 
-// _btlvoice_hp_change (from btlcalc_chk_dead): fighter k's HP goes from `before` to `after`
-void hpChange(App& app, int k, int before, int after) {
+// FUN_000928b0 (from btlcalc_chk_dead): fighter k took a blow of `damage` (0: a miss, a guard, no
+// effect - btlcalc_dmg_hp's return, not the HP). Not for the kind-99 changes (status_prc's ticks,
+// 0404's and 0412's costs in their users' HP); under action 437 only while the HP left equals the
+// damage; a blow skill 189 answered before it landed (que +0xc5) gets the counter line 0xa8 instead
+void hpChange(App& app, int k, int damage) {
     if (!on(app) || speaker(app, k) < 0 || !mayReact(app, k)) return;
-    const cr::Fighter& f = app.battle.rules.f[size_t(k)];
-    if (after <= 0) play(app, k, 0x22, 0x23, 0x24); // down
-    else if (before <= 0) {
+    const App::Battle& b = app.battle;
+    const cr::Fighter& f = b.rules.f[size_t(k)];
+    if (b.turn.action == 437 && f.hp != damage) return;
+    if (b.turn.counterSkill) play(app, k, 0xa8, 0xa8, 0xa8);
+    else if (damage == 0) play(app, k, 0x22, 0x23, 0x24); // it came to nothing
+    else if (f.hp <= 0) {                                   // down
         if (k >= 2 && listedBattle(app, k)) play(app, k, 0x1f, 0x20, 0x21);
         else play(app, k, 0x1c, 0x1d, 0x1e);
-    } else if (before > f.hpMax / 4) play(app, k, 0x16, 0x17, 0x18); // hit
+    } else if (f.hp > f.hpMax / 4) play(app, k, 0x16, 0x17, 0x18); // hit
     else play(app, k, 0x19, 0x1a, 0x1b);                             // hit, low already
 }
 
@@ -13239,11 +13396,10 @@ void healed(App& app, int k) { // _btlvoice_healed: to full, or not
 // guard, 4 a strong one fell
 void attack(App& app, const cr::BattleTurn& t) {
     if (!on(app) || speaker(app, t.actors[0]) < 0) return;
-    { // only when the action had no line of its own (its slot is -1); else the turn line was the voice
+    { // only when the action had no line of its own (its slot is -1); else the turn line was the voice -
+      // FUN_00092f04 reads the party slot for a member, the monster slot for a monster (not by the speaker mask)
         const cr::BattleActionDef* a = app.battleActions.get(t.action);
-        const int sp = speaker(app, t.actors[0]);
-        const bool own = (sp >= 0 && sp <= 2) || (sp >= 19 && sp <= 26) || t.actors[0] < 2;
-        if (a && a->voice[own ? 0 : 3] != -1) return;
+        if (a && a->voice[t.actors[0] < 2 ? 0 : 3] != -1) return;
     }
     int how = 0;
     for (const cr::BattleHit& h : t.hits) {
@@ -13298,8 +13454,26 @@ void turn(App& app, int k, int action) {
     play(app, who, v[0], v[1], v[2]);
 }
 
-// _btlvoice_victory: scripted battles' own lines (0xc93d0, by the pair), else 500..502 / with
-// someone down or at a quarter HP or less 503..505
+// btl +0xb06 (_read_btlcpl): a monster of the strong-growth kind is in this battle
+bool strongInBattle(const App& app) {
+    for (int k = 2; k < 5; ++k) {
+        const cr::Fighter& f = app.battle.rules.f[size_t(k)];
+        if (f.present && f.def && f.def->strongGrowth) return true;
+    }
+    return false;
+}
+
+// FUN_000926d8 (btl_main 799): in groups 651, 669, 671, 672 and 673 the victory waits while a battle voice still
+// plays. The scene caps the wait at the longest clip (15.7 s in voicebtl.bin): a stream the device never drains
+// (the headless tests) cannot hold the battle
+constexpr int kWinWaitMax = 16 * 20;
+bool winWaits(const App& app) {
+    const int g = app.battle.start.group;
+    return (g == 651 || g == 669 || g == 671 || g == 672 || g == 673) && app.sound.battleLinePlaying();
+}
+
+// _btlvoice_victory (FUN_0009327c): scripted battles' own lines (0xc93d0, by the pair), else 500..502 / with
+// someone down or at a quarter HP or less 503..505; six on (506..511) with a strong-growth monster in the battle
 void victory(App& app) {
     if (!on(app)) return;
     App::Battle& b = app.battle;
@@ -13321,7 +13495,7 @@ void victory(App& app) {
             if (b.rules.f[size_t(k)].present && (k == who || b.rules.pair))
                 hurt |= !living(app, k) || b.rules.f[size_t(k)].hp <= b.rules.f[size_t(k)].hpMax / 4;
         int& v = b.voiceVariant[size_t(who)];
-        line = (hurt ? 503 : 500) + v;
+        line = (strongInBattle(app) ? 506 : 500) + (hurt ? 3 : 0) + v;
         v = (v + 1) % 3;
     }
     const int clip = clipFor(app, sp, line);
@@ -13373,7 +13547,8 @@ void startTurn(App& app) {
     if (!t.repeat) { // btlque_make_que (once an action): the actor's action line, the sides' speakers picked afresh
         b.voiceRound = b.rules.round;
         if (t.actors[0] >= 0 && t.actors[0] < 2) b.voiceLeader = t.actors[0];
-        btlvoice::turn(app, t.actors[0], t.action);
+        // (no line for a counter's go - its "Counter!" instead - nor for group 657's 437 in its first two rounds)
+        if (!t.counter && !(t.action == 437 && b.start.group == 657 && b.rules.round <= 2)) btlvoice::turn(app, t.actors[0], t.action);
         btlvoice::pickSpeakers(app);
     }
     if (t.kind == cr::kCmdEscape && t.escaped) btlvoice::playSide(app, 99, 0x13, 0x14, 0x15); // btlact_escape_init (either member)
@@ -13508,13 +13683,34 @@ void showHits(App& app) {
             b.notices.push_back(n);
     if (b.turn.gone) // the monster leaves
         if (App::Battle::Actor* u = battleActor(app, b.turn.actors[0])) u->fading = true;
+    { // the calcs' own lines (3.1.0's voice calls in the calcs, as the blow is shown)
+        const cr::BattleActionDef* act = app.battleActions.get(b.turn.action);
+        if (b.turn.reflected && !b.turn.barriers.empty()) // _btlact_gene: the barrier's holder, as it turns the gene back
+            btlvoice::playSide(app, b.turn.barriers.front(), 0xa5, 0xa5, 0xa5);
+        if (act && act->calc == 10 && !b.turn.hits.empty()) { // _btlcalc_0415 (Steal Oz): the robbed one - hit, or nothing taken
+            const bool took = b.turn.message == 57039;
+            btlvoice::playSide(app, b.turn.hits.front().target, took ? 0x16 : 0x22, took ? 0x17 : 0x23, took ? 0x18 : 0x24);
+        }
+        if (act && act->id == 223) { // _btlcalc_0504 (Steal Item): the thief - a catch 0x96, a failure 0x97, nothing left silent
+            const bool got = std::any_of(b.turn.notices.begin(), b.turn.notices.end(),
+                                         [](const cr::BattleNotice& n) { return n.fighter < 0 && n.entry == 5; });
+            if (got) btlvoice::playSide(app, b.turn.actors[0], 0x96, 0x96, 0x96);
+            else if (b.turn.message == 57038) btlvoice::playSide(app, b.turn.actors[0], 0x97, 0x97, 0x97);
+        }
+        if (b.turn.message == 57049 || b.turn.message == 57050) // _btlcalc_0506: a gene or skill taken from the fallen
+            btlvoice::playSide(app, b.turn.actors[0], 0xa9, 0xaa, 0xab);
+    }
     for (const cr::BattleHit& h : b.turn.hits) {
         App::Battle::Actor* a = battleActor(app, h.target);
         const cr::Fighter& f = b.rules.f[size_t(h.target)];
-        const int hpBefore = b.shownHp[h.target];
         if (h.revived) btlvoice::playSide(app, h.target, 0x2b, 0x2c, 0x2d); // btlcalc_0424
-        else if (h.amount < 0 && !h.mp) btlvoice::healed(app, h.target);   // btlcalc_dmg_hp
-        else if (h.amount > 0 && !h.mp) btlvoice::hpChange(app, h.target, hpBefore, f.hp); // btlcalc_chk_dead
+        else if (!h.mp && !h.silent && h.type != cr::kHitQuiet) {
+            const cr::BattleActionDef* act = app.battleActions.get(b.turn.action);
+            if (act && act->calc == 40 && app.game.flag(0x584) && b.voiceSpeaks[size_t(h.target)]) // _btlcalc_0432's 1000-damage form: the side's speaker
+                btlvoice::playSide(app, h.target, 0xa7, 0xa7, 0xa7);
+            if (h.amount < 0) btlvoice::healed(app, h.target);   // btlcalc_dmg_hp
+            else btlvoice::hpChange(app, h.target, h.amount);     // btlcalc_chk_dead (a miss too)
+        }
         b.shownHp[h.target] = f.hp;
         b.shownMp[h.target] = f.mp;
         if (!a || h.type == cr::kHitQuiet) continue;
@@ -14132,8 +14328,10 @@ void stepBattle(App& app) {
             if (b.rules.nextTurn(app.battleActions, b.turn)) {
                 b.turnOn = true;
                 startTurn(app);
-            } else if (b.popups.empty())
+            } else if (b.popups.empty()) {
+                if (b.rules.outcome() == 2 && btlvoice::winWaits(app) && b.winWait++ < btlvoice::kWinWaitMax) break; // btl_main 799: the win holds for a line still playing
                 endRound(app);
+            }
             break;
         }
         ++b.turnFrame;
@@ -16350,6 +16548,58 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
             App::Battle& b = app.battle;
             if (b.active) {
                 vbad += btlvoice::speaker(app, 0) != b.rules.f[0].character; // the party's own
+                { // FUN_000928b0's lines by the damage and the HP left, and its gates; chooseSpeaker(99)'s coin; the win's wait
+                    auto bad = [&](bool failed, const char* what) { if (failed) { ++vbad; std::printf("battle voices FAILED: %s\n", what); } };
+                    auto said = [&](int situation) { // the log's last clip is member 0's `situation` (none in the table: nothing to say)
+                        const int c = btlvoice::clipFor(app, btlvoice::speaker(app, 0), situation);
+                        return c <= 0 || (!app.sound.battleLineLog.empty() && app.sound.battleLineLog.back() == c);
+                    };
+                    auto lineOf = [&](int from) { return said(from) || said(from + 1) || said(from + 2); };
+                    cr::Fighter& m = b.rules.f[0];
+                    const int hp = m.hp;
+                    for (bool& sp : b.voiceSpeaks) sp = true;
+                    b.turn = cr::BattleTurn();
+                    btlvoice::hpChange(app, 0, 0);
+                    bad(!lineOf(0x22), "no damage says 0x22..0x24");
+                    m.hp = m.hpMax;
+                    btlvoice::hpChange(app, 0, 1);
+                    bad(!lineOf(0x16), "a hit above a quarter HP says 0x16..0x18");
+                    m.hp = std::max(1, m.hpMax / 5);
+                    btlvoice::hpChange(app, 0, 1);
+                    bad(!lineOf(0x19), "a hit at a quarter HP or less says 0x19..0x1b");
+                    m.hp = 0;
+                    btlvoice::hpChange(app, 0, 1);
+                    bad(!lineOf(0x1c), "a fall says 0x1c..0x1e");
+                    b.turn.counterSkill = true;
+                    btlvoice::hpChange(app, 0, 1);
+                    bad(!said(0xa8), "the Counter skill's answer says 0xa8");
+                    b.turn.counterSkill = false;
+                    b.turn.action = 437;
+                    const size_t n = app.sound.battleLineLog.size();
+                    m.hp = m.hpMax;
+                    btlvoice::hpChange(app, 0, m.hpMax - 1); // 437: only while the HP left equals the damage
+                    bad(app.sound.battleLineLog.size() != n, "437 with the HP left unequal to the damage says nothing");
+                    btlvoice::hpChange(app, 0, m.hpMax);
+                    bad(!lineOf(0x16) || app.sound.battleLineLog.size() != n + 1, "437 with the HP left equal to the damage reacts");
+                    b.turn = cr::BattleTurn();
+                    m.hp = hp;
+                    if (b.rules.f[1].present) { // chooseSpeaker(99): member 1 may be picked though down
+                        const int hp1 = b.rules.f[1].hp;
+                        b.rules.f[1].hp = 0;
+                        bool one = false, zero = false;
+                        for (int i = 0; i < 40; ++i) (btlvoice::chooseSpeaker(app, 99) ? one : zero) = true;
+                        bad(!one || !zero, "chooseSpeaker(99) flips a coin with member 1 down");
+                        b.rules.f[1].hp = hp1;
+                    }
+                    const int group = b.start.group;
+                    bad(btlvoice::winWaits(app), "no win wait outside the listed groups");
+                    b.start.group = 673;
+                    btlvoice::play(app, 0, 1, 1, 1);
+                    if (app.sound.battleLinePlaying()) bad(!btlvoice::winWaits(app), "group 673's win waits for a line playing");
+                    app.sound.stopBattleLines();
+                    bad(btlvoice::winWaits(app), "no win wait once the lines are stopped");
+                    b.start.group = group;
+                }
                 app.sound.battleLineLog.clear();
                 for (int f = 0; f < 6000 && b.active && b.phase != App::Battle::Results && b.phase != App::Battle::Lost; ++f) {
                     if (b.phase == App::Battle::Command && b.menu == App::Battle::Top) {
@@ -16366,6 +16616,13 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 int inRange = 0;
                 for (int c : log) inRange += c > 0 && c < app.sound.voiceClips(true);
                 vbad += log.size() < 3 || inRange != int(log.size());
+                if (won && !log.empty()) { // the last line is the victory's: 500..505, 506..511 with a strong-growth monster in it
+                    const int base = btlvoice::strongInBattle(app) ? 506 : 500;
+                    bool victoryLine = false;
+                    for (size_t i = 0; i < app.battleVoiceTable.size(); ++i)
+                        if (app.battleVoiceTable[i] == log.back() && int(i % 1000) + 1 >= base && int(i % 1000) + 1 < base + 6) victoryLine = true;
+                    if (!victoryLine) { ++vbad; std::printf("battle voices FAILED: the won battle's last line is a victory line (%d..)\n", base); }
+                }
                 if (SDL_getenv("CR_BATTLE_DEBUG"))
                     for (int c : log)
                         for (size_t i = 0; i < app.battleVoiceTable.size(); ++i)
@@ -17097,18 +17354,27 @@ int sceneAudioSelfTest(App& app) {
             if (app.sound.linePlaying()) { clip = i; break; }
         }
         check(clip >= 0, "a real story clip can play");
-        if (clip >= 0) {
+        if (clip >= 0) { // PrcMsg 0x1e: a page's two cues, the typing held at the second while the first plays
             app.dialogue = {{"Old page"}};
-            app.dialogueVoices = {{clip, clip}};
+            app.dialogueVoices = {{{0, clip}, {0, clip}}};
             ++app.dialogueSerial;
             app.dialoguePage = 0;
-            updateVoices(app);
-            check(app.voiceQueue.size() == 1, "a page queues its second clip");
-            app.dialogue.clear(); // a scene closes the window directly, without a page tap
+            app.dialogueTyped = 0;
+            check(!stepVoiceCue(app) && app.sound.linePlaying() && app.voiceCue == 1, "a page's first cue starts its clip");
+            check(stepVoiceCue(app) && app.voiceCue == 1, "its second cue holds the typing while the first clip plays");
             app.sound.stopLine(); // the first clip has finished
-            const int played = app.voicesPlayed;
+            int played = app.voicesPlayed;
+            check(!stepVoiceCue(app) && app.sound.linePlaying() && app.voicesPlayed == played + 1 && app.voiceCue == 2,
+                  "the second clip follows once the first is done");
+            app.dialogueVoices = {{{0, clip}, {0, clip}}};
+            ++app.dialogueSerial; // a new page with two cues: its first starts ...
+            app.sound.stopLine();
+            check(!stepVoiceCue(app) && app.sound.linePlaying() && app.voiceCue == 1, "a new page's cues start over");
+            app.dialogue.clear(); // ... then a scene closes the window directly, without a page tap
+            app.sound.stopLine(); // the first clip has finished
+            played = app.voicesPlayed;
             updateVoices(app);
-            check(app.voiceQueue.empty() && app.voicesPlayed == played && !app.sound.linePlaying(),
+            check(!stepVoiceCue(app) && app.voiceCue == 0 && app.voicesPlayed == played && !app.sound.linePlaying(),
                   "a closed page cannot restart its remaining clip");
             app.sound.playLine(clip);
             app.dialogue = {{"Silent replacement"}};
@@ -17116,7 +17382,6 @@ int sceneAudioSelfTest(App& app) {
             ++app.dialogueSerial;
             updateVoices(app);
             check(!app.sound.linePlaying(), "an unvoiced replacement stops the previous page's line");
-            app.voiceQueue = {clip};
         }
     }
     app.dialogue = {{"Interrupted by battle"}};
@@ -17126,13 +17391,13 @@ int sceneAudioSelfTest(App& app) {
     startBattle(app, {1, 0, -1, 0}, 0);
     check(app.battle.active, "real battle starts");
     app.sound.update(); // refill an old looping stream if battle entry failed to stop it
-    check(app.dialogue.empty() && app.voiceQueue.empty() && app.sound.dialogueVoiceCount() == 0,
+    check(app.dialogue.empty() && app.sound.dialogueVoiceCount() == 0,
           "battle entry clears the field dialogue's audio and queued clips");
     if (app.battle.active) endBattle(app, false);
     app.runner.stop();
     app.sound.stopAll();
     bootTitle(app);
-    check(app.voiceQueue.empty() && app.sound.dialogueVoiceCount() == 0, "title cleanup remains silent");
+    check(app.sound.dialogueVoiceCount() == 0, "title cleanup remains silent");
     problems += app.renderer.takeErrors();
     std::printf("scene audio: story clip %d, battle entry and title; %d problems\n", clip, problems);
     return problems;
@@ -18846,6 +19111,105 @@ int runSelfTest(App& app) {
         glErrors += errs;
         app.game = cr::GameState();
     }
+    { // The Camp's gene plates (CampMainPrc 0x17-0x1f and the Genes page 2-6, read in the 3.1.0
+      // code): a plate is chosen (0x93) and its known entries listed with the board in picture
+      // mode; only the list's Equip row wears it (0xa6) and Back returns to the plate list. The
+      // plate list holds the bag's plates with a known entry, one the other member wears included,
+      // Remove last and only while the slot is worn (acting at once); the slot list refuses the
+      // empty plate slots 2-4 until a common skill is known and, in the first scenario, the Human
+      // Genes 474..476; the Genes page lists every plate in the bag, refuses one without a known
+      // entry and opens the others' entries. Jewels: Remove last; the Items page leaves out the
+      // held-back member's one worn jewel.
+        int problems = 0;
+        auto chk = [&](bool bad, const char* what) { if (bad) { ++problems; std::printf("camp plates: not as expected: %s\n", what); } };
+        app.game = cr::GameState();
+        app.playerChar = 0;
+        app.game.scenario = 0;
+        auto on = [](int plate, int e) { // e among the plate's entries
+            const auto& pc = cr::plateContents(plate);
+            return std::find(pc.begin(), pc.end(), e) != pc.end();
+        };
+        // (every entry of the plates 481.. is a "common" one, 89..113 / 139..186: the lock opens with
+        // the first gene learned from one) plate 481's first entry and plate 483's skill, neither
+        // on 474, 475 or 482
+        const int e481 = 108, common = 146, commonPlate = 483;
+        chk(!on(481, e481) || !on(commonPlate, common) || on(482, e481) || on(482, common) || on(474, e481) || on(475, e481) ||
+                on(474, common) || on(475, common) || on(481, common),
+            "the test plates' entries");
+        app.game.items = {{481, 1}, {482, 1}, {474, 1}, {475, 1}, {commonPlate, 1}}; // the plates, nothing known yet
+        for (auto& pm : app.game.party) pm.genes[0] = pm.genes[1] = pm.genes[2] = pm.genes[3] = 0;
+        app.game.party[0].genes[0] = 474;                      // Escher's Human Genes (scenario 0: 474..476 are refused)
+        app.game.party[1].genes[1] = 481;                      // Musiea wears 481: listed for Escher all the same
+        openCamp(app);
+        auto key = [&](SDL_Keycode k) { campKey(app, k); };
+        App::Camp& c = app.camp;
+        c.cursor = 1, key(SDLK_RETURN), key(SDLK_RETURN);     // Equip, Escher: the slot list
+        chk(c.phase != App::Camp::Slot, "c.phase != App::Camp::Slot");
+        c.slot = 3, key(SDLK_RETURN);                         // Human Genes 474 in the first scenario: refused
+        chk(c.phase != App::Camp::Slot, "c.phase != App::Camp::Slot");
+        c.slot = 4, key(SDLK_RETURN);                         // the empty plate slot 2: shut until a common skill is known
+        chk(c.phase != App::Camp::Slot || campCommonSkill(app), "c.phase != App::Camp::Slot || campCommonSkill(app)");
+        app.game.items[e481] = 1, app.game.items[common] = 1;  // ... known now (their plates are in the bag)
+        chk(!campCommonSkill(app), "!campCommonSkill(app)");
+        key(SDLK_RETURN);                                      // 481 (known entry), the common skill's plate; not 482, no Remove
+        chk(c.phase != App::Camp::List || c.list != std::vector<int>{481, commonPlate}, "c.phase != App::Camp::List || c.list != std::vector<int>{481, commonPlate}");
+        key(SDLK_RETURN);                                      // 481 chosen: its known entries, nothing worn yet
+        chk(c.phase != App::Camp::Entries || c.plate != 481 || c.list != std::vector<int>{e481} || app.game.party[0].genes[1] != 0, "c.phase != App::Camp::Entries || c.plate != 481 || c.list != std::vector<int>{e481} || app.game.party[0].genes[1] != 0");
+        int frames = 0;
+        for (int f = 0; f < 2; ++f) { app.lastTicks = 0; drawFrame(app, false); ++frames; }
+        key(SDLK_ESCAPE);                                      // Back: the plate list again
+        chk(c.phase != App::Camp::List || c.listCursor != 0 || c.list.size() != 2, "c.phase != App::Camp::List || c.listCursor != 0 || c.list.size() != 2");
+        key(SDLK_RETURN), key(SDLK_RETURN);                    // Equip: worn
+        chk(app.game.party[0].genes[1] != 481 || c.phase != App::Camp::Slot, "app.game.party[0].genes[1] != 481 || c.phase != App::Camp::Slot");
+        key(SDLK_RETURN);                                      // the worn slot's list: Remove last
+        chk(c.phase != App::Camp::List || c.list != std::vector<int>{481, commonPlate, campui::kRemove}, "c.phase != App::Camp::List || c.list != std::vector<int>{481, commonPlate, campui::kRemove}");
+        key(SDLK_RETURN), key(SDLK_RETURN);                    // 481 again: no Equip row while Escher wears it
+        chk(c.phase != App::Camp::Entries || app.game.party[0].genes[1] != 481, "c.phase != App::Camp::Entries || app.game.party[0].genes[1] != 481");
+        key(SDLK_ESCAPE);
+        c.listCursor = 2, key(SDLK_RETURN);                    // Remove: off at once
+        chk(app.game.party[0].genes[1] != 0 || c.phase != App::Camp::Slot, "app.game.party[0].genes[1] != 0 || c.phase != App::Camp::Slot");
+        app.game.party[0].genes[0] = 477;                      // another Human Genes: the slot opens on 474.., Remove last
+        c.slot = 3, key(SDLK_RETURN);
+        chk(c.phase != App::Camp::List || c.list != std::vector<int>{474, 475, campui::kRemove}, "c.phase != App::Camp::List || c.list != std::vector<int>{474, 475, campui::kRemove}");
+        c.listCursor = 1, key(SDLK_RETURN);                    // 475: no known entry, refused (kind 6)
+        chk(c.phase != App::Camp::List, "c.phase != App::Camp::List");
+        for (int f = 0; f < 2; ++f) { app.lastTicks = 0; drawFrame(app, false); ++frames; }
+        key(SDLK_ESCAPE), key(SDLK_ESCAPE), key(SDLK_ESCAPE);  // the list, the slots, the members: the Camp's front
+        chk(c.page != App::Camp::Main || !app.campOpen, "c.page != App::Camp::Main || !app.campOpen");
+        c.cursor = 2, key(SDLK_RETURN);                        // Genes: every plate in the bag, in id order
+        chk(c.page != App::Camp::Genes || c.list != std::vector<int>{474, 475, 481, 482, commonPlate}, "c.page != App::Camp::Genes || c.list != std::vector<int>{474, 475, 481, 482, commonPlate}");
+        c.listCursor = 3, key(SDLK_RETURN);                    // 482: nothing known, refused
+        chk(c.phase != App::Camp::List, "c.phase != App::Camp::List");
+        c.listCursor = 2, key(SDLK_RETURN);                    // 481: its entries
+        chk(c.phase != App::Camp::Entries || c.plate != 481 || c.list != std::vector<int>{e481}, "c.phase != App::Camp::Entries || c.plate != 481 || c.list != std::vector<int>{e481}");
+        for (int f = 0; f < 2; ++f) { app.lastTicks = 0; drawFrame(app, false); ++frames; }
+        key(SDLK_RETURN);                                      // (no Equip row here)
+        chk(c.phase != App::Camp::Entries || app.game.party[0].genes[1] != 0, "c.phase != App::Camp::Entries || app.game.party[0].genes[1] != 0");
+        key(SDLK_ESCAPE);
+        chk(c.phase != App::Camp::List || c.listCursor != 2, "c.phase != App::Camp::List || c.listCursor != 2");
+        app.game.items[369] = 1, app.game.items[370] = 1;      // jewels: Remove last while one is worn
+        app.game.party[0].equip[cr::kJewel] = 370;
+        const auto jewels = campEquipList(app, 0, cr::kJewel);
+        chk(jewels.size() < 2 || jewels.back() != campui::kRemove || std::find(jewels.begin(), jewels.end(), 369) == jewels.end(), "jewels.size() < 2 || jewels.back() != campui::kRemove || std::find(jewels.begin(), jewels.end(), 369) == jewels.end()");
+        app.game.setFlag(0xfed, true);                         // Musiea held back wearing 369: its one copy stays out of the bag's list
+        app.game.party[1].equip[cr::kJewel] = 369;
+        auto bag = campItems(app, 4);
+        chk(std::find(bag.begin(), bag.end(), 369) != bag.end() || std::find(bag.begin(), bag.end(), 370) == bag.end(), "std::find(bag.begin(), bag.end(), 369) != bag.end() || std::find(bag.begin(), bag.end(), 370) == bag.end()");
+        app.game.items[369] = 2;                               // a second copy: listed
+        bag = campItems(app, 4);
+        chk(std::find(bag.begin(), bag.end(), 369) == bag.end(), "std::find(bag.begin(), bag.end(), 369) == bag.end()");
+        app.game.setFlag(0xfed, false);
+        const std::string removeName = itemName(app, campui::kRemove), equipName = sysText(app, 58059);
+        chk(removeName.rfind("item ", 0) == 0 || equipName.empty(), "removeName.rfind(\"item \", 0) == 0 || equipName.empty()");
+        const int errs = app.renderer.takeErrors();
+        key(SDLK_ESCAPE), key(SDLK_ESCAPE);
+        chk(app.campOpen + errs, "app.campOpen + errs");
+        std::printf("camp plates: common skill %d on plate %d, \"%s\" / \"%s\"; %d frames, %d render API errors; %d problems\n",
+                    common, commonPlate, removeName.c_str(), equipName.c_str(), frames, errs, problems);
+        mapErrors += problems;
+        glErrors += errs;
+        app.game = cr::GameState();
+    }
     { // The field menu (menuf_mainPrc): the corner button slides the bar out and back in 4 frames;
       // skill 170 known adds the encounter switch (per pair, refused under flag 4076), and while
       // it's off the walked distance doesn't count; skill 174 worn banks 1 EXP every 10 units,
@@ -20463,7 +20827,7 @@ void bootTitle(App& app) {
     app.runner.stop();
     app.sound.stopAll(); // fldread_prc: returning to the title also ends looping effects
     app.sound.stopDialogueVoices();
-    app.voiceQueue.clear();
+    app.voiceCue = 0;
     app.fadeGrey = app.fadeFrom = app.fadeTo = 0;
     app.fadeT = app.fadeFrames = 0;
     app.crystalCam = App::CrystalCam();
@@ -21197,7 +21561,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                         app.battlesFought);
             if (pi < app.dialogueVoices.size() && !app.dialogueVoices[pi].empty()) {
                 std::printf("voices on this page:");
-                for (int v : app.dialogueVoices[pi]) std::printf(" %d", v);
+                for (const App::VoiceCue& v : app.dialogueVoices[pi]) std::printf(" %d@%d", v.clip, v.at);
                 std::printf("\n");
             }
         }
