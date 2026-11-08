@@ -198,11 +198,15 @@ void MenuPainter::plate(float x, float y, int icon, int word, bool selected, flo
 
 void MenuPainter::gauge(float x, float y, int value, float alpha, bool highlight) {
     value = std::clamp(value, 0, 100);
-    picture(103, x, y, alpha);
-    for (int k = 0; k < 24; ++k) picture(105, x + 20 + 8 * k, y, alpha);
-    picture(104, x + 212, y, alpha);
-    picture(108, x - 1, y - 13, alpha);
-    picture(107, x + 193, y - 13, alpha);
+    // ComUty_SideGuageDraw (Omega's sheet): the left cap 0x68 at x, the track 0x6a 24 times from
+    // x + 20, 8 apart, the right cap 0x69 at x + 212, "Min" (0x6d) at (x - 1, y - 13), "Max" (0x6c) at
+    // (x + 193, y - 13), the knob 0x6b at y - 16. (CR1's numbers had drawn the "Options" title (103)
+    // as the left cap.)
+    picture(104, x, y, alpha);
+    for (int k = 0; k < 24; ++k) picture(106, x + 20 + 8 * k, y, alpha);
+    picture(105, x + 212, y, alpha);
+    picture(109, x - 1, y - 13, alpha);
+    picture(108, x + 193, y - 13, alpha);
     // The fill (red, 0xFFFF0000) up to the knob at 235 + value x 2.03 (SideGuageInit; menus
     // place gauges at x 224, so it is x + 11 + ...)
     const float knob = x + 11 + std::floor(value * 2.03f);
@@ -213,7 +217,7 @@ void MenuPainter::gauge(float x, float y, int value, float alpha, bool highlight
         quad(x + 14, y + 5, fill, 4, red, red);
     }
     const float r = highlight ? 0x4B / 255.0f : 1, b = highlight ? 0xEB / 255.0f : 1;
-    const short* p = kMenuPicture[106];
+    const short* p = kMenuPicture[107];
     piece(knob, y - 16, p[0], p[1], p[2], p[3], alpha, r, 1, b);
 }
 
