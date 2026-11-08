@@ -9440,8 +9440,11 @@ void drawMapScreen(App& app) {
     cr::Renderer& r = app.renderer;
     cr::MenuPainter& m = app.menu;
     const float a = float(ms.fade) / 4;
-    r.setOrigin(r.uiX()); // __menuu_MapPut's PutWin: the game's screen dimmed to a quarter (widescreen: its sides
-    r.fillRect(0, 0, cr::Renderer::kLogicalW, cr::Renderer::kLogicalH, 0, 0, 0, 0.75f * a); // left as they are, as the reference's)
+    // __menuu_MapPut: PutWin of window 0 - the menu's def at e1238 is the Camp's plain 64 x 64 window, which draws
+    // nothing - then the sheet's picture 15 (its own dark panel) at (0, 0); no mask (MapSet / Prc set none). Part 10
+    // (TnlQuNZ6qCY) 384 / 1376 s: the field a quarter as bright inside 160..1120 x 40..680 and untouched outside -
+    // the port dimmed the whole screen under the panel too (inside a sixteenth)
+    r.setOrigin(r.uiX());
     m.begin(r, app.windowTex, &app.font);
     if (!ms.tex.id) return;
     const PhoneMenu phoneMenu(app, m);
