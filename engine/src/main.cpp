@@ -16721,11 +16721,14 @@ void stepResults(App& app) {
             ++rs.level[k], menuSound(app, se::kMenuBase + 0x11);
     }
     auto climb = [](float& v, float to, float step) { if (v < to) v = std::min(to, v + step); };
-    climb(rs.shownExp, float(rs.expTotal), float(rs.expTotal / 60));
+    climb(rs.shownExp, float(rs.expTotal), float(rs.expTotal / 60)); // (MbResultPrc's own counters: never drawn)
     climb(rs.shownOz, float(rs.ozTotal), float(rs.ozTotal / 60));
-    climb(rs.shownPurse, float(rs.purseTo), float(rs.ozTotal / 60));
+    // the purse climbs by the earned OZ / 60 only while it is below the OZ earned (MbResultPrc compares
+    // DAT_ec528 with DAT_ec49c, not the new purse): a fuller purse holds until __RestoreParam sets it
+    // (Part 3 979.6-980.7 s: 6967 held, 10287 at the tap)
+    if (rs.shownPurse < float(rs.ozTotal)) rs.shownPurse = std::min(9999999.0f, rs.shownPurse + float(rs.ozTotal / 60));
     --rs.count;
-    if ((rs.count & 1) == 0 && (rs.expTotal > 0 || rs.ozTotal > 0)) app.sound.play(se::kMenuBase + 0x13);
+    if (rs.count % 3 == 0 && (rs.expTotal > 0 || rs.ozTotal > 0)) app.sound.play(se::kMenuBase + 0x13); // (0xa4 every third)
     if (rs.count < 1) resultsSettle(rs);
 }
 
@@ -16759,10 +16762,10 @@ void drawBattleResults(App& app, cr::MenuPainter& m, float a) {
     m.picture(67, 304 + rx, 48, a);
     m.picture(68, 288 + rx, 76, a); // EXP Gained
     m.picture(70, 340 + rx, 96, a);
-    drawShopNumber(m, int(rs.shownExp), 358 + rx, 98, 6, 12, a);
+    drawShopNumber(m, rs.expTotal, 358 + rx, 98, 6, 12, a); // (MbResultPut: the totals, DAT_ec498 / 49c - not the counters)
     m.picture(69, 288 + rx, 132, a); // OZ Earned
     m.picture(70, 340 + rx, 152, a);
-    drawShopNumber(m, int(rs.shownOz), 358 + rx, 154, 6, 12, a);
+    drawShopNumber(m, rs.ozTotal, 358 + rx, 154, 6, 12, a);
     const int keepOz = app.game.oz;
     app.game.oz = int(rs.shownPurse); // (ComUty_BattryAndRealTimeAndOzDraw: the purse as it counts)
     drawClockAndOz(app, m, a * in);
@@ -18751,7 +18754,7 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
         // escaping - every one ends (won, lost or fled) and draws without render API errors
         {
             app.rng.seed(5);
-            int won = 0, lost = 0, fled = 0, stuck = 0, rerrs = 0, n = 0, levelled = 0, resultsBad = 0;
+            int won = 0, lost = 0, fled = 0, stuck = 0, rerrs = 0, n = 0, levelled = 0, resultsBad = 0, purseClimbed = 0, purseHeld = 0;
             const cr::GameState saved = app.game;
             std::vector<std::pair<int, int>> list(starts.begin(), starts.end());
             for (size_t i = 0; i < list.size() && n < 24; i += std::max<size_t>(1, list.size() / 24), ++n) {
@@ -18785,6 +18788,17 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                         ++won;
                         levelled += int(b.levelled.size());
                         const size_t lines = b.result.ups.size() + b.result.items.size();
+                        // the purse: below the OZ earned it climbs; at or above it, it holds until the count settles
+                        {
+                            const App::Battle::Result keep = b.result;
+                            const float from = b.result.shownPurse;
+                            for (int g = 0; g < 10 && b.result.count > 0; ++g) stepResults(app);
+                            const bool climbs = from < float(keep.ozTotal) && keep.ozTotal >= 60;
+                            (climbs ? purseClimbed : purseHeld) += keep.count > 10;
+                            if (b.result.frames >= 10 && keep.count > 10 && (climbs ? b.result.shownPurse <= from : b.result.shownPurse != from))
+                                std::printf("  results: the purse went %.0f -> %.0f (earned %d)\n", from, b.result.shownPurse, keep.ozTotal), ++resultsBad;
+                            b.result = keep;
+                        }
                         int taps = 0;
                         for (int g = 0; g < 3000 && b.exit != 4; ++g) {
                             stepBattle(app);
@@ -18823,8 +18837,8 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 app.runner.stop();
             }
             app.game = saved;
-            std::printf("battle scenes: %d played - %d won (%d level-ups), %d lost, %d fled, %d didn't end, %d results stuck; %d render "
-                        "API errors\n", n, won, levelled, lost, fled, stuck, resultsBad, rerrs);
+            std::printf("battle scenes: %d played - %d won (%d level-ups; the purse climbed %d, held %d), %d lost, %d fled, %d didn't end, "
+                        "%d results stuck; %d render API errors\n", n, won, levelled, purseClimbed, purseHeld, lost, fled, stuck, resultsBad, rerrs);
             problems += stuck + rerrs + resultsBad + (won == 0) + (fled == 0);
             glErrors += rerrs;
         }
