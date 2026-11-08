@@ -4,6 +4,23 @@ A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux
 
 ## What's new
 
+- **Field events start as in 3.1.0:** a touch box you arrive in now fires once the scene is over
+  when it isn't the one that brought you there - so the Ark's welcome-back event plays again after
+  every return from a dungeon. Who is in a room is decided as the room loads, as the original does:
+  a flag set by a scene mid-room no longer makes an event box or a person appear on the spot, and
+  the story's actors wait hidden until a scene brings them on (no more stray, solid figures with a
+  "!" in d04, d06, c101_d07 and the Ark). After a battle the room is read back as it was set up -
+  the treasure boxes a scene put away return, and so do people a scene hid. Losing a battle runs the
+  Ark's area script, as the original does, not the room's. Examining or talking plays the original's
+  sound; with both in reach an object is examined before a person, the nearest by real 3D distance,
+  and the "!" stays a moment after you step away; invisible event boxes and walls stand where the
+  original puts them (their offset was applied twice).
+- **The field HUD as 3.1.0's:** the corner button, the bar, the pad and the "!" vanish the moment a
+  scene starts and come back whole - no fade. Closing the Camp, Options or the save screen leaves
+  the bar shut; the corner button sits a little lower, where the original's is; a puzzle room's teleport lock
+  holds back Camp, Save and the puzzle buttons but not the corner button. The dungeons' key icons
+  are back at the bottom left (lit once you have the key, gone once the door is open), and a low
+  battery (under 18%) shows its icon in the top left corner on machines that have one.
 - **Walking as the original's collision has it:** the field's floor and walls are read from the
   collision file's own tree, as the iOS game does - the floor under the leader is the highest one
   in reach (ramps such as d0207's climb smoothly, no 5-unit step limit), walls push only when faced
