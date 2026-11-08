@@ -551,6 +551,7 @@ struct App {
         // to x -240, the plates (3) to +360, the Scenarios / Collection pictures (0x14 / 0x15) to -120,
         // the rest fading - and Scenarios opens 4 frames on (frames into it, 0 none)
         int leaving = 0;
+        bool closing = false;              // ... the same frames for Back on the main page, then the Camp closes
         std::array<cr::Texture, 31> plateArt; // gene_m*c.mct, loaded when a board first shows them
         std::array<cr::Texture, 11> statusArt; // _gkpachFaceImage: the records' Status portraits (j039_L01..)
     } camp;
@@ -6717,8 +6718,9 @@ bool campUsable(const App& app, int item) {
 }
 
 float campEase(const App& app) {
-    const float t = std::min(1.0f, float(app.camp.anim) / 8.0f);
-    return 1 - (1 - t) * (1 - t);
+    // (the windows' moves - ComUty_WinDispOn / Off - are linear over four frames: Part 3 393.52-393.68 s, the
+    // face boards 180, 120, 60, 0 units short of their place a frame apart, fading in with them)
+    return std::min(1.0f, float(app.camp.anim) / 4.0f);
 }
 float campListX(const App& app) {
     return campui::kRowX + (app.camp.page == App::Camp::Items ? 160 * (1 - campEase(app)) : 0);
@@ -6914,7 +6916,10 @@ void campBack(App& app) {
     menuSound(app, se::kBack);
     c.message.clear();
     switch (c.page) {
-    case App::Camp::Main: app.campOpen = false; menuSound(app, se::kCampClose); return;
+    case App::Camp::Main: // (CampMain 5 -> 0xd: every window off, the Camp closed four frames on - 0xe, 0x10;
+        // Part 3 437.32-437.40 s: the boards 60, 120, 180 units out, then gone)
+        if (!c.leaving) c.leaving = 1, c.closing = true, menuSound(app, se::kCampClose);
+        return;
     case App::Camp::Items:
         if (c.phase == App::Camp::Member) c.phase = App::Camp::List; // (CampMainPrc 4's -1: the list again)
         else { c.page = App::Camp::Main; c.anim = 0; }
@@ -7109,6 +7114,7 @@ void stepCampLeaving(App& app) {
     if (!c.leaving || ++c.leaving <= 4) return;
     c.leaving = 0;
     c.anim = 0;
+    if (c.closing) { c.closing = false; app.campOpen = false; return; } // (Back: the Camp closed)
     openScenarios(app, 1);
 }
 
@@ -7142,6 +7148,7 @@ void campExitWarp(App& app) {
 void stepCamp(App& app) {
     App::Camp& c = app.camp;
     if (!app.campOpen) return;
+    ++c.anim; // (a game frame: the windows' moves)
     if (c.leaving) { stepCampLeaving(app); return; } // (Scenarios chosen: the windows going)
     stepCampScroll(app);
     ++c.mark;
@@ -7302,7 +7309,7 @@ void campClick(App& app, float px, float py) {
     }
     if (c.phase == App::Camp::Member) { // __MuCommon_CharChoiceProc: a member's plate (0x148, 0xb0 + 0x38k) or face board (8, 0x30 + 0x58k)
         for (int k = 0; k < campMembers(app); ++k)
-            if (in(kPlateX + 200 * (1 - campEase(app)), kMemberY + kMemberStep * float(k), 136, 40) ||
+            if (in(kPlateX + 360 * (1 - campEase(app)), kMemberY + kMemberStep * float(k), 136, 40) ||
                 inAt(lx0, 8, 48 + 88.0f * float(k), 252, 80)) { c.member = k; campChoose(app); return; }
         return;
     }
@@ -9287,7 +9294,8 @@ void drawCamp(App& app) {
         right();
         for (int k = 0; k < campMembers(app); ++k) {
             const int word = memberWord(app, campCharacter(app, k));
-            m.plate(kPlateX + 200 * (1 - ease), kMemberY + kMemberStep * float(k), plateIcon(word), word, lit && c.member == k, ease, false);
+            // (window 8: WinDispOn(8, 0x168) - in from 360 to the right, as the main plates go out)
+            m.plate(kPlateX + 360 * (1 - ease), kMemberY + kMemberStep * float(k), plateIcon(word), word, lit && c.member == k, ease, false);
         }
         left();
     };
@@ -18131,7 +18139,6 @@ void drawFrame(App& app, bool present = true) {
     if (app.campOpen && !app.optionsOpen && !app.scc.open && !app.collection.open) {
         for (app.campClock += dt; app.campClock >= 1.0f / kFramesPerSecond && app.campOpen && !app.scc.open; app.campClock -= 1.0f / kFramesPerSecond)
             stepCamp(app);
-        ++app.camp.anim;
         if (app.campOpen && !app.scc.open) drawCamp(app);
     }
     if (app.mapScreen.open) {
@@ -22449,6 +22456,7 @@ int runSelfTest(App& app) {
         for (int f = 0; f < 3; ++f) { app.lastTicks = 0; drawFrame(app, false); ++frames; }
         const int errs = app.renderer.takeErrors();
         key(SDLK_ESCAPE), key(SDLK_ESCAPE), key(SDLK_ESCAPE);
+        for (int f = 0; f < 5; ++f) stepCamp(app); // (Back on the main page: four frames of the windows going)
         problems += app.campOpen + errs;
         std::printf("camp: 56016 first, 3 seeds +%d attack, Plum to MP %d, full MP / 9999 refused, Bastard Sword worn (refilled "
                     "on the Ark), the slots' arrows, status board / \"%s\" / \"%s\"; %d frames, %d render API errors; %d problems\n",
@@ -22561,6 +22569,7 @@ int runSelfTest(App& app) {
         chk(removeName.rfind("item ", 0) == 0 || equipName.empty(), "removeName.rfind(\"item \", 0) == 0 || equipName.empty()");
         const int errs = app.renderer.takeErrors();
         key(SDLK_ESCAPE), key(SDLK_ESCAPE);
+        for (int f = 0; f < 5; ++f) stepCamp(app); // (the windows going)
         chk(app.campOpen + errs, "app.campOpen + errs");
         std::printf("camp plates: common skill %d on plate %d, \"%s\" / \"%s\"; %d frames, %d render API errors; %d problems\n",
                     common, commonPlate, removeName.c_str(), equipName.c_str(), frames, errs, problems);

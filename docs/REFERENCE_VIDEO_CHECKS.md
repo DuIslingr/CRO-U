@@ -98,6 +98,9 @@ beside ffmpeg frames.
 | The Items question's board (ComUty_MsgBoardDraw(0, 0xdc, .., font 3): the mark, picture 13 out and back, at (458, 298); the line in the menu font) | Part 13 2945.8-2946.5 s: "Use Emergency Exit?" and the mark at the board's lower right; Yes / No at the plates' places | Contradicted, fixed: no mark, the line a size larger |
 | The Emergency Exit's end: CampMain 9 brings the clock back for a frame or two before 0xd takes every window off | Part 13 2946.96-2947.18 s: TIME / OZ at full strength, then fading with the board over about five frames; white from 2947.24 s (about 17 frames after Yes) | Open: the port cuts the Items page at frame 10 and shows no clock; the white's start matches |
 | The Status page | Not in the videos (OCR of all parts) | Code reading only (its lists now use the same MuScrList layout) |
+| The Camp's windows move in and out linearly over four game frames (ComUty_WinDispOn / Off) | Part 3 393.52-393.68 s (opening): the face boards' left edge 180, 120, 60, 0 units short, fading in with them | Contradicted, fixed: the port eased over eight drawn frames (its count rose per rendered frame, not per 20 Hz frame) |
+| Back on the main page: the windows go, then the Camp closes (CampMain 0xd, four frames, 0xe, 0x10) | Part 3 437.32-437.40 s: the boards 60, 120, 180 units out on successive frames, then the field | Contradicted, fixed: the port closed at once (the pad's triangle still closes at once - the port's own) |
+| The member plates come in from 360 to the right (window 8: WinDispOn(8, 0x168)) | - | Code reading only (the dark plates don't threshold cleanly in the video); the port used 200 |
 
 Everything else from the 3.1.0 audit rounds rests on code reading; check it here before claiming it
 is what players saw.
