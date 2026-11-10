@@ -129,14 +129,20 @@ void Renderer::drawMesh(const GpuMesh& mesh, const Texture* tex, const Mat4& mvp
     // GL ES 1.1 lighting with full-bright scene light (ambient = diffuse = 1) until scene
     // Light records are decoded: rgb = emission + ambient + diffuse, alpha = diffuse alpha.
     // 357 materials rely on this (black ambient, white diffuse - or the other way), so one alone is not enough.
+    // hwalSetAppearanceColor_ES1 (3.1.0 0x999f4) takes a model's colour array only with property bit 6 set,
+    // lit or not: lit, it enables GL_COLOR_MATERIAL over it, else disables that and the array and sets the
+    // material from colour 1 alone (found by metastigma's fork: a body went see-through by its colour
+    // array's alpha while its clothes stayed opaque). Meshes the port builds itself (shadow fans, puzzle
+    // beams, the debug collision) have no file array - hasColors false - and keep their colours.
     MeshShading sh;
-    if (mat.unlit) { // hwalSetAppearanceColor_ES1, lighting off: the colour array alone (property bit 6), else glColor = colour 1
-        const bool array = (mat.properties & 0x40) && mesh.vertexColors;
+    const bool array = (mat.properties & 0x40) && mesh.vertexColors;
+    if (mat.unlit) { // lighting off: the colour array alone, else glColor = colour 1
         for (int i = 0; i < 4; ++i) sh.color[i] = array ? 1.0f : mat.diffuse[i];
         sh.vertexColor = array;
     } else {
         for (int i = 0; i < 3; ++i) sh.color[i] = std::min(1.0f, mat.emission[i] + mat.ambient[i] + mat.diffuse[i]);
         sh.color[3] = mat.diffuse[3];
+        sh.vertexColor = array || !mesh.vertexColors;
     }
     sh.alphaRef = mat.alphaThreshold / 255.0f;
     const bool textured = tex && tex->id;

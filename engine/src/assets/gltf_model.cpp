@@ -298,7 +298,7 @@ bool exportGlb(const Model& model, const std::vector<Action>& actions, const std
             for (int c = 0; c < 3; ++c) mn[c] = std::min(mn[c], pos[v * 3 + c]), mx[c] = std::max(mx[c], pos[v * 3 + c]);
         std::string attrs = "\"POSITION\":" + std::to_string(w.accessor(pos.data(), nv, 3, 5126, "VEC3", 34962, false, mn, mx));
         if (mesh.uvs.size() >= nv * 2) attrs += ",\"TEXCOORD_0\":" + std::to_string(w.accessor(mesh.uvs.data(), nv, 2, 5126, "VEC2", 34962));
-        if (mesh.colors.size() >= nv * 4)
+        if (mesh.hasColors && mesh.colors.size() >= nv * 4) // (none made up for a mesh without)
             attrs += ",\"COLOR_0\":" + std::to_string(w.accessor(mesh.colors.data(), nv, 4, 5121, "VEC4", 34962, true));
         if (skinned && !rigid) {
             std::vector<uint16_t> joints(nv * 4, 0);
@@ -543,6 +543,7 @@ bool applyGltfReplacement(Model& model, const std::string& path, std::string* er
             m.positions.resize(nv * 3);
             m.uvs.assign(nv * 2, 0.0f);
             m.colors.assign(nv * 4, 255);
+            m.hasColors = colour && colour->count == nv; // a full COLOR_0: the colour array, under property bit 6
             m.posOf.resize(nv);
             m.bindPositions.resize(nv * 3);
             m.influenceCount.assign(nv, 0);
@@ -596,7 +597,7 @@ bool applyGltfReplacement(Model& model, const std::string& path, std::string* er
                     m.positions[v * 3] = q.x, m.positions[v * 3 + 1] = q.y, m.positions[v * 3 + 2] = q.z;
                     m.posOf[v] = uint32_t(v);
                     if (uv) cgltf_accessor_read_float(uv, v, &m.uvs[v * 2], 2);
-                    if (colour) {
+                    if (m.hasColors) {
                         float c[4] = {1, 1, 1, 1};
                         cgltf_accessor_read_float(colour, v, c, colour->type == cgltf_type_vec3 ? 3 : 4);
                         for (int k = 0; k < 4; ++k) m.colors[v * 4 + size_t(k)] = uint8_t(std::clamp(c[k], 0.0f, 1.0f) * 255 + 0.5f);
@@ -622,7 +623,7 @@ bool applyGltfReplacement(Model& model, const std::string& path, std::string* er
                     std::memcpy(&m.bindPositions[v * 3], rest, sizeof rest);
                 }
                 if (uv) cgltf_accessor_read_float(uv, v, &m.uvs[v * 2], 2);
-                if (colour) {
+                if (m.hasColors) {
                     float c[4] = {1, 1, 1, 1};
                     cgltf_accessor_read_float(colour, v, c, colour->type == cgltf_type_vec3 ? 3 : 4);
                     for (int k = 0; k < 4; ++k) m.colors[v * 4 + size_t(k)] = uint8_t(std::clamp(c[k], 0.0f, 1.0f) * 255 + 0.5f);
