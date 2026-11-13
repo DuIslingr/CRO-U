@@ -865,6 +865,10 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
         // Twin Lunar Lion: two walk-up passes, 233 and 226, MP 236 -> 164)
         if (a->cls == 9 && e.kind == kCmdGene) e.kind = out.kind = kCmdAttack;
         int counterBy = -1;
+        // btlque_add_counter returns while the attacker's entry still has goes (its +0x3c9 not yet
+        // set by make_que's go count), so a multi-go entry is answered after its last go only - and
+        // without the +0xc0 it would set, later targets still make their draws
+        const bool lastGo = e.repeats <= 1;
         std::vector<int> hitList = resolveTargets(*a, e);
         firstTarget_ = hitList.empty() ? -1 : hitList.front(); // btlcalc_critical reads G+0x7a
         // btlque_make_que: each target's 131 / 136 (20% holding the Break, else 10) and Omega's 189
@@ -877,7 +881,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             if (has(t, 189) && a->dodgeable && random(100) < 5) {
                 dodgeHit_ = dodgeGene_ = true;
                 out.counterSkill = true; // (que +0xc5)
-                if (counterBy < 0 && !e.counter && e.actors[0] >= 0 && (t < 2) != (e.actors[0] < 2)) counterBy = t;
+                if (counterBy < 0 && !e.counter && e.actors[0] >= 0 && lastGo) counterBy = t; // (no side check)
             }
         }
         if (a->sureGene) dodgeHit_ = dodgeGene_ = false; // (btlque_make_que: +0x20 clears que +0xb8 and +0xb9 both)
@@ -1190,15 +1194,19 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                 enemyPair = false;       // (btlcalc_chk_dead: a fall ends the enemies' pair round too)
                 breakEvent(breakBy, 0x10, t);
             }
-            if (h.amount > 0 && tf.hp > 0 && (t < 2) != (e.actors[0] < 2)) {
+            if (h.amount > 0 && tf.hp > 0) { // (btlcalc_chk_dead: whichever side the blow came from)
                 // 153: at a quarter of the HP or less the target may start guarding
                 if (tf.hp <= tf.hpMax / 4 && !tf.guarding && has(t, 153) && random(100) < (holdsBreak(t) ? 20 : 10)) {
-                    tf.guarding = true;
-                    if (t < 2 && pair) f[size_t(1 - t)].guarding = true;
+                    // (btlord_chk_autoguard: a pair - +0xaf0 for the party, +0xaf4 for the enemies -
+                    // guards as one: fighters 0 and 1, or 2 and 3)
+                    if (t < 2 && pair) f[0].guarding = f[1].guarding = true;
+                    else if (t >= 2 && enemyPair) f[2].guarding = f[3].guarding = true;
+                    else tf.guarding = true;
                 }
                 // 154 (or calc 34's stance): a physical hit may be answered with the target's attack
                 if (calc == 0 && counterBy < 0 && !e.counter &&
-                    (tf.counterStance || (has(t, 154) && (random(100), true)))) // (3.1.0: the draw is made but not compared - 1.0.0 took 10 / 20 %)
+                    (tf.counterStance || (has(t, 154) && (random(100), true))) && // (3.1.0: the draw is made but not compared - 1.0.0 took 10 / 20 %)
+                    lastGo)
                     counterBy = t;
             }
             if (calc == 0 && a->id == 201 && h.amount >= 1) { // btlcalc_0404: Trompe-L'oeil

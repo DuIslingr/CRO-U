@@ -19494,6 +19494,34 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                     std::printf("story heal rules: 656's Olgar %s, 658 under the enemies' Break %s, without it %s\n", olgar ? "ok" : "WRONG",
                                 held ? "ok" : "WRONG", free ? "ok" : "WRONG");
                 }
+                { // _btlque_add_counter returns while the attacker's entry has goes left (+0x3c9): Asura Lotus
+                    // (2..5 goes) on a target in counter stance is answered once, after its last go
+                    int good = 0;
+                    for (uint32_t seed = 1; seed <= 12; ++seed) {
+                        cr::BattleRules ct;
+                        ct.seed(seed);
+                        ct.setupParty(g, app.itemTable, 0);
+                        std::array<int, 3> one{200, 0, 0};
+                        ct.setupEnemies(app.battleData, one, 0);
+                        ct.f[2].hp = ct.f[2].hpMax = 99999;
+                        ct.f[2].lck = -1000;
+                        ct.f[0].mp = ct.f[0].mpMax = 999;
+                        cr::BattleCommand cc[2];
+                        cc[0].kind = cr::kCmdGene, cc[0].action = 207, cc[0].target = 2;
+                        cc[1].kind = cr::kCmdDefend;
+                        ct.beginRound(cc, app.battleActions);
+                        ct.f[2].counterStance = true;
+                        cr::BattleTurn tt;
+                        int goes = 0, counters = 0, goesAfter = 0;
+                        while (ct.nextTurn(app.battleActions, tt)) {
+                            if (tt.counter) ++counters;
+                            else if (tt.action == 207 && tt.actors[0] == 0) goes += 1, goesAfter += counters;
+                        }
+                        good += goes >= 2 && counters == 1 && goesAfter == 0;
+                    }
+                    bad += good != 12;
+                    std::printf("counter after a multi-go move's last go: %d/12 %s\n", good, good == 12 ? "ok" : "WRONG");
+                }
             }
             { // decompile checks: levels from 20 add 10 HP and 1 to the others (Omega's pcparam_change_lv),
               // seeds add 10 into that bonus, to 9999 (use_item, MuCom_GetUsedItemLimitNum), guests' Speed / Luck are their Defense, a monster
