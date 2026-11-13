@@ -27832,8 +27832,12 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
     }
     if (app.havePlayer && app.captureAt[0] == app.captureAt[0]) { // --at x z: put the player there
         float y;
-        if (cr::floorHeight(app.collisionData, app.captureAt[0], 1000.0f, app.captureAt[1], 0.0f, y))
+        if (cr::floorHeight(app.collisionData, app.captureAt[0], 1000.0f, app.captureAt[1], 0.0f, y)) {
             app.walker.pos = {app.captureAt[0], y, app.captureAt[1]};
+            app.between.valid = false;         // (shown where it is now)
+            app.scroll.snap = true;            // a painted field's view on it at once
+            followPlayerScroll(app, 1.0f);
+        } else std::printf("--at %.1f %.1f: no floor there\n", app.captureAt[0], app.captureAt[1]);
     }
     settleMenuMask(app);
     // The capture shows exactly the frames stepped above; --settle draws that moment first (an
