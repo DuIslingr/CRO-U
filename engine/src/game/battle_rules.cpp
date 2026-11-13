@@ -838,6 +838,12 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             for (int k : e.actors)
                 if (k >= 0) f[size_t(k)].mp -= cost;
         }
+        // btlque_make_que (3.1.0 decomp 34613): an action of class 9 - the physical genes: Twin Lunar
+        // Lion, Asura Lotus, Divine Fist, Risk Breaker, ... - goes as an attack (+0x542 = 1, so
+        // btlact_attack_init: the swing, the walk up and back, the attack camera; no barrier bounces
+        // it, that being btlact_gene's). Its MP is paid all the same (Part 4 2017-2021.5 s, Olgar's
+        // Twin Lunar Lion: two walk-up passes, 233 and 226, MP 236 -> 164)
+        if (a->cls == 9 && e.kind == kCmdGene) e.kind = out.kind = kCmdAttack;
         int counterBy = -1;
         std::vector<int> hitList = resolveTargets(*a, e);
         firstTarget_ = hitList.empty() ? -1 : hitList.front(); // btlcalc_critical reads G+0x7a
