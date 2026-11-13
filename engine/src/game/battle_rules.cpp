@@ -809,15 +809,16 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
         breakFlags &= ~0x3200u; // btl_main 600: per action
         if (e.kind == kCmdEscape) {
             // btlact_escape_init: certain while the pair holds the Break, else by levels (3.1.0 4ef94:
-            // 40 below -49, 50 below 0, 60 below 50, else 70)
+            // 40 below -49, 50 below 0, 60 below 50, else 70) - the entry's actors' average less its
+            // targets'. But __menub_mainPrc's Escape fills ord slot 0 with member 0 alone (+0x3d0) and
+            // puts the enemies 2, 3, 4 in slot 1's targets (+0x406), while make_que runs it from slot 0,
+            // whose lists btlord_init_all left at -1: IsDead(-1) is false, so the four -1 actors and
+            // five -1 targets count, their level read at G - 0x20 (gac + 0x8a9ec, which nothing writes:
+            // 0). So the actors' average is member 0's level / 5 (0 once it has fallen - make_que blanks
+            // it), the targets' 0: 60% short of level 250
             int chance = 100;
             if (group != 664 && breakGauge < 1 && !has(0, 160) && !has(1, 160)) { // 160: Beast Wavelength; group 0x298 always
-                int pl = 0, pn = 0, el = 0, en = 0;
-                for (int i = 0; i < 2; ++i)
-                    if (f[size_t(i)].alive()) pl += f[size_t(i)].level, ++pn;
-                for (int i = 2; i < 5; ++i)
-                    if (f[size_t(i)].alive()) el += f[size_t(i)].level, ++en;
-                const int d = (pn ? pl / pn : 0) - (en ? el / en : 0);
+                const int d = f[0].alive() ? f[0].level / 5 : 0;
                 chance = d < -49 ? 40 : d < 0 ? 50 : d < 50 ? 60 : 70;
             }
             out.escapeChance = chance;
