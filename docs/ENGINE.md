@@ -133,8 +133,8 @@ switches between the eight party field models (f001–f008). When you browse to 
 the map's first entrance from the warp table (or, without one, where the camera looks at the
 floor). `--no-player` starts with the player hidden.
 
-A controller plays as the Vita does (its manual): the **left stick** or **D-pad** walks (the stick
-pushed far runs) and moves through menus, **○** confirms and **×** cancels (the Japanese release's
+A controller plays as the Vita does (its manual and its pad code): the **left stick** or **D-pad** walks (the stick
+past about 0.29 walks and past 0.58 runs, the D-pad runs - CrossKey::update) and moves through menus, **○** confirms and **×** cancels (the Japanese release's
 layout; Options, Game, "Swap ○ and ×" On makes × confirm and ○ cancel), **△** opens and closes the Camp menu, **□**
 skips a scene's text, **L / R** turn pages; in puzzle rooms **START** restarts, **SELECT** shows the
 help and **□** uses the pair's ability (the Vita does puzzles by touch alone); elsewhere START is the

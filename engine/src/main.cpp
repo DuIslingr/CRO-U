@@ -5908,7 +5908,7 @@ void saveScreenKey(App& app, SDL_Keycode key) {
             key == SDLK_RIGHT || key == SDLK_D) { ss.confirm ^= 1; menuSound(app, se::kCursor); } // (Yes over No)
         else if (enter && ss.confirm == 0) saveScreenYes(app);
         else if (enter || back) { // No
-            menuSound(app, se::kChoose);
+            menuSound(app, back ? se::kBack : se::kChoose); // (the Vita's × for No: 0x94)
             if (ss.toTitle) saveScreenNoToTitle(app);
             else if (ss.load && ss.kind == 3) { // then a plain new game? (57089..57091)
                 ss.kind = 2;
@@ -8421,11 +8421,11 @@ void worldSelectLevel(App& app, int n) { // state 6: a band, or Back (-1)
     ws.state = 7, ws.timer = 4;
 }
 
-void worldSelectAnswer(App& app, bool yes) { // states 4 (skip?) and 8 (okay?)
+void worldSelectAnswer(App& app, bool yes, bool cancelled = false) { // states 4 (skip?) and 8 (okay?)
     using namespace wldsel;
     App::WorldSelect& ws = app.worldSelect;
     if (ws.state != 4 && ws.state != 8) return;
-    menuSound(app, se::kChoose);
+    menuSound(app, cancelled ? se::kBack : se::kChoose); // (the Vita's × for No: 0x94)
     if (ws.state == 4) { // ComUty_YesNoChoiceProc: 2 the first box (Yes)
         off(app, 8, -360, 0), off(app, 9, 0, 160), off(app, 10, 0, 160);
         on(app, 4), on(app, 5);
@@ -8580,7 +8580,7 @@ void worldSelectKey(App& app, SDL_Keycode key) {
     } else if (ws.state == 4 || ws.state == 8) {
         if (up || down || key == SDLK_LEFT || key == SDLK_RIGHT) ws.confirm ^= 1, menuSound(app, se::kCursor);
         else if (enter) worldSelectAnswer(app, ws.confirm == 0);
-        else if (back) worldSelectAnswer(app, false);
+        else if (back) worldSelectAnswer(app, false, true);
     }
 }
 
@@ -9962,12 +9962,12 @@ void offerResume(App& app) {
     openResumePrompt(app);
 }
 
-void answerResume(App& app, bool yes) {
+void answerResume(App& app, bool yes, bool cancelled = false) {
     if (app.resumePrompt != 1) return;
     app.resumePrompt = 2; // 0x1c: the windows go
     app.resumeYes = yes;
     SDL_RemovePath(savePath(app, "resume.dat").c_str()); // used up either way, as the original's
-    menuSound(app, se::kChoose); // Yes and No alike (ComUty_YesNoChoicePosProc's SE 0x93)
+    menuSound(app, cancelled ? se::kBack : se::kChoose); // Yes and No alike (ComUty_YesNoChoicePosProc's SE 0x93; the Vita's × 0x94)
     if (!yes) { app.resumeIn = 7; return; } // 0x1d: 4, counted below zero in 0x1e, then TitleClr
     // Yes (0x1d): the music off, black over 10 frames, ten counted below zero, then the load (stepResume)
     playBgm(app, 1u << 27);
@@ -29094,7 +29094,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
                 if (app.resumePrompt == 1) app.resumeCursor ^= 1, menuSound(app, se::kCursor);
                 break;
             case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: case SDLK_E: answerResume(app, app.resumeCursor == 0); break;
-            case SDLK_ESCAPE: case SDLK_BACKSPACE: answerResume(app, false); break;
+            case SDLK_ESCAPE: case SDLK_BACKSPACE: answerResume(app, false, true); break;
             default: break;
             }
             break;
