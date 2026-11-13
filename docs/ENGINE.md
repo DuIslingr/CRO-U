@@ -352,7 +352,7 @@ c101/c102/c104/m207a, 2026-10-12).
       `CR_CAPTURE_ITEM=item[:n]` shows Uty_GetItem's band for that item n frames in (2: settled);
       `CR_CAPTURE_VARS=k:v,...` sets script variables (before the map's entry and before `--event`'s
       script); `CR_CAPTURE_AT=<address>` starts `--event`'s script at that address of the area's file instead;
-      `CR_CAPTURE_STAFF=mode:n[:fast]` the staff roll n frames in)
+      `CR_CAPTURE_STAFF=mode:n[:fast]` the staff roll n frames in; `CR_PUZZLE_POINTS=1` prints where taps find each puzzle object - its top, in the frame's pixels)
 - [x] New game: the opening plays as the original's script stages it (a 3D room filmed by the
       script camera: cuts and moves between shots, framed as `setCamera3D` does - the stage view
       doubled and centred, so the screen shows its middle), then the hall's characters can be talked

@@ -11882,20 +11882,30 @@ int npcEffect(App& app, int id, int npc, bool loop = false) {
 
 // A world point on the frame (logical 1024 x 768 pixels, the whole screen's width), as drawFrame
 // lays out the stage view (false when it's off the view or behind the camera)
+void shownScroll(const App& app, float& x, float& y);
 bool fieldToLogical(const App& app, cr::Vec3 p, float& lx, float& ly) {
     const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
     float vx, vy, vw, vh;
-    if (scrollingField(app)) {
+    if (scrollingField(app)) { // (as drawFrame places the view: the scroll as shown, the quake's offset)
         const float fz = fieldFillZoom(app);
         vw = fieldViewW(app) * fz, vh = fieldViewH(app) * fz;
-        vx = (SW - vw) / 2 + app.scroll.offX * fz, vy = (H - vh) / 2 - app.scroll.offY * fz;
+        float sx, sy;
+        shownScroll(app, sx, sy);
+        vx = (SW - vw) / 2 + sx * fz, vy = (H - vh) / 2 - sy * fz;
     } else {
         vw = vh = std::min(SW, H);
         vx = (SW - vw) / 2, vy = (H - vh) / 2;
     }
+    vx += std::trunc(vx + app.fieldQuake.off[0]) - std::trunc(vx), vy += std::trunc(vy + app.fieldQuake.off[1]) - std::trunc(vy);
     float hx, hy;
     if (!fieldViewPoint(app, p, hx, hy)) return false;
     lx = vx + hx * vw / fieldViewW(app), ly = vy + hy * vh / fieldViewH(app);
+    // The view is drawn in the paintings' layer 3 - on the Vita's screen larger than the 2D's and
+    // 12 px higher - and taps, the punishment mark and the arrows are in layer 0: the point in
+    // layer 0's units (as the "!" prompt's; the same point in the other layouts)
+    cr::Renderer& r = const_cast<cr::Renderer&>(app.renderer);
+    const int keep = r.layer();
+    r.setLayer(3), r.layoutToScreen(lx, ly), r.setLayer(0), r.screenToLayout(lx, ly), r.setLayer(keep);
     return true;
 }
 // Logical pixels <-> tex2d (the 480 x 320 layout: menu units less (16, 32), half the pixels)
@@ -27501,6 +27511,17 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         std::printf("puzzle: stage %d (map %d), ability %d, ESP %d, %zu objects: %d blocks, %d fixed, %d gems, %d switches, %d crystals\n",
                     app.puzzle.stage, app.mapNumber, cr::kPuzzleStage[app.puzzle.stage].ability, app.puzzle.esp,
                     app.puzzle.objs.size(), counts[1], counts[2], counts[9], counts[8], counts[10]);
+        if (SDL_getenv("CR_PUZZLE_POINTS")) { // (tests: where taps find each object - its top's point, frame pixels)
+            float ax, ay, bx, by;
+            app.renderer.toLogical(0, 0, ax, ay), app.renderer.toLogical(1000, 1000, bx, by);
+            for (const App::Puzzle::Obj& o : app.puzzle.objs) {
+                if (!o.shown || o.npc < 0 || size_t(o.npc) >= app.npcs.size()) continue;
+                const cr::FieldNpc& n = app.npcs[size_t(o.npc)];
+                float lx, ly;
+                if (fieldToLogical(app, {n.pos[0], n.pos[1] + n.box[1], n.pos[2]}, lx, ly))
+                    std::printf("puzzle point: type %d at %.0f %.0f\n", o.type, (lx - ax) * 1000 / (bx - ax), (ly - ay) * 1000 / (by - ay));
+            }
+        }
     }
     if (!app.captureTouchPad.empty()) { // --touch-pad dx,dy[,chest]: the pad held from the screen's middle (tex2d)
         float dx = 0, dy = 0;
