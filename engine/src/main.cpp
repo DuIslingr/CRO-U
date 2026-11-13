@@ -1925,7 +1925,7 @@ bool titleTapFront(const App& app);
 // A menu's held touch (App::press): its screen, and whether it is now inside a control's box - in
 // menu units of the group drawn from `origin` (uiX, wideLeft, wideRight)
 enum PressScreen { kPressNone = 0, kPressSave, kPressCharSelect, kPressCamp, kPressLastBattle, kPressWorld, kPressShop,
-                   kPressBattle, kPressResume, kPressTitle };
+                   kPressBattle, kPressResume, kPressTitle, kPressChoice };
 int pressScreen(const App& app);
 bool pressIn(const App& app, int screen, float origin, float x, float y, float w, float h);
 bool padField(const App& app);
@@ -6400,13 +6400,20 @@ void drawShopBoard(App& app, float bx, float by, int c, int item, float a, bool 
 // ComUty_NumCountDraw at (348, 68): white < and > boxes fading out at the ends (alpha 0xb3; a
 // tapped one cyan) around a dark box (black, 0xb3) with the count in big digits (picture 26 on:
 // 28 x 28) - always two, the tens at 376 and the ones at 404 (Part 13 854 s: "06")
-void drawNumCount(cr::MenuPainter& m, int count, int = 99, float dx = 0, float a = 1) { // (no dimming at the ends: both arrows always lit)
+void drawNumCount(cr::MenuPainter& m, int count, int = 99, float dx = 0, float a = 1, bool minusHeld = false, bool plusHeld = false) {
+    // (no dimming at the ends: both arrows always lit; _ComUty_NumCountDraw: a side held - +5 / +4 - turns
+    // its box's gradient 0xEBFF4B, cyan)
     const float on[4] = {1, 1, 1, a * 0xB3 / 255.0f}, off[4] = {1, 1, 1, 0}, dark[4] = {0, 0, 0, a * 0xB3 / 255.0f};
-    m.quad(336 + dx, 60, 15, 31, off, on);
-    m.quad(351 + dx, 60, 20, 31, on, on);
+    const float cyan[4] = {0x4B / 255.0f, 1, 0xEB / 255.0f, a * 0xB3 / 255.0f}, cyanOff[4] = {0x4B / 255.0f, 1, 0xEB / 255.0f, 0};
+    const float* mOn = minusHeld ? cyan : on;
+    const float* mOff = minusHeld ? cyanOff : off;
+    const float* pOn = plusHeld ? cyan : on;
+    const float* pOff = plusHeld ? cyanOff : off;
+    m.quad(336 + dx, 60, 15, 31, mOff, mOn);
+    m.quad(351 + dx, 60, 20, 31, mOn, mOn);
     m.quad(372 + dx, 60, 63, 31, dark, dark);
-    m.quad(436 + dx, 60, 19, 31, on, on);
-    m.quad(455 + dx, 60, 16, 31, on, off);
+    m.quad(436 + dx, 60, 19, 31, pOn, pOn);
+    m.quad(455 + dx, 60, 16, 31, pOn, pOff);
     m.picture(99, 348 + dx, 68, a);
     m.picture(100, 448 + dx, 68, a);
     const short* big = cr::kMenuPicture[26];
@@ -6545,7 +6552,7 @@ void drawShop(App& app) {
             m.picture(98, 312, 40, 1); // PRICE and the total
             drawShopNumber(m, shopUnitPrice(app, item) * s.count, 362, 40, 9, 12, 1);
             m.picture(73, 362, 49, 1);
-            drawNumCount(m, s.count);
+            drawNumCount(m, s.count, 99, 0, 1, shopPressIn(app, true, 336, 60, 36, 31), shopPressIn(app, true, 436, 60, 36, 31));
         }
         // (a held plate takes the cursor: __ComUty_YesNoChoiceProc)
         const bool hy = shopPressIn(app, true, 336, 104, 136, 40), hn = shopPressIn(app, true, 336, 160, 136, 40);
@@ -9797,9 +9804,13 @@ void drawCamp(App& app) {
                 // (window 10: WinDispOn(10, 0x168) - in from 360 to the right; 0xb: WinDispOnTypeY(0xb, 0xa0) - up
                 // from 160 below)
                 const float dx = 360 * (1 - e), dy = 160 * (1 - e);
-                if (seed) drawNumCount(m, c.count, campSeedLimit(app, ch, item), dx, e);
-                m.plate(336 + dx, 104, plateIcon(0), 0, current && c.confirm == 0, e, false); // Yes
-                m.plate(336 + dx, 160, plateIcon(1), 1, current && c.confirm == 1, e, false); // No
+                const float wr = wideRight(app);
+                if (seed) drawNumCount(m, c.count, campSeedLimit(app, ch, item), dx, e, current && campPressIn(app, wr, 336, 60, 36, 31),
+                                       current && campPressIn(app, wr, 436, 60, 36, 31));
+                // (a held plate takes the cursor: __ComUty_YesNoChoiceProc)
+                const bool hy = current && campPressIn(app, wr, 336, 104, 136, 40), hn = current && campPressIn(app, wr, 336, 160, 136, 40);
+                m.plate(336 + dx, 104, plateIcon(0), 0, hy || (!hn && current && c.confirm == 0), e, false); // Yes
+                m.plate(336 + dx, 160, plateIcon(1), 1, hn || (!hy && current && c.confirm == 1), e, false); // No
                 centre();
                 // ComUty_MsgBoardDraw(0, 0xdc, .., 0, font 3): picture 12, the mark (picture 13, PictAnimInit(1 tick, 4
                 // frames, 20 px, out and back)) at (458, 298), the line at (24, 234) in the menu font (Part 13 2946 s:
@@ -19060,8 +19071,9 @@ void drawFrame(App& app, bool present = true) {
             // sets it only while a finger is down on one: touch play shows both dark - Part 6 58.5 s,
             // "Retry puzzle?" -; keys and pads keep the cursor's lit)
             const bool lit = !app.pointerLast;
-            app.menu.plate(336 + dx, 104, 0, 0, lit && app.choiceCursor == 0, 1, false);
-            app.menu.plate(336 + dx, 160, 1, 1, lit && app.choiceCursor == 1, 1, false);
+            const bool hy = pressIn(app, kPressChoice, r.uiX(), 336, 104, 136, 40), hn = pressIn(app, kPressChoice, r.uiX(), 336, 160, 136, 40);
+            app.menu.plate(336 + dx, 104, 0, 0, (lit && app.choiceCursor == 0) || hy, 1, false);
+            app.menu.plate(336 + dx, 160, 1, 1, (lit && app.choiceCursor == 1) || hn, 1, false);
         } else {
             const float cx = W - 260, cy = H - 360;
             r.fillRect(cx, cy, 200, 110, 0.05f, 0.08f, 0.2f, 0.85f);
@@ -28957,6 +28969,7 @@ int pressScreen(const App& app) {
     if (app.mode == Mode::Maps && app.battle.active) return kPressBattle;
     if (app.resumePrompt) return kPressResume;
     if (app.mode == Mode::Maps && app.titleOpen) return kPressTitle;
+    if (app.mode == Mode::Maps && app.choiceFlag >= 0) return kPressChoice;
     return kPressNone;
 }
 // Select Scenario's cord takes the touch as it goes down (ComUty_PadChkMove); true when it did
@@ -28984,6 +28997,14 @@ void pressRelease(App& app, int screen, float px, float py) {
     case kPressBattle: battleClick(app, px, py); break;
     case kPressResume: resumeClick(app, px, py); break;
     case kPressTitle: titleClick(app, px, py); break;
+    case kPressChoice: { // an event's Yes / No plates (0x88 x 0x28), lifted on
+        float lx, ly, mx, my;
+        app.renderer.toLogical(px, py, lx, ly);
+        menuPoint(app, lx, ly, mx, my);
+        if (mx >= 336 && mx < 472 && my >= 104 && my < 144) answerChoice(app, true);
+        else if (mx >= 336 && mx < 472 && my >= 160 && my < 200) answerChoice(app, false);
+        break;
+    }
     default: break;
     }
 }
@@ -29621,11 +29642,8 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
                 holdSkip(app, kSkipPointer, true);
                 break;
             }
-            if (app.choiceFlag >= 0) { // the Yes / No plates (0x88 x 0x28)
-                float mx, my;
-    menuPoint(app, lx, ly, mx, my);
-                if (mx >= 336 && mx < 472 && my >= 104 && my < 144) answerChoice(app, true);
-                else if (mx >= 336 && mx < 472 && my >= 160 && my < 200) answerChoice(app, false);
+            if (app.choiceFlag >= 0) { // the Yes / No plates: held, answered as the touch lifts (pressRelease)
+                app.press = App::Press{true, kPressChoice, event->button.x * kx, event->button.y * ky};
                 break;
             }
             if (app.choiceFlag < 0 && !app.dialogue.empty()) {
