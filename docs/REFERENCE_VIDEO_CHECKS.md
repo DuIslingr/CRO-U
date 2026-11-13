@@ -298,9 +298,18 @@ OCR index). Moment types and where they are checked:
 | Staff rolls (EndBack01 / 02, "The End") and the end card | 8 (4494-4800 s), 14 (1452-1530 s), 15 (3792-3846 s) | Field rows (round 1) and this section |
 | The title, Character Select, Scenarios, Options, the achievement list | 8 (4890-4940 s), 15 (3858-3900 s) | Screens rows; the achievement list: the achievements section |
 | Android's achievement banner | 13, 14 (1080 s), 15 (2352 s) | Achievements section |
-| Puzzle rooms, the dungeon floor view, area title cards, white warps, quakes | 8, 9, 10, 11, 12 | Field rows and round 2's Parts 1-7 section (the floor view and title cards Open there) |
+| Puzzle rooms, the dungeon floor view, area title cards, white warps, quakes | 6, 8, 9, 10, 11, 12 | Field rows, round 2's Parts 1-7 section and round 3 (title cards confirmed, the floor views identified, the Skip button) |
 | YouTube end cards, the phone's notification shade (14 1362 s) | each part's end | Not the game's |
 
 Code reading only here: the Status page's lists over the portrait (no video); the ambush's
 first action's banner lag beyond the two clips; the World Select's band list and "Skip the first
 half?" (not in the videos at a settled frame).
+
+## Round 3 (2026-11-13)
+
+| Check | Reference | Verdict |
+|---|---|---|
+| A puzzle room's third button, "Skip" (menuf_mainPut, 3.1.0 decomp.c 35933: picture (420, 216) 44 x 32 at (160, 14) while flag map + 0xb1f - 3000 + stage - is clear and var map - 89 - 64 + stage - is above 2) | Part 6 (UU3-os1kzGg) 58-62 s: after "Retry puzzle?" the panel shows Left 3, HELP, a blue "Skip" and Retry | Confirmed: `CR_CAPTURE_VARS=64:3 CR_CAPTURE_SIZE=1280x720 --layout android --capture p0002_10.cmp <out> --area 1 --frames 3000` beside 62 s: the panel, "Left 3", HELP, Skip and Retry at the same pixels. What raises var 64 + stage is the rooms' scripts (data) |
+
+See also the rows updated in place: area title cards, the "next" mark's art, the opening's boxless
+lines, the dungeon floor views.
