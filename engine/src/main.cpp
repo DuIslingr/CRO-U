@@ -22553,9 +22553,24 @@ int runSelfTest(App& app) {
             optionsKey(app, SDLK_RIGHT); // wraps to Off
             problems += app.video.upscaler != 0 || app.video.msaa != 1;
         }
-        // FSR 3.1 where it runs (Vulkan): frames come out the frame's size, not black, error free
+        // FSR 3.1 where it runs (Vulkan): frames come out the frame's size, not black, error free.
+        // The field shown (an earlier step leaves the screen faded to black - the overlay's text alone
+        // then made the frame "drawn", and a Release build, without it, failed); only the frame below
+        // the overlay's band counts
         int upscaled = 0;
+        const int keepFadeFrames = app.fadeFrames;
+        app.fadeFrames = 0;
         if (app.renderer.upscalerProblem(cr::Upscaler::Fsr3).empty()) {
+            if (const char* shot = SDL_getenv("CR_SELFTEST_FSR_SHOT")) { // (the same moment unscaled: <prefix>off.bmp)
+                app.video.upscaler = 0;
+                applyVideo(app);
+                app.optionsOpen = false;
+                for (int f = 0; f < 8; ++f) app.lastTicks = 0, drawFrame(app, false);
+                saveFrame(app, (std::string(shot) + "off.bmp").c_str());
+                std::printf("FSR check: mode %d, area %d map %d, field shown %d, fade %.2f, back fade %.2f, bg %d, booting %d, title %d\n",
+                            int(app.mode), app.area, app.mapNumber, int(!app.fieldHidden), screenFadeAlpha(app), screenFadeBackAlpha(app),
+                            int(app.background.id != 0), int(app.booting), int(app.titleOpen));
+            }
             for (int mode : {0, 1, 3}) {
                 app.video.upscaler = 1;
                 app.video.upscaleMode = mode;
@@ -22570,7 +22585,9 @@ int runSelfTest(App& app) {
                 int w = 0, h = 0;
                 uint64_t sum = 0;
                 if (app.renderer.readPixels(px, w, h))
-                    for (size_t i = 0; i < px.size(); i += 4) sum += px[i] + px[i + 1] + px[i + 2];
+                    for (size_t i = size_t(w) * size_t(h / 8) * 4; i < px.size(); i += 4) sum += px[i] + px[i + 1] + px[i + 2];
+                if (const char* shot = SDL_getenv("CR_SELFTEST_FSR_SHOT")) // (each mode's frame: <prefix><mode>.bmp)
+                    saveFrame(app, (std::string(shot) + std::to_string(mode) + ".bmp").c_str());
                 const int errs = app.renderer.takeErrors();
                 if (!sum || errs || w != app.renderer.frameWidth()) {
                     std::printf("FSR 3.1 %s: %d errors, %dx%d, %s\n", kUpscaleModes[mode].name, errs, w, h, sum ? "drawn" : "black");
@@ -22579,6 +22596,7 @@ int runSelfTest(App& app) {
                 ++upscaled;
             }
         }
+        app.fadeFrames = keepFadeFrames;
         { // Smooth Models + HD textures: battles load and draw with them, HD textures keep the
           // original's layout size
             app.video.smoothModels = 3;
