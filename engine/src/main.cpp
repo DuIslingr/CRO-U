@@ -1925,7 +1925,7 @@ bool titleTapFront(const App& app);
 // A menu's held touch (App::press): its screen, and whether it is now inside a control's box - in
 // menu units of the group drawn from `origin` (uiX, wideLeft, wideRight)
 enum PressScreen { kPressNone = 0, kPressSave, kPressCharSelect, kPressCamp, kPressLastBattle, kPressWorld, kPressShop,
-                   kPressBattle, kPressResume, kPressTitle, kPressChoice };
+                   kPressBattle, kPressResume, kPressTitle, kPressChoice, kPressCollection };
 int pressScreen(const App& app);
 bool pressIn(const App& app, int screen, float origin, float x, float y, float w, float h);
 bool padField(const App& app);
@@ -10988,7 +10988,7 @@ void drawCollection(App& app) {
         digits(13, pct, 3, 396 + dx, 232, 16, t);
         pict(14, 444 + dx, 240, t);
     }
-    m.backBar(192, 288, false, t);
+    m.backBar(192, 288, pressIn(app, kPressCollection, app.renderer.uiX(), 192, 286, 256, 34), t); // (lit while held: DAT_000ed638)
 }
 
 void collectionKey(App& app, SDL_Keycode key) {
@@ -11897,7 +11897,7 @@ void drawAchievementList(App& app) {
     // (the knob as ComUty_GuageBarDraw's: 3876 s, scrolled 683.5, its top at 280; at the end 544 - as here)
     const int n = int(a.listRows.size());
     if (n > 1) drawScrGauge(m, 460, 34, 244, n, -a.listScroll, kRowH, 0, t);
-    m.backBar(192, 288, false, t);
+    m.backBar(192, 288, pressIn(app, kPressCollection, app.renderer.uiX(), 192, 286, 256, 34), t); // (lit while held: DAT_000ed638)
     if (keyHints(app)) m.text("Up/Down  Esc: back", 8, 300, false, t * 0.8f, 9); // (our key hints)
     r.setOrigin(r.uiX());
 }
@@ -28966,6 +28966,7 @@ bool padField(const App& app) { // the field itself, nothing over it
 }
 // The menu a touch goes down on (the mouse-down's order)
 int pressScreen(const App& app) {
+    if (app.collection.open) return kPressCollection; // (over the Camp)
     if (app.saveScreen.open) return kPressSave;
     if (app.charSelectOpen) return kPressCharSelect;
     if (app.campOpen) return kPressCamp;
@@ -29003,6 +29004,13 @@ void pressRelease(App& app, int screen, float px, float py) {
     case kPressBattle: battleClick(app, px, py); break;
     case kPressResume: resumeClick(app, px, py); break;
     case kPressTitle: titleClick(app, px, py); break;
+    case kPressCollection: { // its Back (BackButtonProc(1)), lifted on
+        float lx, ly, mx, my;
+        app.renderer.toLogical(px, py, lx, ly);
+        menuPoint(app, lx, ly, mx, my);
+        collectionClick(app, mx, my);
+        break;
+    }
     case kPressChoice: { // an event's Yes / No plates (0x88 x 0x28), lifted on
         float lx, ly, mx, my;
         app.renderer.toLogical(px, py, lx, ly);
@@ -29585,7 +29593,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
                 menuPoint(app, lx, ly, mx, my);
                 App::Scenarios& sc = app.scc;
                 if (app.ach.listOpen) achievementListDown(app, mx, my);
-                else if (app.collection.open) collectionClick(app, mx, my);
+                else if (app.collection.open) app.press = App::Press{true, kPressCollection, event->button.x * kx, event->button.y * ky}; // (its Back: on the lift)
                 else if (sc.card >= 0 && sc.zoom > bingo::kZoomMin && my >= 48 && my < 284) { // a zoomed picture: drag, or tap to zoom out
                     app.dragging = true;
                     sc.dragMoved = 0;
