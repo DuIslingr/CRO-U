@@ -4063,7 +4063,9 @@ struct ViewerHost : cr::EventHost {
                         v ? v[5] : 0.0f);
         float pitch = 0, yaw = 0, roll = 0;
         bool withAngles = false; // (eff3d_set_with_pos_and_ang: FrmPlayEff2 at a record's point - an NPC's goes through eff3d_set)
+        bool atRecord = false;
         if (!actorPos(app, actor, p)) { // not an NPC: where the scene's record has it
+            atRecord = true;
             if (!v) return;
             p = {v[0], v[1], v[2]};
             // FrmPlayEff2 (eff3d_set_with_pos_and_ang) takes its angles too; in a battle the Y one
@@ -4073,7 +4075,11 @@ struct ViewerHost : cr::EventHost {
         const int h = startEffect(app, app.fieldEffects, effect, p, true, float(scale) / 100.0f, 0.0f);
         if (h)
             for (Effect& fx : app.fieldEffects)
-                if (fx.handle == h) fx.pitch = pitch, fx.yaw = yaw, fx.roll = roll, fx.faceCamera = app.battle.active, fx.keepDepthWrite = withAngles;
+                // (the camera-facing byte +0xfc7: eff3d_set / FrmPlayEff2 set it in a battle only (G+0x364
+                // bit 0x20); FrmPlayEff at a record's point - 3.1.0 __EvtFrmPlayEff, decomp 21268 - always)
+                if (fx.handle == h)
+                    fx.pitch = pitch, fx.yaw = yaw, fx.roll = roll, fx.faceCamera = app.battle.active || (atRecord && !angled),
+                    fx.keepDepthWrite = withAngles;
         if (h && app.frameEffects.size() < 16) app.frameEffects.push_back({(effect + 1) * (actor + 1), effect, h});
     }
     void stopFrameEffect(int effect, int actor) override {
