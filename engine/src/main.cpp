@@ -5862,7 +5862,7 @@ void drawSaveScreen(App& app) {
     }
     r.setOrigin(wideLeft(app));
     if (keyHints(app)) // (our key hints)
-        m.text(ss.phase == 1 ? "Left/Right  Enter  Esc: no" : ss.phase == 0 ? "Up/Down  Enter  Esc: back" : "", 20, 372, false,
+        m.text(ss.phase == 1 ? "Up/Down  Enter  Esc: no" : ss.phase == 0 ? "Up/Down  Enter  Esc: back" : "", 20, 372, false,
            a * 0.8f, 9);
     r.setOrigin(r.uiX());
 }
@@ -5888,7 +5888,8 @@ void saveScreenKey(App& app, SDL_Keycode key) {
         return;
     }
     if (ss.phase == 1) {
-        if (key == SDLK_LEFT || key == SDLK_A || key == SDLK_RIGHT || key == SDLK_D) { ss.confirm ^= 1; menuSound(app, se::kCursor); }
+        if (key == SDLK_UP || key == SDLK_W || key == SDLK_DOWN || key == SDLK_S || key == SDLK_LEFT || key == SDLK_A ||
+            key == SDLK_RIGHT || key == SDLK_D) { ss.confirm ^= 1; menuSound(app, se::kCursor); } // (Yes over No)
         else if (enter && ss.confirm == 0) saveScreenYes(app);
         else if (enter || back) { // No
             menuSound(app, se::kChoose);
@@ -5925,13 +5926,10 @@ void saveScreenClick(App& app, float px, float py) {
     menuPointAt(app, lx, ly, wideRight(app), rx, my); // (widescreen: the plates on the right)
     if (ss.phase == 2) { ss.timer = 1000; return; }
     if (ss.phase == 1) {
-        if (app.renderer.phoneLayout()) { // the plates (0x88 x 0x28)
-            if (mx >= 336 && mx < 472 && my >= 104 && my < 144) { ss.confirm = 0; saveScreenYes(app); }
-            else if (mx >= 336 && mx < 472 && my >= 160 && my < 200) saveScreenKey(app, SDLK_ESCAPE);
-            return;
-        }
-        if (my >= 288 && my < 336 && mx >= 128 && mx < 240) { ss.confirm = 0; saveScreenYes(app); }
-        else if (my >= 288 && my < 336 && mx >= 272 && mx < 384) saveScreenKey(app, SDLK_ESCAPE);
+        // the plates (0x88 x 0x28) where drawSaveScreen puts them in every layout: (336, 104) / (336, 160)
+        // from the right-hand origin (ComUty_YesNoChoice*)
+        if (rx >= 336 && rx < 472 && my >= 104 && my < 144) { ss.confirm = 0; saveScreenYes(app); }
+        else if (rx >= 336 && rx < 472 && my >= 160 && my < 200) saveScreenKey(app, SDLK_ESCAPE);
         return;
     }
     const std::vector<int> plates = savePlates(app);
@@ -25289,8 +25287,12 @@ int runSelfTest(App& app) {
         openSaveScreen(app, false);
         tap(wideRight(app), 328 + 60, 136 + 48.0f * float(savePlates(app).empty() ? 0 : savePlates(app)[0]) + 20, px, py);
         saveScreenClick(app, px, py);
-        const bool save = app.saveScreen.phase == 1; // asking "Save data?"
+        bool save = app.saveScreen.phase == 1; // asking "Save data?"
         drawFrame(app, false);
+        tap(wideRight(app), 336 + 68, 160 + 20, px, py); // No's plate (drawn at (336, 160) from the right)
+        saveScreenClick(app, px, py);
+        if (app.saveScreen.open) std::printf("widescreen: the save question's No plate DIDN'T answer\n");
+        save = save && !app.saveScreen.open;
         errs += r.takeErrors();
         app.saveScreen.open = false;
         app.titleOpen = true;
