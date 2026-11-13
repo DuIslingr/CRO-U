@@ -1140,6 +1140,9 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             const int before = tf.hp;
             const bool direct = calc == 1 && a->id == 241; // (0406's 0xf1: hp -= 99999 - no dmg_hp, Endure or floor)
             if (h.type == kHitKill) h.amount = tf.hp;
+            // _btlcalc_dmg_hp's story rules (scenario 0): group 0x290 (656) - no healing Olgar (kind 9);
+            // group 0x292 (658) - no healing the party while the enemies hold the Break ("No effect")
+            if (!direct && storyNoHeal(t, h.amount)) h.amount = 0, note_ = 57047;
             if (h.amount > 0 && invincible(t) && !direct) { // Is_invincible (a pair's either member): the damage 0, the label as it was ("0")
                 h.amount = 0;
                 if (h.type == kHitKill) h.type = kHitNormal;
@@ -1155,6 +1158,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                 tf.status[kStatusEndure] = 0;
                 tf.hp = 1;
             }
+            if (!direct && storyKeepsUp(t) && tf.hp == 0) tf.hp = 1; // (0x290: Olgar can't fall)
             if (h.type == kHitCritical || h.critical) breakEvent(breakBy, 8, t); // (que +0xab: a critical the triangle relabelled, or that didn't land)
             if (before > 0 && tf.hp == 0) { // btlcalc_chk_dead
                 h.fell = true;
@@ -1307,10 +1311,12 @@ void BattleRules::endRound() {
             if (k != kStatusEndure && k != kStatusWard && x.status[k] > 0) --x.status[k];
         if (i < 2 && stage == 0x13) d += x.hpMax / 20;
         if (regenFull[size_t(i)]) d = x.hp - x.hpMax; // (group 0x293's, until flag 0x58c)
+        if (storyNoHeal(i, d)) d = 0; // (dmg_hp's story rules here too)
         if (d > 0) d = floored(i, d);
         const int before = x.hp;
         x.hp = std::clamp(x.hp - d, 0, x.hpMax);
         if (x.hp == 0 && d > 0 && x.status[kStatusEndure]) x.hp = 1, x.status[kStatusEndure] = 0; // (btlcalc_dmg_hp: Endure holds here too)
+        if (storyKeepsUp(i) && x.hp == 0) x.hp = 1;
         // btlcalc_chk_dead(fighter, 0, i, 99) for every changed HP: an enemy felled by poison pays as
         // one felled by a blow - its EXP and Oz (161 / 162), what it stole, its item / gene / plate
         // (the drops' level average from the party standing: the queue's actors are stale here)
@@ -1329,6 +1335,17 @@ void BattleRules::endRound() {
         }
     }
 }
+
+// _btlcalc_dmg_hp (scenario 0; the encounter's group, gac + 0x8a90c): 0x290 - a heal on Olgar (+0xa2 kind 9)
+// none; 0x292 - a heal on the party (kind <= 0xb) none while the enemies hold the Break (G2+0x12 < 0)
+bool BattleRules::storyNoHeal(int t, int amount) const {
+    if (scenario != 0 || amount >= 0 || t < 0 || t >= 2) return false;
+    if (group == 656) return f[size_t(t)].character == 1;
+    if (group == 658) return breakGauge < 0;
+    return false;
+}
+// ... and 0x290's Olgar left at 0 HP stays at 1
+bool BattleRules::storyKeepsUp(int t) const { return scenario == 0 && group == 656 && t >= 0 && t < 2 && f[size_t(t)].character == 1; }
 
 bool BattleRules::invincible(int t) const {
     if (t < 0 || t > 4) return false;

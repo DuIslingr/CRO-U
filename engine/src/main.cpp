@@ -19475,6 +19475,25 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                     bad += !ok;
                     std::printf("boss moves by model: group 663 round 1 %d, round 2 %d %s\n", r1, r2, ok ? "ok" : "WRONG");
                 }
+                { // _btlcalc_dmg_hp's story rules: 656 - Olgar alone, no heals on him, never below 1; 658 - no
+                    // heals on the party while the enemies hold the Break
+                    cr::GameState sg;
+                    cr::giveStartingItems(sg, app.itemTable);
+                    cr::BattleRules st;
+                    st.scenario = 0, st.group = 656;
+                    st.setupSpecial(sg, app.itemTable, 656, 0);
+                    const bool olgar = st.f[0].character == 1 && st.storyNoHeal(0, -100) && !st.storyNoHeal(0, 100) && st.storyKeepsUp(0);
+                    cr::BattleRules s8;
+                    s8.scenario = 0, s8.group = 658;
+                    s8.breakGauge = -2;
+                    const bool held = s8.storyNoHeal(0, -50);
+                    s8.breakGauge = 2;
+                    const bool free = !s8.storyNoHeal(0, -50) && !s8.storyKeepsUp(0);
+                    const bool ok = olgar && held && free;
+                    bad += !ok;
+                    std::printf("story heal rules: 656's Olgar %s, 658 under the enemies' Break %s, without it %s\n", olgar ? "ok" : "WRONG",
+                                held ? "ok" : "WRONG", free ? "ok" : "WRONG");
+                }
             }
             { // decompile checks: levels from 20 add 10 HP and 1 to the others (Omega's pcparam_change_lv),
               // seeds add 10 into that bonus, to 9999 (use_item, MuCom_GetUsedItemLimitNum), guests' Speed / Luck are their Defense, a monster

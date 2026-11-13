@@ -246,6 +246,8 @@ public:
     // _btlque_special: the story battles' set moves - by group, round and monster, what an enemy
     // does instead of its own choice (0 its own)
     int specialAction(int enemy) const;
+    bool storyNoHeal(int t, int amount) const;  // _btlcalc_dmg_hp's story rules (656 / 658)
+    bool storyKeepsUp(int t) const;
     int expGained = 0, ozGained = 0;
     int purse = 0;               // the party's Oz at the start (calc 10 takes from it)
     int ozStolen = 0;            // what the enemies took
