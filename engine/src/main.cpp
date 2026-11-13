@@ -640,6 +640,8 @@ struct App {
     // A touch held on a menu (_pad_chk_updw_box): the screen it went down on and where it is now (the
     // frame's pixels). The control under it is lit while held; its action runs as it lifts there (trg)
     struct Press { bool down = false; int screen = 0; float px = 0, py = 0; } press;
+    int countHeldSide = 0, countHeldFrames = 0; // a count's < or > held by a touch (_ComUty_NumCountProc's +0x14)
+    float countClock = 0;
     int padCountDir = 0;                   // a count's L / R (or left / right) held: -1 / +1 (FUN_8105bea8)
     float padCountFor = 0;
     crinput::HeldOver padHeldOver;         // (dead after a cancel or a session's end, until let go)
@@ -1928,6 +1930,7 @@ enum PressScreen { kPressNone = 0, kPressSave, kPressCharSelect, kPressCamp, kPr
                    kPressBattle, kPressResume, kPressTitle, kPressChoice, kPressCollection, kPressScenarios };
 int pressScreen(const App& app);
 bool pressIn(const App& app, int screen, float origin, float x, float y, float w, float h);
+void pressCountStep(App& app, float dt);
 bool padField(const App& app);
 void offerResume(App& app);
 void openSaveScreen(App& app, bool load);
@@ -6705,8 +6708,8 @@ void shopClick(App& app, float px, float py) {
         break;
     }
     case App::Shop::Count:
-        if (my >= 60 && my < 91 && rx >= 336 && rx < 372) shopKey(app, SDLK_LEFT);
-        else if (my >= 60 && my < 91 && rx >= 436 && rx < 472) shopKey(app, SDLK_RIGHT);
+        // (the count's < >: stepped while held - pressCountStep -, not on the lift)
+        if (my >= 60 && my < 91 && ((rx >= 336 && rx < 372) || (rx >= 436 && rx < 472))) {}
         else if (const int i = plateAt(336, 104, 56, 2); i == 0) shopPay(app);
         else if (i == 1) shopBack(app);
         break;
@@ -7702,8 +7705,7 @@ void campClick(App& app, float px, float py) {
     }
     if (c.phase == App::Camp::Ask) {
         const int item = c.list.empty() ? 0 : c.list[size_t(c.listCursor)];
-        if (in(336, 60, 36, 31) && item >= 3 && item <= 6) campKey(app, SDLK_LEFT);
-        else if (in(436, 60, 36, 31) && item >= 3 && item <= 6) campKey(app, SDLK_RIGHT);
+        if ((in(336, 60, 36, 31) || in(436, 60, 36, 31)) && item >= 3 && item <= 6) {} // (stepped while held: pressCountStep)
         else if (in(336, 104, 136, 40)) { c.confirm = 0; campChoose(app); }
         else if (in(336, 160, 136, 40)) { c.confirm = 1; campChoose(app); }
     }
@@ -23509,6 +23511,27 @@ int runSelfTest(App& app) {
         shopKey(app, SDLK_RIGHT), shopKey(app, SDLK_RIGHT); // 3
         const int count = app.shop.count;
         problems += app.shop.phase != App::Shop::Count || count != 3 || shopMessage(app).empty(); // (Omega's asks without the name)
+        { // a touch held on > (_ComUty_NumCountProc): a step at once, none for 20 frames, then one a frame
+            bool found = false;
+            for (int y = 0; y < app.renderer.frameHeight() && !found; y += 4)
+                for (int x = 0; x < app.renderer.frameWidth() && !found; x += 4) {
+                    app.press = App::Press{true, kPressShop, float(x), float(y)};
+                    found = shopPressIn(app, true, 446, 66, 16, 19);
+                }
+            const float tick = 1.0f / kFramesPerSecond;
+            pressCountStep(app, tick);                                 // down: a step
+            const int c1 = app.shop.count;
+            for (int f = 0; f < 19; ++f) pressCountStep(app, tick);   // 19 frames held: none
+            const int c20 = app.shop.count;
+            for (int f = 0; f < 3; ++f) pressCountStep(app, tick);    // from the 20th: one a frame
+            const int c23 = app.shop.count;
+            app.press = App::Press();
+            pressCountStep(app, tick);
+            const bool held = found && c1 == count + 1 && c20 == count + 1 && c23 == count + 4;
+            if (!held) std::printf("shops: a held > counted %d, %d, %d (want %d, %d, %d)\n", c1, c20, c23, count + 1, count + 1, count + 4);
+            problems += !held;
+            app.shop.count = count;
+        }
         shopKey(app, SDLK_RETURN); // Yes
         if (app.shop.phase == App::Shop::EquipAsk) shopKey(app, SDLK_ESCAPE); // (not worn)
         problems += app.game.oz != 100000 - price * count || ownedCount(app, weapon) != count || app.shop.phase != App::Shop::List;
@@ -29037,6 +29060,32 @@ void pressRelease(App& app, int screen, float px, float py) {
     default: break;
     }
 }
+// _ComUty_NumCountProc: a touch held on a count's < or > steps it as it goes down, then - past 20
+// frames held - one a frame; let go, it starts over (the shop's count, the Camp's seeds)
+bool campPressIn(const App& app, float origin, float x, float y, float w, float h);
+bool shopPressIn(const App& app, bool right, float x, float y, float w, float h);
+void pressCountStep(App& app, float dt) {
+    int side = 0;
+    bool shop = false;
+    if (app.shop.open && app.shop.phase == App::Shop::Count) {
+        shop = true;
+        side = shopPressIn(app, true, 336, 60, 36, 31) ? -1 : shopPressIn(app, true, 436, 60, 36, 31) ? 1 : 0;
+    } else if (app.campOpen && app.camp.page == App::Camp::Items && app.camp.phase == App::Camp::Ask && !app.camp.list.empty()) {
+        const int item = app.camp.list[size_t(std::clamp(app.camp.listCursor, 0, int(app.camp.list.size()) - 1))];
+        if (item >= 3 && item <= 6)
+            side = campPressIn(app, wideRight(app), 336, 60, 36, 31) ? -1 : campPressIn(app, wideRight(app), 436, 60, 36, 31) ? 1 : 0;
+    }
+    const SDL_Keycode k = side < 0 ? SDLK_LEFT : SDLK_RIGHT;
+    auto stepIt = [&] { if (shop) shopKey(app, k); else campKey(app, k); };
+    if (side != app.countHeldSide) { // (held now: a step at once - its counter 0 -> 1)
+        app.countHeldSide = side, app.countHeldFrames = 0, app.countClock = 0;
+        if (side) stepIt();
+        return;
+    }
+    if (!side) return;
+    for (app.countClock += dt; app.countClock >= 1.0f / kFramesPerSecond; app.countClock -= 1.0f / kFramesPerSecond)
+        if (++app.countHeldFrames >= 20) stepIt(); // (the counter past 0x14: one a frame)
+}
 void padKey(App& app, SDL_Keycode key) { // the button as its key, through the same handling
     SDL_Event e{};
     e.type = SDL_EVENT_KEY_DOWN;
@@ -29830,6 +29879,7 @@ SDL_AppResult SDL_AppIterate(void* state) {
     App& app = *static_cast<App*>(state);
     const float activeDt = app.clock.step();
     padStep(app, activeDt);
+    pressCountStep(app, activeDt);
     stickPointerStep(app, activeDt);
     app.music.update(activeDt);
     // the frame rate's limit: each frame no sooner than its slot (vsync may hold it longer)
