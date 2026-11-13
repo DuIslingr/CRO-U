@@ -19462,6 +19462,19 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                     std::printf("genes per scenario: scenario 0's own %s, scenario 1's own %s, an old save split %s\n", s0 ? "yes" : "NO",
                                 s1 ? "yes" : "NO", split ? "yes" : "NO");
                 }
+                { // _btlque_special by the enemy's model: scenario 2's group 663 - model 21 opens with 243, model 19
+                    // follows with 242
+                    cr::BattleRules sp;
+                    sp.scenario = 1, sp.group = 663;
+                    sp.setupEnemies(app.battleData, app.battleData.group(663), 0);
+                    sp.round = 1;
+                    const int r1 = sp.specialAction(2);
+                    sp.round = 2;
+                    const int r2 = sp.specialAction(3);
+                    const bool ok = r1 == 243 && r2 == 242;
+                    bad += !ok;
+                    std::printf("boss moves by model: group 663 round 1 %d, round 2 %d %s\n", r1, r2, ok ? "ok" : "WRONG");
+                }
             }
             { // decompile checks: levels from 20 add 10 HP and 1 to the others (Omega's pcparam_change_lv),
               // seeds add 10 into that bonus, to 9999 (use_item, MuCom_GetUsedItemLimitNum), guests' Speed / Luck are their Defense, a monster
