@@ -16417,9 +16417,10 @@ void startTurn(App& app) {
             // _btlact_gene_init / _btlact_item_init (42018 / 42756): _mdl_set_act_motion_loop(slot, 2,
             // loop start, loop end) - played to the loop's end, then its loop over and over (the whole
             // slot when it has none) till another motion is set (the round's end, a blow)
+            // (the loop's range from the class slot's row - btlanm_get_loop_start / _end(.., class), 3.1.0
+            // decomp 42014-42019 - whichever clip mdl_set_act_motion_loop then moves on to)
             playSlot(app, *u, slot, -1);
-            const cr::BattleAnim ca = app.battleData.anim(u->modelId, u->slot);
-            if (ca.loopEnd > ca.loopStart) u->loopFrom = ca.loopStart, u->loopTo = ca.loopEnd;
+            if (an.loopEnd > an.loopStart) u->loopFrom = an.loopStart, u->loopTo = an.loopEnd;
         } else
             playSlot(app, *u, slot, approach ? btlui::kSlotReturn : btlui::kSlotIdle);
         // (_btlact_gene_init / _btlact_item_init: the hit at the cast slot's loop start + 30)
