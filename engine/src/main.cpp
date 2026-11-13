@@ -6540,7 +6540,9 @@ void shopKey(App& app, SDL_Keycode key) {
     const bool back = key == SDLK_ESCAPE || key == SDLK_BACKSPACE || key == SDLK_AC_BACK;
     const bool enter = key == SDLK_RETURN || key == SDLK_KP_ENTER || key == SDLK_SPACE || key == SDLK_E;
     const bool up = key == SDLK_UP || key == SDLK_W, down = key == SDLK_DOWN || key == SDLK_S;
-    const bool left = key == SDLK_LEFT || key == SDLK_A, right = key == SDLK_RIGHT || key == SDLK_D;
+    // (the Vita: L / R - PgUp / PgDn - switch the list's member and change the count: __menuu_ShopPrc
+    // 4 -> 8..0xb, FUN_8105bea8; left / right too)
+    const bool left = key == SDLK_LEFT || key == SDLK_A || key == SDLK_PAGEUP, right = key == SDLK_RIGHT || key == SDLK_D || key == SDLK_PAGEDOWN;
     switch (s.phase) {
     case App::Shop::Main:
         if (up || down) { s.cursor = (s.cursor + (up ? 2 : 1)) % 3; menuSound(app, se::kCursor); }
@@ -7183,9 +7185,11 @@ bool campBusy(const App& app) { return app.camp.notice != 0 || app.camp.phase ==
 void campBack(App& app) {
     App::Camp& c = app.camp;
     if (campBusy(app)) return;
-    if (c.page == App::Camp::Items && c.phase == App::Camp::Ask) return; // (no Back during the Yes / No: window 4 is off, CampMainPrc 4 -> 5)
+    // (no Back bar during the Yes / No - window 4 is off, CampMainPrc 4 -> 5 -, but the Vita's × answers
+    // No there: __ComUty_YesNoChoiceProc, 0x93 and the list again)
+    if (c.page == App::Camp::Items && c.phase == App::Camp::Ask) { c.confirm = 1; campChoose(app); return; }
     if (c.page == App::Camp::Items && c.phase == App::Camp::Result) { campChoose(app); return; } // (any tap: CampMainPrc 9)
-    menuSound(app, se::kBack);
+    if (c.page != App::Camp::Main) menuSound(app, se::kBack); // (the main page's: 0x9a alone - FUN_81053c6c 5)
     c.message.clear();
     switch (c.page) {
     case App::Camp::Main: // (CampMain 5 -> 0xd: every window off, the Camp closed four frames on - 0xe, 0x10;
@@ -7457,7 +7461,12 @@ void campKey(App& app, SDL_Keycode key) {
     const bool back = key == SDLK_ESCAPE || key == SDLK_BACKSPACE || key == SDLK_AC_BACK || (key == SDLK_K && c.page == App::Camp::Main);
     const bool enter = key == SDLK_RETURN || key == SDLK_KP_ENTER || key == SDLK_SPACE || key == SDLK_E;
     const bool up = key == SDLK_UP || key == SDLK_W, down = key == SDLK_DOWN || key == SDLK_S;
-    const bool left = key == SDLK_LEFT || key == SDLK_A, right = key == SDLK_RIGHT || key == SDLK_D;
+    // (the Vita turns the Items categories, the Equip member and the Status views with L / R - the Back
+    // bar's arrows, FUN_81052fd0 / 81051eec / 81050cde -: PgUp / PgDn, L / R, as left / right off the
+    // main page)
+    const bool lr = c.page != App::Camp::Main;
+    const bool left = key == SDLK_LEFT || key == SDLK_A || (lr && key == SDLK_PAGEUP),
+               right = key == SDLK_RIGHT || key == SDLK_D || (lr && key == SDLK_PAGEDOWN);
     if (c.notice) { if (enter || back) tapDialogue(app); return; } // (the message's page turned, as a tap)
     if (c.phase == App::Camp::Exit) return;
     if (c.phase == App::Camp::Result) { if (enter || back) campChoose(app); return; } // (pad_chk_updw_box: the whole screen)
@@ -23449,8 +23458,10 @@ int runSelfTest(App& app) {
         chk(c.notice != 0 || c.page != App::Camp::Items, "56016 once only");
         key(SDLK_RETURN), key(SDLK_RETURN);                   // on Escher: how many?
         chk(c.phase != App::Camp::Ask, "the Yes / No");
-        key(SDLK_ESCAPE);                                     // (no Back here)
-        chk(c.phase != App::Camp::Ask, "Esc during the Yes / No");
+        key(SDLK_ESCAPE);                                     // (no Back bar here; the Vita's × answers No: the list)
+        chk(c.phase != App::Camp::List || lastSound() != se::kChoose, "Esc during the Yes / No: No");
+        key(SDLK_RETURN), key(SDLK_RETURN);                   // Escher again: how many?
+        chk(c.phase != App::Camp::Ask, "the Yes / No again");
         key(SDLK_RIGHT), key(SDLK_RIGHT), key(SDLK_RIGHT);    // 3 (the bag's all)
         chk(c.count != 3, "count 3");
         key(SDLK_RETURN);                                     // Yes: 0xa5, then the board
@@ -25515,10 +25526,12 @@ int runSelfTest(App& app) {
                 if (o.label.rfind("Swap", 0) == 0 && o.act) o.act(1); // Off: as on the Vita
             app.padConfirmEast = true;
             const auto held = [&](int button, bool down) { SDL_SetJoystickVirtualButton(js, button, down); SDL_UpdateJoysticks(); };
-            const auto repeats = [&] { // (half a second of a D-pad direction held in the Camp: the cursor's moves)
-                app.camp.cursor = 0;
+            // (half a second of a D-pad direction held in the Camp's Items list - a scroll list, the only
+            // menus that repeat on the Vita: the cursor's moves)
+            const auto repeats = [&] {
+                app.camp.listCursor = 0, app.camp.listTop = 0;
                 for (int f = 0; f < 30; ++f) padStep(app, 1.0f / 60.0f);
-                return app.camp.cursor != 0;
+                return app.camp.listCursor != 0;
             };
             const auto focusLost = [&] {
                 SDL_Event e{};
@@ -25528,6 +25541,16 @@ int runSelfTest(App& app) {
                 SDL_AppEvent(&app, &e);
             };
             app.camp.page = App::Camp::Main;
+            held(SDL_GAMEPAD_BUTTON_DPAD_DOWN, true); // the main page's plates: no repeat
+            app.camp.cursor = 0;
+            for (int f = 0; f < 30; ++f) padStep(app, 1.0f / 60.0f);
+            const bool platesHeld = app.camp.cursor == 0;
+            held(SDL_GAMEPAD_BUTTON_DPAD_DOWN, false);
+            padStep(app, 1.0f / 60.0f);
+            for (int n = 21; n <= 40; ++n) app.game.items[n] = 1; // (a list longer than it shows)
+            campOpenPage(app, 0, false);
+            while (app.camp.pageOut) stepCamp(app);
+            app.camp.phase = App::Camp::List;
             held(SDL_GAMEPAD_BUTTON_DPAD_DOWN, true);
             const bool repeated = repeats();
             focusLost();
@@ -25538,10 +25561,20 @@ int runSelfTest(App& app) {
             const bool repeatFresh = repeats();
             held(SDL_GAMEPAD_BUTTON_DPAD_DOWN, false);
             padStep(app, 1.0f / 60.0f);
+            const int last = int(app.camp.list.size()) - 1; // held at the list's end: it stays there
+            held(SDL_GAMEPAD_BUTTON_DPAD_DOWN, true);
+            padStep(app, 1.0f / 60.0f);
+            app.camp.listCursor = last;
+            for (int f = 0; f < 60; ++f) padStep(app, 1.0f / 60.0f);
+            const bool endHeld = last > 0 && app.camp.listCursor == last;
+            held(SDL_GAMEPAD_BUTTON_DPAD_DOWN, false);
+            padStep(app, 1.0f / 60.0f);
+            app.camp.page = App::Camp::Main, app.camp.phase = App::Camp::List;
             app.camp.cursor = 0;
-            problems += !repeated || !repeatStopped || !repeatFresh;
-            std::printf("controller: a held direction repeats %s, stops with the focus %s, and repeats again once let go %s\n",
-                        repeated ? "yes" : "NO", repeatStopped ? "yes" : "NO", repeatFresh ? "yes" : "NO");
+            problems += !repeated || !repeatStopped || !repeatFresh || !platesHeld || !endHeld;
+            std::printf("controller: a held direction repeats in a list %s (not over the plates %s), stops with the focus %s, "
+                        "repeats again once let go %s, stops at the list's end %s\n", repeated ? "yes" : "NO", platesHeld ? "yes" : "NO",
+                        repeatStopped ? "yes" : "NO", repeatFresh ? "yes" : "NO", endHeld ? "yes" : "NO");
             padButton(app, SDL_GAMEPAD_BUTTON_NORTH); // △ again: closed, from any page
             const bool closed = !app.campOpen;
             { // The Vita's screen (its menuf_mainPrc / Put): △ the bar, the cursor on its last entry (Camp),
@@ -28861,6 +28894,34 @@ void drawStickPointer(App& app) {
     r.fillRect(lx - 2, ly - arm, 4, 2 * arm, 0.3f, 0.95f, 1.0f, a);
 }
 
+// The scroll list in focus (MuScrList: the only menus whose held direction repeats on the Vita -
+// FUN_81008690(6, 3) from FUN_81065578): its cursor and length; false for anything else
+bool padListFocus(const App& app, int& cur, int& n) {
+    const App::Battle& b = app.battle;
+    if (app.mode == Mode::Maps && b.active) {
+        if (b.menu != App::Battle::Genes && b.menu != App::Battle::Items) return false;
+        cur = b.pick, n = int(b.picks.size());
+        return true;
+    }
+    if (app.campOpen) {
+        const App::Camp& c = app.camp;
+        if ((c.page != App::Camp::Items && c.page != App::Camp::Equip && c.page != App::Camp::Genes) ||
+            (c.phase != App::Camp::List && c.phase != App::Camp::Entries))
+            return false;
+        cur = c.listCursor, n = int(c.list.size());
+        return true;
+    }
+    if (app.shop.open && app.shop.phase == App::Shop::List) { cur = app.shop.listCursor, n = int(app.shop.list.size()); return true; }
+    if (app.mode == Mode::Maps && app.worldChoiceOpen) {
+        const App::WorldSelect& ws = app.worldSelect;
+        if (ws.state == 1) { cur = ws.cursor, n = int(ws.worlds.size()); return true; }
+        if (ws.state == 6) { cur = ws.levelCursor, n = ws.levels; return true; }
+        return false;
+    }
+    if (app.manualOpen && app.manualMsg.state == 0) { cur = app.manualCursor, n = int(manualTopics(app).size()); return true; }
+    return false;
+}
+
 void padStep(App& app, float dt) {
     if (!padLive(app) || !padMenus(app)) { app.padHeld = -1; return; }
     const float lx = float(SDL_GetGamepadAxis(app.pad, SDL_GAMEPAD_AXIS_LEFTX)) / 32767.0f;
@@ -28871,7 +28932,7 @@ void padStep(App& app, float dt) {
     else if (SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_LEFT)) dir = 2;
     else if (SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) dir = 3;
     const bool fromPad = dir >= 0;
-    if (!fromPad && std::max(std::fabs(lx), std::fabs(ly)) > 0.5f) // (the Vita's: past half, a direction)
+    if (!fromPad && std::max(std::fabs(lx), std::fabs(ly)) >= 0.2549f) // (the Vita's reader: an axis past 0.2549 a direction)
         dir = std::fabs(ly) >= std::fabs(lx) ? (ly < 0 ? 0 : 1) : (lx < 0 ? 2 : 3);
     static const SDL_Keycode kDir[4] = {SDLK_UP, SDLK_DOWN, SDLK_LEFT, SDLK_RIGHT};
     if (dir != app.padHeld) {
@@ -28880,9 +28941,14 @@ void padStep(App& app, float dt) {
         return;
     }
     if (dir < 0) return;
+    // Held: only a scroll list's up / down repeat - after 6 frames, then every 3 (0.30 / 0.15 s) -, and
+    // a repeat stops at the list's end (a fresh press wraps round)
+    int cur = 0, n = 0;
+    if (dir > 1 || !padListFocus(app, cur, n)) return;
     const float before = app.padHeldFor;
     app.padHeldFor += dt;
-    if (app.padHeldFor >= 0.35f && std::floor((app.padHeldFor - 0.35f) / 0.08f) != std::floor((before - 0.35f) / 0.08f))
+    if (app.padHeldFor >= 0.30f && std::floor((app.padHeldFor - 0.30f) / 0.15f) != std::floor((before - 0.30f) / 0.15f) &&
+        (dir == 0 ? cur > 0 : cur < n - 1))
         padKey(app, kDir[dir]);
 }
 } // namespace
