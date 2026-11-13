@@ -316,6 +316,7 @@ struct App {
     std::string cutinWideName;
     cr::Texture speedLinesTex;             // syuutyuusen(_ipad).mct (slot 0x2e): scene effect 1
     cr::Texture titleArt[2];               // __menuu_TitleSet: title1.mct (MuCom slot 0x11), chaos.mct (0x12)
+    bool titleArtIpad = false;             // title1 came from its _ipad sheet (pictures 9 / 10; else 7 / 8)
     float footPrev = 0;                    // player's animation time last frame (footsteps)
     std::vector<uint32_t> soundLog;        // every sound started (self-test)
     std::vector<uint32_t> menuSoundLog;    // the menus' sounds, latest last (self-test)
@@ -11415,7 +11416,9 @@ void drawTitleMenu(App& app) {
     for (int k = 0; k < 2; ++k)
         if (!app.titleArt[k].id) {
             cr::Image img;
+            const int ipadBefore = app.ipadImages;
             if (loadImage(app, kTitleSheet[k], img)) app.titleArt[k] = app.renderer.upload(img);
+            if (k == 0) app.titleArtIpad = app.ipadImages > ipadBefore;
         }
     m.begin(app.renderer, app.windowTex, &app.font);
     const PhoneMenu phoneMenu(app, m); // the iPhone layout: its screen's menu coordinates
@@ -11425,14 +11428,17 @@ void drawTitleMenu(App& app) {
     const float t = std::min(1.0f, app.titleAnim / 10.0f), ease = 1 - (1 - t) * (1 - t);
     const bool plates = app.titleStage == 1, board = app.titleStage == 2;
     const float logo = plates || board ? std::max(0.0f, 1 - app.titleAnim / 10.0f) : t; // (the logo fading out as the plates come)
+    // (the pieces by the sheet loaded - the iPad's 9 / 10 only from title1_ipad: with data that has
+    // none, the Vita's, the iPad layout gets title1_hd, cut as the iPhone's 7 / 8 - the places by layout)
+    const int name = app.titleArtIpad ? 9 : 7, strip = app.titleArtIpad ? 10 : 8;
     if (app.renderer.phoneLayout()) {
-        outPicture(m, app.titleArt[0], 7, 184, 220, logo);
+        outPicture(m, app.titleArt[0], name, 184, 220, logo);
         outPicture(m, app.titleArt[1], 6, 0, 0, logo);
-        outPicture(m, app.titleArt[0], 8, 0, 280, plates || board ? 1.0f : t);
+        outPicture(m, app.titleArt[0], strip, 0, 280, plates || board ? 1.0f : t);
     } else {
-        outPicture(m, app.titleArt[0], 9, 184, 252, logo);
+        outPicture(m, app.titleArt[0], name, 184, 252, logo);
         outPicture(m, app.titleArt[1], 6, 0, -32, logo);
-        outPicture(m, app.titleArt[0], 10, 0, 312, plates || board ? 1.0f : t);
+        outPicture(m, app.titleArt[0], strip, 0, 312, plates || board ? 1.0f : t);
     }
     if (board) { // the version-up board (ComUty_MsgBoardDraw at y 220, window 8 sliding up 0xa0; its mark 4 ticks a frame)
         const App::TitleBoard& b = app.titleBoard;
