@@ -122,6 +122,7 @@ struct Effect {
     // the byte only with G+0x364 bit 0x20 - a battle (btl_init) -, so a script's effect started in
     // the field keeps its own angles (CR1 2.2.0 sets it always)
     bool faceCamera = false;
+    bool keepAngles = false;     // a battle's effect with +0xfc7 cleared after it is set (m225's 0x18): its own angles
     bool keepDepthWrite = false; // eff3d_set_with_pos_and_ang (FrmPlayEff2 at a record's point): its materials' depth writes kept
     int handle = 0;  // for stopping it
     int key = 0;     // FrmPlayEff's (effect + 1) x (actor + 1)
@@ -14842,7 +14843,7 @@ void drawEffects(App& app, const std::vector<Effect>& list, const cr::Mat4& vp, 
         }
         // scaled, turned (Euler XYZ, mdl_put: R = Rz Ry Rx), at its point
         // (a battle's effects all face the camera; a field's only those FrmPlayEff flagged)
-        const bool face = eye && target && (&list == &app.battle.effects || e.faceCamera);
+        const bool face = eye && target && ((&list == &app.battle.effects && !e.keepAngles) || e.faceCamera);
         const float yaw = face ? std::atan2(eye->x - target->x, eye->z - target->z) : e.yaw;
         const float cx = std::cos(e.pitch), sx = std::sin(e.pitch), cy = std::cos(yaw), sy = std::sin(yaw);
         const float cz = std::cos(e.roll), sz = std::sin(e.roll), k = e.scale;
@@ -16341,7 +16342,14 @@ void startTurn(App& app) {
             if (id >= 0) app.sound.play(uint32_t(id));
         }
         const App::Battle::Actor* u = battleActor(app, t.actors[0]);
-        if (u && u->modelId == 0x20 && t.actors[0] >= 2) app.sound.play(0x90); // (m225's in-place blow)
+        if (u && u->modelId == 0x20 && t.actors[0] >= 2) { // m225's in-place blow (btlact_attack_init's slot-9
+            // path, 3.1.0 0x187a8..0x18800): SE 0x90 and effect 0x18 on it (eff3d_set_btl -> eff3d_set ->
+            // eff3d_set_with_pos: at its node, angles 0), its camera-facing byte then cleared
+            app.sound.play(0x90);
+            const size_t before = app.battle.effects.size();
+            spawnEffect(app, 0x18, t.actors[0]);
+            if (app.battle.effects.size() > before) app.battle.effects.back().keepAngles = true;
+        }
     }
     b.turnFrame = 0;
     b.hitsShown = false;
