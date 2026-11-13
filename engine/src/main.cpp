@@ -3675,7 +3675,10 @@ struct ViewerHost : cr::EventHost {
     void playMusic(uint32_t v) override { playBgm(app, v); app.soundLog.push_back(0x40000000u | v); }
     void recoverPair() override { // pcparam_hpmp_recovery: the scenario's pair
         for (int c : app.game.pairs[size_t(std::clamp(app.game.scenario, 0, cr::kScenarios - 1))])
-            if (c >= 0 && c < cr::kCharacters) app.game.party[size_t(c)].hp = app.game.party[size_t(c)].mp = -1;
+            if (c >= 0 && c < cr::kCharacters) { // (the most MP as it is now, a number - gear changed later
+                app.game.party[size_t(c)].hp = -1; // doesn't move it)
+                app.game.party[size_t(c)].mp = cr::memberStat(app.game, c, cr::kMp, app.itemTable);
+            }
     }
     void addLevels(int c, int n) override { // pcparam_change_lv: to 255; the growth goes with it
         if (c < 0 || c >= cr::kCharacters) return;
@@ -6906,7 +6909,7 @@ void memberHpMp(const App& app, int c, int& hp, int& hpMax, int& mp, int& mpMax,
     hpMax = cr::memberStat(g, c, cr::kHp, app.itemTable);
     mpMax = cr::memberStat(g, c, cr::kMp, app.itemTable);
     hp = hpMax;
-    mp = pm.mp < 0 ? mpMax : std::min(pm.mp, mpMax);
+    mp = pm.mp < 0 ? mpMax : pm.mp; // (stored, unclamped - above the most after gear came off)
 }
 
 // MuComMakeItemHaveData: what the bag holds of a category (the pair's own weapons and armor)
@@ -8207,7 +8210,10 @@ void openLastBattle(App& app) {
     cr::Image img;
     static const char* const kGuardian[4] = {"hi.mct", "mizu.mct", "kaze.mct", "mu.mct"};
     if (loadImage(app, kGuardian[std::clamp(lb.count, 0, 3)], img)) lb.tex = app.renderer.upload(img);
-    for (auto& m : app.game.party) m.hp = m.mp = -1; // pcparam_hpmp_all_recovery
+    for (int c = 0; c < cr::kCharacters; ++c) { // pcparam_hpmp_all_recovery (the most MP, a number)
+        app.game.party[size_t(c)].hp = -1;
+        app.game.party[size_t(c)].mp = cr::memberStat(app.game, c, cr::kMp, app.itemTable);
+    }
 }
 
 void lastBattleList(App& app, bool windows) { // __LastBt_CharChoiceInit
@@ -10264,6 +10270,7 @@ void newPairParty(App& app, int pair, bool clearData) {
         for (int e = 0; e < 2; ++e) cr::addScenarioItem(g, app.itemTable, p, cr::startItem(int(c), e), 1);
         m.hp = m.mp = -1;
         g.party[c] = m;
+        g.party[c].mp = cr::memberStat(g, int(c), cr::kMp, app.itemTable); // (prty_init: _pcparam_max_mp, a number)
     }
     if (p == 1) {
         for (int item : {480, 82, 188}) cr::addScenarioItem(g, app.itemTable, 1, item, 1);
@@ -12624,7 +12631,18 @@ void pkDetect(App& app) {
     if (!pz.pkHeld) { pkSend(app, 0); return; }
     const float dx = pz.pkAtX - pz.pkFromX, dy = pz.pkAtY - pz.pkFromY;
     if (dx > -29 && dx < 29 && dy > -35 && dy < 20) return;
-    pkSend(app, std::fabs(dx) >= std::fabs(dy) ? (dx < 0 ? 3 : 4) : (dy < 0 ? 1 : 2));
+    // (0x5bd80: a = atan2(dx, dy) in double, then float; strict bands of float pi / 4 - down, right,
+    // up (Repeat2PI), else left - so an exact diagonal to the right falls to LEFT, as in 3.1.0)
+    const float a = float(std::atan2(double(dx), double(dy)));
+    const float pi = 3.14159274f, q = pi * 0.25f, h = pi * 0.5f, two = 6.28318548f;
+    int dir = 3;
+    if (a > -q && a < q) dir = 2;
+    else if (h - q < a && a < h + q) dir = 4;
+    else {
+        const float r = a >= two ? a - two : a < 0 ? a + two : a;
+        if (pi - q < r && r < pi + q) dir = 1;
+    }
+    pkSend(app, dir);
 }
 
 // ---- Toughness (Toughness, FragileBlock, RedBlock, BlueBlock) ----
@@ -23828,7 +23846,9 @@ int runSelfTest(App& app) {
         for (int f = 0; f < 3; ++f) { app.lastTicks = 0; drawFrame(app, false); ++frames; }
         key(SDLK_RETURN);                                     // wear the Bastard Sword (the bag as it was)
         chk(app.game.party[0].equip[0] != 202 || ownedCount(app, 201) != 0 || ownedCount(app, 202) != 1, "the Bastard Sword worn");
-        chk(app.game.party[0].mp != -1 || app.game.party[size_t(campCharacter(app, 1))].mp != -1, "refilled on the Ark");
+        chk(app.game.party[0].mp != cr::memberStat(app.game, 0, cr::kMp, app.itemTable) ||
+                app.game.party[size_t(campCharacter(app, 1))].mp != cr::memberStat(app.game, campCharacter(app, 1), cr::kMp, app.itemTable),
+            "refilled on the Ark");
         app.mapNumber = keepMap;
         key(SDLK_RETURN), key(SDLK_RETURN);                   // the weapon again: the one worn refused (kind 5)
         chk(c.phase != App::Camp::List || app.game.party[0].equip[0] != 202 || lastSound() != se::kBuzzer, "the worn one refused");
@@ -24065,7 +24085,7 @@ int runSelfTest(App& app) {
         const bool ark = !app.campOpen && app.area == 9 && app.mapNumber == 0xa9 && fromArea != 9 && t == kCampExitWarp;
         chk(!shown || !hidden || !white, "the windows, then none, then white with 0x128");
         chk(!ark, "the Ark (area 9, map 0xa9) after 30 frames");
-        chk(app.game.party[0].hp != -1 || app.game.party[0].mp != -1, "the pair refilled");
+        chk(app.game.party[0].hp != -1 || app.game.party[0].mp != cr::memberStat(app.game, 0, cr::kMp, app.itemTable), "the pair refilled");
         chk(app.pendingEntry != App::Entry::Area, "the area's script next");
         chk(app.fadeGrey != 1 || app.fadeFrom != 1 || app.fadeTo != 0, "the field from the white");
         const int arkArea = app.area, arkMap = app.mapNumber;
@@ -24875,7 +24895,8 @@ int runSelfTest(App& app) {
         app.game.pairs[1] = {0, 2};
         for (auto& m : app.game.party) m.hp = 1, m.mp = 1;
         host.recoverPair();
-        const bool healed = app.game.party[0].hp < 0 && app.game.party[2].mp < 0 && app.game.party[1].hp == 1;
+        const bool healed = app.game.party[0].hp < 0 && app.game.party[2].mp == cr::memberStat(app.game, 2, cr::kMp, app.itemTable) &&
+                            app.game.party[1].hp == 1;
         const bool pair = host.pairNo() == 1;
         host.playMusic(7);
         const bool bgm = host.bgmNo() == 7;

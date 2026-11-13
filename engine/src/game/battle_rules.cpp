@@ -109,7 +109,9 @@ void BattleRules::member(const GameState& gs, const ItemTable& items, int k, int
     x.hpMax = memberStat(gs, c, kHp, items);
     x.mpMax = memberStat(gs, c, kMp, items);
     x.hp = x.hpMax; // every battle starts with full HP
-    x.mp = m.mp < 0 ? x.mpMax : std::min(m.mp, x.mpMax);
+    // (btlpcparam_prty_init copies the stored MP unclamped: gear taken off since can leave it above
+    // the most; -1 is the port's old saves' "full")
+    x.mp = m.mp < 0 ? x.mpMax : m.mp;
     x.atk = memberStat(gs, c, kAttack, items);
     x.grd = memberStat(gs, c, kDefense, items);
     x.spd = memberStat(gs, c, kSpeed, items);
@@ -1486,7 +1488,7 @@ std::vector<int> BattleRules::applyRewards(GameState& gs) const {
         const Fighter& x = f[size_t(k)];
         if (!x.present || x.guest) continue;
         PartyMember& m = gs.party[size_t(x.character)];
-        m.mp = x.skills[163 - 131] && outcome() != 3 ? -1 : x.mp; // 163: MP back to full
+        m.mp = x.skills[163 - 131] && outcome() != 3 ? x.mpMax : x.mp; // 163: MP back to full (_pcparam_max_mp, a number)
         if (won) {
             const int gained = expGained * (doubleExp ? 2 : 1);
             m.exp += x.hp > 0 ? gained : gained / 2; // MbResultSet: a fallen member gets half
