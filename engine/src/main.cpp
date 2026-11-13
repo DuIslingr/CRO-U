@@ -1925,7 +1925,7 @@ bool titleTapFront(const App& app);
 // A menu's held touch (App::press): its screen, and whether it is now inside a control's box - in
 // menu units of the group drawn from `origin` (uiX, wideLeft, wideRight)
 enum PressScreen { kPressNone = 0, kPressSave, kPressCharSelect, kPressCamp, kPressLastBattle, kPressWorld, kPressShop,
-                   kPressBattle, kPressResume, kPressTitle, kPressChoice, kPressCollection };
+                   kPressBattle, kPressResume, kPressTitle, kPressChoice, kPressCollection, kPressScenarios };
 int pressScreen(const App& app);
 bool pressIn(const App& app, int screen, float origin, float x, float y, float w, float h);
 bool padField(const App& app);
@@ -6573,7 +6573,8 @@ void drawShop(App& app) {
             !have[0].empty())
             m.text(have[0][0], 24, 250, false, 1, kFont);
     } else if (list && shopEquipment(app)) {
-        m.backButton(kBackX, kBackY, shopPressIn(app, false, kBackX + 51, kBackY, 130, 24), s.bob, a); // ComUty_CmdBack 2: < Back >
+        m.backButton(kBackX, kBackY, shopPressIn(app, false, kBackX + 51, kBackY, 130, 24) ? 1 : shopPressIn(app, false, kBackX + 181, kBackY, 51, 24) ? 2
+                                     : shopPressIn(app, false, kBackX, kBackY, 51, 24) ? 3 : 0, s.bob, a); // ComUty_CmdBack 2: < Back >
     } else {
         m.backBar(kBackX, kBackY, shopPressIn(app, false, kBackX, kBackY, 232, 24), a); // (lit while held: DAT_000ec80c)
     }
@@ -9945,7 +9946,9 @@ void drawCamp(App& app) {
         const float ux = app.renderer.uiX(), by = campBackY(app);
         if (campOkBar(app))
             m.backOkBar(kBackX, by, campPressIn(app, ux, 0xc0, by, 0x72, 34) ? 1 : campPressIn(app, ux, 0x137, by, 0x72, 34) ? 5 : 0, barA);
-        else if (campArrows(app)) m.backButton(kBackX, by, campPressIn(app, ux, 0xf8, by, 0x78, 34), 0, barA);
+        else if (campArrows(app))
+            m.backButton(kBackX, by, campPressIn(app, ux, 0xf8, by, 0x78, 34) ? 1 : campPressIn(app, ux, 0x175, by, 0x33, 34) ? 2
+                                     : campPressIn(app, ux, 0xc0, by, 0x33, 34) ? 3 : 0, 0, barA);
         else m.backBar(kBackX, by, campPressIn(app, ux, kBackX, by, 256, 34), barA);
     }
     if (items && !c.pageOut && ease <= 0) m.backBar(kBackX, campBackY(app), false, 1 - outA); // (the main page's going)
@@ -10686,7 +10689,7 @@ void drawScenarios(App& app) {
                 }
             }
         }
-        m.backBar(192, 288, false, a);
+        m.backBar(192, 288, pressIn(app, kPressScenarios, app.renderer.uiX(), 192, 286, 256, 34), a); // (lit while held: DAT_000ed27c)
         sideMasks();
         return;
     }
@@ -10744,7 +10747,11 @@ void drawScenarios(App& app) {
         r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 1, 1, 1, w);
         r.setOrigin(r.uiX());
     }
-    m.backButton(192, 288, false, s.bob, a); // window 10: < Back >
+    { // window 10: < Back > - the part held lit (DAT_000ed5e4: 1 Back, 2 right, 3 left)
+        const float ux = app.renderer.uiX();
+        m.backButton(192, 288, pressIn(app, kPressScenarios, ux, 248, 286, 120, 34) ? 1 : pressIn(app, kPressScenarios, ux, 373, 286, 51, 34) ? 2
+                               : pressIn(app, kPressScenarios, ux, 192, 286, 51, 34) ? 3 : 0, s.bob, a);
+    }
     drawShopNumber(m, presentsUsed(app), 0, 296, 2, 12, a); // window 11: presents used / all
     m.picture(66, 24, 296, a);
     drawShopNumber(m, cards(app) == 5 ? 80 : 64, 36, 296, 2, 12, a);
@@ -28967,6 +28974,7 @@ bool padField(const App& app) { // the field itself, nothing over it
 // The menu a touch goes down on (the mouse-down's order)
 int pressScreen(const App& app) {
     if (app.collection.open) return kPressCollection; // (over the Camp)
+    if (app.scc.open) return kPressScenarios;
     if (app.saveScreen.open) return kPressSave;
     if (app.charSelectOpen) return kPressCharSelect;
     if (app.campOpen) return kPressCamp;
@@ -29004,6 +29012,13 @@ void pressRelease(App& app, int screen, float px, float py) {
     case kPressBattle: battleClick(app, px, py); break;
     case kPressResume: resumeClick(app, px, py); break;
     case kPressTitle: titleClick(app, px, py); break;
+    case kPressScenarios: { // the scenarios' pictures, a card's cells and arrows, Back - lifted on
+        float lx, ly, mx, my;
+        app.renderer.toLogical(px, py, lx, ly);
+        menuPoint(app, lx, ly, mx, my);
+        scenariosClick(app, mx, my);
+        break;
+    }
     case kPressCollection: { // its Back (BackButtonProc(1)), lifted on
         float lx, ly, mx, my;
         app.renderer.toLogical(px, py, lx, ly);
@@ -29597,7 +29612,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
                 else if (sc.card >= 0 && sc.zoom > bingo::kZoomMin && my >= 48 && my < 284) { // a zoomed picture: drag, or tap to zoom out
                     app.dragging = true;
                     sc.dragMoved = 0;
-                } else scenariosClick(app, mx, my);
+                } else app.press = App::Press{true, kPressScenarios, event->button.x * kx, event->button.y * ky}; // (on the lift)
             }
             break;
         }
