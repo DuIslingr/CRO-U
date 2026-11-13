@@ -6047,6 +6047,7 @@ int ownedCount(const App& app, int item) {
 }
 
 // The price of one in the current list (half when selling)
+void plateText(cr::MenuPainter& m, const std::string& s, float x, float y, int style, float a);
 int shopUnitPrice(const App& app, int item) {
     const cr::ItemParam* p = app.itemTable.item(item);
     if (!p) return 0;
@@ -6542,13 +6543,38 @@ void drawShop(App& app) {
             const int it = s.list[size_t(index)];
             const float x = kRowX + 160 * slide, y = kRowY + scroll + kRowH * float(index);
             if (y + kRowH <= kClipTop || y >= kClipBottom) continue;
-            const float ra = shopMaxCount(app, it) > 0 ? a : a * 0.55f; // unaffordable rows dim (our addition)
-            m.picture(index == s.listCursor ? 9 : 8, x, y, ra);
-            if (const cr::ItemParam* p = app.itemTable.item(it); p && p->icon >= 0)
-                m.piece(x + 12, y + 8, float(p->icon % 16) * 32, 248 + float(p->icon / 16) * 32, 32, 32, ra);
-            m.text(itemName(app, it), x + 56, y + 12, false, ra, 14);
-            drawShopNumber(m, shopUnitPrice(app, it), x + 158, y + 30, 6, 10, ra);
-            m.picture(101, x + 226, y + 34, ra);
+            // __menuu_ShopPrc's list: only the name's colour tells (MuComFontPlateDisp: 0 white, 2 grey
+            // 0x808080, 3 0x00ffff - A B G R, yellow). Buying: 3 when the chosen member wears it
+            // (MuScrList_IsNowEquip: gear and plates), then 2 over the purse, past 98, or a gene, skill
+            // or OMU item (kinds 4 / 5 / 11) owned. Selling: 2 at a sell price of 0, 3 worn by the pair
+            // (or scenario 1's third record) - Part 14 510.5 s: grey names, white prices
+            const cr::ItemParam* ip = app.itemTable.item(it);
+            const int owned = ownedCount(app, it);
+            auto wears = [&](int r, bool plates) {
+                if (r < 0 || r >= cr::kCharacters) return false;
+                const cr::PartyMember& pm = app.game.party[size_t(r)];
+                for (int e : pm.equip) if (e == it) return true;
+                if (plates) for (int g : pm.genes) if (g == it) return true;
+                return false;
+            };
+            const bool collected = ip && (ip->kind == 4 || ip->kind == 5 || ip->kind == 11) && owned > 0;
+            int state = 0;
+            if (!s.selling) {
+                if (wears(campCharacter(app, s.member), true)) state = 3;
+                if (shopUnitPrice(app, it) > app.game.oz || owned > 98 || collected) state = 2;
+            } else {
+                if (ip && cr::sellPrice(*ip) == 0) state = 2;
+                if (cr::wornCount(app.game, it) > 0) state = 3;
+            }
+            m.picture(index == s.listCursor ? 9 : 8, x, y, a);
+            if (ip && ip->icon >= 0)
+                m.piece(x + 12, y + 8, float(ip->icon % 16) * 32, 248 + float(ip->icon / 16) * 32, 32, 32, a);
+            plateText(m, itemName(app, it), x + 56, y + 12, state, a);
+            drawShopNumber(m, shopUnitPrice(app, it), x + 158, y + 30, 6, 10, a);
+            // (ComUty_ShopItemPlate: such a gene, skill or OMU item owned gets picture 0x66, "Sold Out!",
+            // over its icon; its NEW (0x74) needs flag 0xffb, which only ever gets cleared)
+            if (collected) m.picture(102, x + 8, y + 2, a);
+            m.picture(101, x + 226, y + 34, a);
         }
         if (n > 2) { // the jump plates: ⬇ over the first rows, ⬆ under the last (MuScrList_Draw, type 0)
             if (s.listCursor < 2) m.picture(144, 280 + 160 * slide, 112 + scroll, a);
@@ -28054,10 +28080,12 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         app.game.items[21] = 3;
         app.game.items[1] = 1;
         app.game.items[202] = 1;
+        // main category member buy items[@n] sell count equip talk omu (items@n: the cursor on row n,
+        // scrolled to it; omu: scenario 2's fifth plate, its OMU items, 521 owned - ShopItemPlate's 0x66)
+        const std::string p = app.captureShop.substr(0, app.captureShop.find('@'));
+        if (p == "omu") app.game.scenario = 1, app.game.items[521] = 1;
         openShop(app);
         App::Shop& s = app.shop;
-        // main category member buy items[@n] sell count equip talk (items@n: the cursor on row n, scrolled to it)
-        const std::string p = app.captureShop.substr(0, app.captureShop.find('@'));
         if (p == "talk") { // (talk@n: n frames on, 40 by default; the area's EvrStart 4 - --area 7 / 13 / 19 / 25)
             shopChooseMain(app, 0);
             const size_t at = app.captureShop.find('@');
@@ -28073,7 +28101,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                         int(s.talkRunning), app.dialogue.size());
         } else if (p != "main") {
             shopChooseMain(app, p == "sell" ? 2 : 1);
-            if (p != "category") shopChooseCategory(app, p == "sell" || p == "items" ? 0 : 1);
+            if (p != "category") shopChooseCategory(app, p == "sell" || p == "items" ? 0 : p == "omu" ? 4 : 1);
             if (s.phase == App::Shop::Member && p != "member") shopChooseMember(app, s.member);
             if (p == "items" && app.captureShop.find('@') != std::string::npos) {
                 s.listCursor = std::clamp(SDL_atoi(app.captureShop.c_str() + app.captureShop.find('@') + 1), 0,
