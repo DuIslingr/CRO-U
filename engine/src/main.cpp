@@ -760,6 +760,10 @@ struct App {
         cr::Texture gameOver;    // btl_main 0x4b0: gameover.mct faded in over 20 frames for a lost event battle
         enum Menu { Top, Commands, Targets, Items, EscapeAsk, Genes } menu = Top;
         int cursor = 0;
+        // The Vita's pad cursors (__menub_mainPrc): the first page's kept for the battle (DAT_8112f1d8,
+        // cleared by __menub_mainSet alone), the commands' one a member, cleared as the first page
+        // comes in (DAT_8112f1dc..)
+        int topCursor = 0, cmdCursor[2] = {0, 0};
         int member = 0;                    // solo: the member choosing
         cr::BattleCommand cmds[2];
         int pendingItem = 0;               // an item chosen, its target next
@@ -2691,11 +2695,12 @@ void tapDialogue(App& app) {
 }
 
 // Answers the open yes/no choice (Util 3): yes sets its flag, no clears it (_menuu_EventClr).
-void answerChoice(App& app, bool yes) {
+void answerChoice(App& app, bool yes, bool cancelled = false) {
     if (app.choiceFlag < 0) return;
     app.game.setFlag(app.choiceFlag, yes);
     app.choiceFlag = -1;
-    menuSound(app, se::kChoose); // Yes and No alike (EventPrc's ComUty_YesNoChoiceProc)
+    // Yes and No alike (EventPrc's ComUty_YesNoChoiceProc); the Vita's × for No: 0x94
+    menuSound(app, cancelled ? se::kBack : se::kChoose);
 }
 
 // Closes the world choice (_menuu_WldChoiceClr): cancelling sets flag 0 (the script returns);
@@ -3644,7 +3649,7 @@ struct ViewerHost : cr::EventHost {
         const bool control = id & (0x20000000u | 0xe000000u | 0xe0000u);
         if (speech && !control && !app.battle.active) {
             app.sound.stopDialogueVoices();
-            if (app.skipScene) return;
+            if (app.skipScene && !app.messageSkip) return; // (skipping - not while the scene bars it)
         }
         app.sound.play(id);
         app.soundLog.push_back(id);
@@ -13041,7 +13046,7 @@ void stepEvents(App& app) {
     // fast-forward while the skip is held (_PrcMsg: FUN_00031978, the corner, as a tap every frame):
     // the typing out at once - not under 0x1b - and each page turned the frame it is out (choices
     // still wait for an answer; pauses, line breaks and voice clips still take their frames)
-    const bool skipping = app.skipScene && app.runner.running() && !app.dialogue.empty();
+    const bool skipping = app.skipScene && !app.messageSkip && app.runner.running() && !app.dialogue.empty(); // (Uty_Chg_MsgSkip: the Vita's □ held refused too - _PrcMsg)
     if (skipping) hurryDialogue(app);
     stepTyping(app);
     if (skipping && !app.dialogue.empty() && pageTyped(app) && !(pageInfo(app) && pageInfo(app)->closeAfter >= 0))
@@ -15110,7 +15115,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     b.phaseFrames = 0;
     b.introStep = 300;
     b.menu = App::Battle::Top;
-    b.cursor = 0;
+    b.cursor = 0, b.topCursor = 0, b.cmdCursor[0] = b.cmdCursor[1] = 0; // (__menub_mainSet)
     b.member = 0;
     b.view = {};
     b.viewState = 0, b.slide = battleSlideDistance(app), b.slideHold = 0, b.menuGone = 100, b.roundWait = false, b.hudSlide = 0;
@@ -15356,6 +15361,8 @@ void battleMenu(App& app, App::Battle::Menu menu) {
     b.menu = menu;
     ++b.page;
     b.cursor = 0;
+    if (menu == App::Battle::Top) b.cursor = b.topCursor, b.cmdCursor[0] = b.cmdCursor[1] = 0;
+    else if (menu == App::Battle::Commands) b.cursor = b.cmdCursor[b.rules.pair ? 0 : std::clamp(b.member, 0, 1)];
     b.pick = b.pickTop = 0;
     // the pages' own kept lines (the target page's 901, the escape question's 801) go with them; a
     // timed message stays until it runs out or the next replaces it - __menub_mainPrc clears slot 11
@@ -15428,8 +15435,23 @@ void placePair(App& app, bool pair) {
         }
 }
 
+// The Vita's pad steps over what can't be chosen (FUN_810087fa's mask): Pair without a pair to
+// make, Escape where it is barred; Items with no battle item held (0x15..0x2f)
+bool battleTopBarred(const App& app, int i) {
+    const App::Battle& b = app.battle;
+    if (i == 1) return !b.rules.f[0].alive() || !b.rules.f[1].alive() || b.rules.allyAuto || b.rules.f[1].guest;
+    return i == 2 && b.rules.escapeBlocked;
+}
+bool battleCommandBarred(const App& app, int i) {
+    if (i != 2) return false;
+    for (int n = 21; n <= 47; ++n)
+        if (auto it = app.game.items.find(n); it != app.game.items.end() && it->second > 0) return false;
+    return true;
+}
+
 void battleChooseTop(App& app, int i) {
     App::Battle& b = app.battle;
+    b.topCursor = i;
     b.cmds[0] = b.cmds[1] = cr::BattleCommand();
     b.pendingItem = b.pendingGene = 0;
     switch (i) {
@@ -15511,6 +15533,7 @@ void battleChooseGene(App& app, int ability) {
 
 void battleChooseCommand(App& app, int i) {
     App::Battle& b = app.battle;
+    b.cmdCursor[b.rules.pair ? 0 : std::clamp(b.member, 0, 1)] = i;
     cr::BattleCommand& c = b.cmds[b.rules.pair ? 0 : b.member];
     c = cr::BattleCommand();
     b.pendingItem = 0;
@@ -15593,6 +15616,7 @@ void battleBack(App& app) {
     case App::Battle::Commands:
         if (!b.rules.pair && b.member == 1 && b.rules.f[0].alive()) {
             b.member = 0;
+            b.cursor = b.cmdCursor[0]; // (the first member's own cursor)
             ++b.page;
             setBattleCamera(app, 28);
         } else
@@ -15600,6 +15624,7 @@ void battleBack(App& app) {
         break;
     case App::Battle::Targets: {
         const bool item = b.pendingItem != 0, gene = b.pendingGene != 0;
+        const int chosen = item ? b.pendingItem : b.pendingGene;
         battleMenu(app, item ? App::Battle::Items : gene ? App::Battle::Genes : App::Battle::Commands);
         if (item) b.pendingItem = 0;
         if (gene) b.pendingGene = 0, b.picks = battleGeneList(app);
@@ -15609,6 +15634,13 @@ void battleBack(App& app) {
                 if (auto it = app.game.items.find(n); it != app.game.items.end() && it->second > 0 && app.battleActions.get(n + 79))
                     b.picks.push_back(n);
         }
+        // (_MuScrList_BattleSetItem / RestorePos: the list again on the one just chosen)
+        for (size_t k = 0; (item || gene) && k < b.picks.size(); ++k)
+            if (b.picks[k] == chosen) {
+                b.pick = int(k);
+                b.pickTop = std::max(0, b.pick - btlui::kItemRows + 1);
+                break;
+            }
         break;
     }
     case App::Battle::Items: case App::Battle::Genes: battleMenu(app, App::Battle::Commands); break;
@@ -15618,9 +15650,9 @@ void battleBack(App& app) {
     menuSound(app, se::kBack);
 }
 
-void battleEscapeAnswer(App& app, bool yes) {
+void battleEscapeAnswer(App& app, bool yes, bool cancelled) {
     App::Battle& b = app.battle;
-    menuSound(app, se::kChoose); // (ComUty_YesNoChoiceProc: 0x93 for either)
+    menuSound(app, cancelled ? se::kBack : se::kChoose); // (ComUty_YesNoChoiceProc: 0x93 for either; the Vita's × 0x94)
     if (!yes) { // 0x322: the page goes, then the first page comes in again (state 1)
         battleMenu(app, App::Battle::Top);
         return;
@@ -18183,12 +18215,14 @@ void battleKey(App& app, SDL_Keycode key) {
     }
     const bool up = key == SDLK_UP || key == SDLK_W, down = key == SDLK_DOWN || key == SDLK_S;
     const bool left = key == SDLK_LEFT || key == SDLK_A, right = key == SDLK_RIGHT || key == SDLK_D;
+    // (the Vita: ○ alone goes on - _btl_main 0x44b, __menuu_MbResultPrc 3 / 6 / 8, _btlact_gene's
+    // Analyze 0xc1c..; × does nothing there)
     if (b.phase == App::Battle::Results) {
-        if (enter || back) resultsTap(app);
+        if (enter) resultsTap(app);
         return;
     }
     if (b.phase == App::Battle::Won) {
-        if (enter || back) b.wonTap = true;
+        if (enter) b.wonTap = true;
         return;
     }
     if (b.phase == App::Battle::Lost) {
@@ -18196,15 +18230,22 @@ void battleKey(App& app, SDL_Keycode key) {
         return;
     }
     if (b.analyze.on) { // Analyze's lines: the next
-        if (enter || back) analyzeTap(app);
+        if (enter) analyzeTap(app);
         return;
     }
     if (b.phase != App::Battle::Command || !battleMenuReady(app)) return;
     switch (b.menu) {
     case App::Battle::Top:
     case App::Battle::Commands:
-        if (up || down) { b.cursor = (b.cursor + (up ? 3 : 1)) % 4; menuSound(app, se::kCursor); }
-        else if (enter) { if (b.menu == App::Battle::Top) battleChooseTop(app, b.cursor); else battleChooseCommand(app, b.cursor); }
+        if (up || down) { // (round the four, over what can't be chosen)
+            const bool top = b.menu == App::Battle::Top;
+            int c = b.cursor;
+            for (int k = 0; k < 4; ++k) {
+                c = (c + (up ? 3 : 1)) % 4;
+                if (!(top ? battleTopBarred(app, c) : battleCommandBarred(app, c))) break;
+            }
+            if (c != b.cursor) b.cursor = c, menuSound(app, se::kCursor);
+        } else if (enter) { if (b.menu == App::Battle::Top) battleChooseTop(app, b.cursor); else battleChooseCommand(app, b.cursor); }
         else if (back && b.menu == App::Battle::Commands) battleBack(app);
         break;
     case App::Battle::Targets:
@@ -18230,8 +18271,8 @@ void battleKey(App& app, SDL_Keycode key) {
     }
     case App::Battle::EscapeAsk:
         if (up || down || left || right) { b.confirm ^= 1; menuSound(app, se::kCursor); }
-        else if (enter) battleEscapeAnswer(app, b.confirm == 0);
-        else if (back) battleEscapeAnswer(app, false);
+        else if (enter) battleEscapeAnswer(app, b.confirm == 0, false);
+        else if (back) battleEscapeAnswer(app, false, true);
         break;
     }
 }
@@ -18306,8 +18347,8 @@ void battleClick(App& app, float px, float py) {
             battleBack(app);
         break;
     case App::Battle::EscapeAsk: // ComUty_YesNoChoiceProc: Yes (336, 104), No (336, 160), 136 x 40
-        if (rx >= kYesNoX && rx < kYesNoX + 136 && my >= kYesY && my < kYesY + 40) battleEscapeAnswer(app, true);
-        else if (rx >= kYesNoX && rx < kYesNoX + 136 && my >= kNoY && my < kNoY + 40) battleEscapeAnswer(app, false);
+        if (rx >= kYesNoX && rx < kYesNoX + 136 && my >= kYesY && my < kYesY + 40) battleEscapeAnswer(app, true, false);
+        else if (rx >= kYesNoX && rx < kYesNoX + 136 && my >= kNoY && my < kNoY + 40) battleEscapeAnswer(app, false, false);
         break;
     }
 }
@@ -19988,7 +20029,7 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 int frame = 0, ended = 0;
                 for (; frame < 30000 && b.active; ++frame) {
                     if (b.phase == App::Battle::Command && b.menu == App::Battle::Top) {
-                        if (style == 3 && b.rules.round >= 1) battleChooseTop(app, 2), battleEscapeAnswer(app, true);
+                        if (style == 3 && b.rules.round >= 1) battleChooseTop(app, 2), battleEscapeAnswer(app, true, false);
                         else {
                             const bool both = b.rules.f[0].alive() && b.rules.f[1].alive();
                             battleChooseTop(app, style == 0 && both ? 1 : 0);
@@ -25713,6 +25754,51 @@ int runSelfTest(App& app) {
         app.game = keepGame;
         app.playerChar = keepChar;
     }
+    { // The Vita's battle cursors (__menub_mainPrc): the first page's kept across its pages and rounds,
+      // a member's command kept, Items stepped over with no battle item, × on "Run from battle?" a No
+        int problems = 0;
+        const cr::GameState keepGame = app.game;
+        app.game = cr::GameState();
+        cr::giveStartingItems(app.game, app.itemTable);
+        for (int n = 21; n <= 47; ++n) app.game.items.erase(n); // (no battle item)
+        showMap(app, 0, 0, 2);
+        app.pendingEntry = App::Entry::None;
+        app.runner.stop();
+        startBattle(app, {1, 0, -1, 0}, 0);
+        App::Battle& b = app.battle;
+        bool escapeKept = false, cmdKept = false, itemsSkipped = false, firstKept = false;
+        auto key = [&](SDL_Keycode k) { // (the page as shown: battleMenuReady)
+            b.phase = App::Battle::Command, b.viewState = 2, b.view.page = b.page;
+            battleKey(app, k);
+        };
+        if (b.active) {
+            battleMenu(app, App::Battle::Top);
+            const bool escapeOk = !b.rules.escapeBlocked;
+            b.cursor = 2;
+            key(SDLK_RETURN);   // Escape ...
+            key(SDLK_ESCAPE);   // ... × : No
+            escapeKept = !escapeOk || (b.menu == App::Battle::Top && b.cursor == 2);
+            b.cursor = 0;
+            key(SDLK_RETURN);   // Solo
+            b.cursor = 1;
+            key(SDLK_DOWN);     // from Genes past Items (nothing in the bag) to Defend
+            itemsSkipped = b.menu == App::Battle::Commands && b.cursor == 3;
+            b.cursor = 0;
+            key(SDLK_RETURN);   // Attack: the targets
+            key(SDLK_ESCAPE);   // back: Attack again
+            cmdKept = b.menu == App::Battle::Commands && b.cursor == 0;
+            b.cmdCursor[0] = 3;
+            battleMenu(app, App::Battle::Top); // the first page again: Solo kept, the commands cleared
+            firstKept = b.cursor == 0 && b.cmdCursor[0] == 0;
+            endBattle(app, true);
+        }
+        problems += !escapeKept || !cmdKept || !itemsSkipped || !firstKept;
+        std::printf("battle cursors (the Vita's): Escape kept after No %s, the command kept %s, Items stepped over %s, "
+                    "the first page kept and the commands cleared %s; %d problems\n", escapeKept ? "yes" : "NO", cmdKept ? "yes" : "NO",
+                    itemsSkipped ? "yes" : "NO", firstKept ? "yes" : "NO", problems);
+        app.game = keepGame;
+        mapErrors += problems;
+    }
     mapErrors += fieldEventsSelfTest(app);
     mapErrors += storyLossSelfTest(app);
     { // PrcMsg's typing: a character a frame, a tap brings the page out (up to its next stop) and the
@@ -28641,6 +28727,12 @@ void padButton(App& app, int b) {
     const bool puzzle = app.puzzle.stage >= 0 && fieldMenuWanted(app) && !fieldSceneRunning(app);
     if (app.vitaLogo.phase) { if (confirm && app.vitaLogo.phase == 2) app.vitaLogo.skip = true; return; }
     if (fieldBarButton(app, b, confirm, cancel)) return;
+    // a defeat (_btl_main 0x513): any of □ × ○ △ START ends it
+    if (app.mode == Mode::Maps && app.battle.active && app.battle.phase == App::Battle::Lost &&
+        (b == SDL_GAMEPAD_BUTTON_WEST || b == SDL_GAMEPAD_BUTTON_NORTH || b == SDL_GAMEPAD_BUTTON_START)) {
+        padKey(app, SDLK_RETURN);
+        return;
+    }
     // the Vita's title (__menuu_TitlePrc 1): any of □ △ ○ × START starts
     if (titleTapFront(app) && (confirm || cancel || b == SDL_GAMEPAD_BUTTON_WEST || b == SDL_GAMEPAD_BUTTON_NORTH ||
                                b == SDL_GAMEPAD_BUTTON_START)) {
@@ -28661,7 +28753,9 @@ void padButton(App& app, int b) {
         } else if (padField(app)) padKey(app, SDLK_K);
         return;
     case SDL_GAMEPAD_BUTTON_WEST: // □: text skipped; in a puzzle room, the ability
-        if (padField(app) && puzzle) padKey(app, SDLK_T);
+        if (padField(app) && puzzle) { // (the Vita's □: the pad's third button - "Skip" - once it shows; else the port's ability key)
+            if (!puzzle::thirdButton(app) || !puzzle::ask(app, 2)) padKey(app, SDLK_T);
+        }
         else if (app.mode == Mode::Maps && app.runner.running()) holdSkip(app, kSkipPad, true); // (up: SDL_EVENT_GAMEPAD_BUTTON_UP)
         return;
     case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: padKey(app, SDLK_PAGEUP); return;   // L: a page back
@@ -29011,7 +29105,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
                 app.choiceCursor ^= 1;
                 menuSound(app, se::kCursor);
                 return SDL_APP_CONTINUE;
-            case SDLK_ESCAPE: case SDLK_BACKSPACE: answerChoice(app, false); return SDL_APP_CONTINUE;
+            case SDLK_ESCAPE: case SDLK_BACKSPACE: answerChoice(app, false, true); return SDL_APP_CONTINUE;
             default: break;
             }
         }
