@@ -8294,8 +8294,9 @@ void drawLastBattle(App& app) {
     if (lb.win[6] > 0) { // Yes / No (from 360 to the right)
         const float dx = 360 * (1 - ease(lb.win[6]));
         r.setOrigin(wideRight(app));
-        m.plate(336 + dx, 104, 0, 0, lb.confirm == 0, lb.win[6], false);
-        m.plate(336 + dx, 160, 1, 1, lb.confirm == 1, lb.win[6], false);
+        const bool hy = pressIn(app, kPressLastBattle, wideRight(app), 336, 104, 136, 40), hn = pressIn(app, kPressLastBattle, wideRight(app), 336, 160, 136, 40);
+        m.plate(336 + dx, 104, 0, 0, hy || (!hn && lb.confirm == 0), lb.win[6], false); // (a held plate takes the cursor)
+        m.plate(336 + dx, 160, 1, 1, hn || (!hy && lb.confirm == 1), lb.win[6], false);
     }
     r.setOrigin(r.uiX());
 }
@@ -8616,7 +8617,9 @@ void drawWorldSelect(App& app) {
         m.clearClip();
         drawCampScrollBar(m, scroll, n, a);
         ownPlace(false);
-        m.backBar(wldsel::kBackX + dx(w), wldsel::kBackY, false, a);
+        const bool ph = app.renderer.phoneLayout(); // (lit while held: the box worldSelectClick tests)
+        m.backBar(wldsel::kBackX + dx(w), wldsel::kBackY,
+                  pressIn(app, kPressWorld, wideRight(app), wldsel::kBackX - (ph ? 16 : 0), wldsel::kBackY - (ph ? 32 : 0), 232, 24), a);
     };
     r.setOrigin(wideRight(app));
     if (ws.win[6] > 0) // the gates
@@ -8643,8 +8646,9 @@ void drawWorldSelect(App& app) {
         // (__WldChoice_YesNoChoiceProc: ComUty_YesNoChoiceProc lights only the box a finger is on - Part 8 6.0 s
         // both dark; keys and pads keep the cursor's lit)
         const bool lit = !app.pointerLast;
-        m.plate(336 + dx(8), 104, 0, 0, lit && ws.confirm == 0, ws.win[8], false);
-        m.plate(336 + dx(8), 160, 1, 1, lit && ws.confirm == 1, ws.win[8], false);
+        const bool hy = pressIn(app, kPressWorld, wideRight(app), 336, 104, 136, 40), hn = pressIn(app, kPressWorld, wideRight(app), 336, 160, 136, 40);
+        m.plate(336 + dx(8), 104, 0, 0, hy || (!hn && lit && ws.confirm == 0), ws.win[8], false); // (a held plate takes the cursor)
+        m.plate(336 + dx(8), 160, 1, 1, hn || (!hy && lit && ws.confirm == 1), ws.win[8], false);
     }
     ownPlace(false);
     r.setOrigin(r.uiX());
@@ -10156,8 +10160,9 @@ void drawResumePrompt(App& app) {
     std::swap(app.game, app.resumeData.game);
     r.setOrigin(wideRight(app)); // (... the date and Yes / No to its right)
     drawSaveDate(app, m, app.resumeData, a, 360 * out);                    // window 5
-    m.plate(336 + 360 * out, 126, 0, 0, app.resumeCursor == 0, a, false); // window 4: Yes
-    m.plate(336 + 360 * out, 176, 1, 1, app.resumeCursor == 1, a, false); // No
+    const bool hy = pressIn(app, kPressResume, wideRight(app), 336, 126, 136, 40), hn = pressIn(app, kPressResume, wideRight(app), 336, 176, 136, 40);
+    m.plate(336 + 360 * out, 126, 0, 0, hy || (!hn && app.resumeCursor == 0), a, false); // window 4: Yes (a held plate takes the cursor)
+    m.plate(336 + 360 * out, 176, 1, 1, hn || (!hy && app.resumeCursor == 1), a, false); // No
     r.setOrigin(r.uiX());
     drawMsgBoard(app, m, 220 + 160 * out, pictAnimFrame(app.resumeMark, 1, 4), a, w >= 1, {57092, 57093}); // window 7
     r.setOrigin(wideLeft(app));
@@ -11475,9 +11480,10 @@ void drawCharSelect(App& app) {
             outPicture(m, app.charSelectArt2, 32, -16, sp.y + 352, t);
         }
     }
-    m.backBar(124, 288, false, t); // ComUty_BackButtonPosSetXYDraw(124, 288), mode 1
+    m.backBar(124, 288, pressIn(app, kPressCharSelect, app.renderer.uiX(), 124, 288, 232, 24), t); // ComUty_BackButtonPosSetXYDraw(124, 288), mode 1; lit while held
     const int word = kScenarioWord[app.charSelectPage & 1];
-    m.plate(172, 232, plateIcon(word), word, app.charSelectCursor == 0, t, false);
+    m.plate(172, 232, plateIcon(word), word,
+            (app.charSelectCursor == 0 && !app.pointerLast) || pressIn(app, kPressCharSelect, app.renderer.uiX(), 172, 232, 136, 40), t, false); // (StartPrc's DAT_000ecad8: held)
     if (later && sp.serect.id) { // window 2: the cord (serect 29, tex2d_add at (260, pull - 205), turned), the arrow while held, 28
         const short* q = cr::kOutReadPicture[29];
         const float k = sp.serect.width >= 1024 ? 2.0f : 1.0f;
