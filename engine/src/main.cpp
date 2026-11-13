@@ -555,6 +555,8 @@ struct App {
                                            // Genes 4-5); Result: the board after an item is used (0's 8-10); Exit:
                                            // the Emergency Exit's frames (0's 7, 0xf-0x12, then CampMain 9, 0xd-0x10)
         int cursor = 0;                    // Main: the plate
+        int btnRow = -1;                   // Main, the Vita's pad: on the buttons below the boards (DAT_81121d64 / d58) -
+                                           // 0 Scenarios, 1 Collection; -1 on the plates
         int category = 0;                  // Items: campui::kCategoryKind index
         std::vector<int> list;
         int listCursor = 0, listTop = 0;
@@ -7473,6 +7475,11 @@ void campKey(App& app, SDL_Keycode key) {
     if (c.phase == App::Camp::Exit) return;
     if (c.phase == App::Camp::Result) { if (enter || back) campChoose(app); return; } // (pad_chk_updw_box: the whole screen)
     if (back) { campBack(app); return; }
+    if (enter && c.page == App::Camp::Main && c.btnRow >= 0) { // a button below the boards (0x93)
+        if (c.btnRow == 0) campToScenarios(app);
+        else if (app.game.scenario != 0) { menuSound(app, se::kChoose); openCollection(app); }
+        return;
+    }
     if (enter) { campChoose(app); return; }
     const int step = up ? -1 : down ? 1 : 0;
     if (c.page == App::Camp::Status && c.phase == App::Camp::Slot) { // the details: the arrows turn, the lists scroll
@@ -7485,11 +7492,23 @@ void campKey(App& app, SDL_Keycode key) {
         return;
     }
     switch (c.page) {
-    case App::Camp::Main:
+    case App::Camp::Main: {
+        // (the Vita's FUN_81053c6c 5: left / right from the plates to the buttons below the boards -
+        // right the first, left the last -, along them, off either end back to the plates; ○ opens
+        // the one lit; up / down do nothing there)
+        const int buttons = app.game.scenario != 0 ? 2 : 1;
+        if (left || right) {
+            if (c.btnRow < 0) c.btnRow = right ? 0 : buttons - 1;
+            else if ((c.btnRow += right ? 1 : -1) < 0 || c.btnRow >= buttons) c.btnRow = -1;
+            menuSound(app, se::kCursor);
+            return;
+        }
+        if (c.btnRow >= 0) return; // (○ there: before the switch)
         if (step) { c.cursor = (c.cursor + step + campEntries(app)) % campEntries(app); menuSound(app, se::kCursor); }
         else if (key == SDLK_Q || key == SDLK_PAGEUP) campToScenarios(app); // (keys, L: the Scenarios picture)
         else if ((key == SDLK_C || key == SDLK_PAGEDOWN) && app.game.scenario != 0) { menuSound(app, se::kChoose); openCollection(app); } // (R: Collection)
         return;
+    }
     case App::Camp::Items:
     case App::Camp::Equip:
     case App::Camp::Genes:
@@ -7554,6 +7573,7 @@ bool campBackShown(const App& app) {
 void campClick(App& app, float px, float py) {
     using namespace campui;
     App::Camp& c = app.camp;
+    c.btnRow = -1; // (a touch: the pad's place on the buttons goes)
     if (c.notice) { tapDialogue(app); return; }
     if (c.phase == App::Camp::Exit) return;
     if (c.phase == App::Camp::Result) { campChoose(app); return; } // (a tap anywhere)
@@ -9628,14 +9648,17 @@ void drawCamp(App& app) {
     for (int i = 0; i < campEntries(app); ++i) {
         const bool save = i == 5;
         m.plate(kPlateX + 360 * out, kPlateY + kPlateStep * float(i), save ? 6 : plateIcon(kWords[i]), save ? -1 : kWords[i],
-                main && c.cursor == i, 1 - outA, !save && !kReady[i], save ? "Save" : "");
+                main && c.cursor == i && c.btnRow < 0, 1 - outA, !save && !kReady[i], save ? "Save" : "");
     }
     centre();
     left();
     if (main || outA < 1) { // __menuu_CampMainPut: Scenarios (162; 128 "new" over it while no cell is open) and, in the
         // second scenario only (window 0x15), Collection (161) under the boards
+        // (the one lit - the pad's place on them; 3.1.0 a touch held - picture 163 under it: 0xd3770 / 0xd37d0)
+        if (main && c.btnRow == 0) m.picture(163, 12 - 120 * out, 236, 1 - outA);
         m.picture(162, 12 - 120 * out, 236, 1 - outA); // (windows 0x14 / 0x15: WinDispOn / Off at x -120)
         if (campScenariosNew(app)) m.picture(128, 12 - 120 * out, 236, 1 - outA);
+        if (app.game.scenario != 0 && main && c.btnRow == 1) m.picture(163, 84 - 120 * out, 236, 1 - outA);
         if (app.game.scenario != 0) m.picture(161, 84 - 120 * out, 236, 1 - outA);
     }
     const int ch = campCharacter(app, c.member);
@@ -25797,6 +25820,35 @@ int runSelfTest(App& app) {
         app.game = keepGame;
         app.playerChar = keepChar;
     }
+    { // The Vita's Camp main page (FUN_81053c6c 5): right to Scenarios, on to Collection (second scenario),
+      // off the end back to the plates; left from the plates to the last button; ○ there opens it
+        int problems = 0;
+        const cr::GameState keepGame = app.game;
+        app.game.setFlag(0x38, true), app.game.setFlag(0x39, true);
+        app.game.scenario = 0;
+        openCamp(app);
+        App::Camp& c = app.camp;
+        c.notice = 0, app.dialogue.clear();
+        campKey(app, SDLK_RIGHT);
+        const bool onScenarios = c.btnRow == 0;
+        campKey(app, SDLK_RIGHT);
+        const bool offFirst = c.btnRow == -1; // (one button in the first scenario)
+        app.game.scenario = 1;
+        campKey(app, SDLK_LEFT);
+        const bool lastFirst = c.btnRow == 1;
+        campKey(app, SDLK_LEFT), campKey(app, SDLK_LEFT);
+        const bool backToPlates = c.btnRow == -1;
+        campKey(app, SDLK_RIGHT), campKey(app, SDLK_RIGHT), campKey(app, SDLK_RETURN);
+        const bool collection = app.collection.open;
+        app.collection.open = false;
+        app.campOpen = false;
+        app.game = keepGame;
+        problems += !onScenarios || !offFirst || !lastFirst || !backToPlates || !collection;
+        std::printf("camp buttons (the Vita's pad): right to Scenarios %s, off the end %s, left to the last %s, back to the plates %s, "
+                    "○ on Collection %s; %d problems\n", onScenarios ? "yes" : "NO", offFirst ? "yes" : "NO", lastFirst ? "yes" : "NO",
+                    backToPlates ? "yes" : "NO", collection ? "yes" : "NO", problems);
+        mapErrors += problems;
+    }
     { // The Vita's battle cursors (__menub_mainPrc): the first page's kept across its pages and rounds,
       // a member's command kept, Items stepped over with no battle item, × on "Run from battle?" a No
         int problems = 0;
@@ -27806,7 +27858,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
     if (app.captureMenu == 1) {
         openCamp(app);
         app.camp.anim = 100;
-        // --camp-view items|use|result|equip|slots|wear|status|status-equip|status-skills|genes|plate|entries: a page, with a bag to show
+        // --camp-view items|use|result|equip|slots|wear|status|status-equip|status-skills|genes|plate|entries|row|row2: a page, with a bag to show (row / row2: the pad on Scenarios / Collection)
         const std::string& v = app.captureCampView;
         if (!v.empty()) {
             app.game.setFlag(0x38, true), app.game.setFlag(0x39, true); // (the once-only messages seen)
@@ -27816,6 +27868,8 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             app.game.items[202] = 1, app.game.items[216] = 1, app.game.items[427] = 1;
             app.game.party[size_t(campCharacter(app, 0))].mp = 10;
             auto key = [&](SDL_Keycode k) { campKey(app, k); };
+            if (v == "row" || v == "row2") key(SDLK_RIGHT);           // (the Vita's pad: the buttons below the boards)
+            if (v == "row2") app.game.scenario = 1, key(SDLK_RIGHT);
             if (v == "items" || v == "use") app.camp.cursor = 0, key(SDLK_RETURN);
             if (v == "use") key(SDLK_RIGHT), key(SDLK_LEFT), key(SDLK_RETURN), key(SDLK_RETURN), key(SDLK_RIGHT), key(SDLK_RIGHT);
             if (v == "equip" || v == "slots" || v == "wear") app.camp.cursor = 1, key(SDLK_RETURN);
