@@ -13793,7 +13793,10 @@ int nodeOfUser(const cr::Model& m, int user) {
 
 // A shadow's fan (FUN_00016008 / FUN_0001628c, the field's and the battle's alike): 32 tex2d_add_tri
 // (centre, point i, point i + 1) of a black ellipse - the points i / 31 turns round, the last back to
-// 0 - with radii rx (the model's x) and rz (its z), turned by its yaw, at `at`, every vertex at alpha `a`
+// 0 - with radii rx (the model's x) and rz (its z), turned by its yaw, at `at`; the centre at alpha
+// `a`, the rim's points at 0 (the colours (a << 24, 0, 0): 3.1.0 0x161f4 / 0x1621c / 0x16224 and
+// 0x16474 / 0x1649c / 0x164a4 - r5 is 0): the shadow fades out to its edge (Part 3 1112.2 s, the
+// flyer's shadow on the library floor: darkest at its middle, no rim)
 void addShadowFan(std::vector<float>& tris, std::vector<uint8_t>& alpha, cr::Vec3 at, float yaw, float rx, float rz, float a) {
     const float cy = std::cos(yaw), sy = std::sin(yaw);
     auto point = [&](int i) {
@@ -13806,7 +13809,8 @@ void addShadowFan(std::vector<float>& tris, std::vector<uint8_t>& alpha, cr::Vec
         const cr::Vec3 p0 = point(i), p1 = point(i + 1);
         tris.insert(tris.end(), {at.x, at.y, at.z, p0.x, p0.y, p0.z, p1.x, p1.y, p1.z});
     }
-    alpha.insert(alpha.end(), 32 * 3, uint8_t(std::lround(std::clamp(a, 0.0f, 1.0f) * 255.0f)));
+    const uint8_t centre = uint8_t(std::lround(std::clamp(a, 0.0f, 1.0f) * 255.0f));
+    for (int i = 0; i < 32; ++i) alpha.insert(alpha.end(), {centre, 0, 0});
 }
 
 // The fans into tex2d slot 0x5e (draw order 990: after the models): one dynamic mesh of black
