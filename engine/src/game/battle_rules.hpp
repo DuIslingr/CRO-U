@@ -12,7 +12,8 @@
 //    leader's level, or the pair's average when it's the route's own pair; ordinary monsters
 //    without a level pick one in the area's band (10b+1..10b+10, kept within L-5..L+2).
 //
-// Actions (sys.evt +0x2c, 24 bytes, 1-based): s16 +0, power +2, MP +4, speed +6, calc +8; u8 icon
+// Actions (sys.evt +0x2c, 1-based; 24 bytes in 1.0.x's data - the voiced data's are 38: six voice ids,
+// s16, at +10 and the rest 12 further on, class at +0x17): s16 +0, power +2, MP +4, speed +6, calc +8; u8 icon
 // +10, class +11 (the animation slot: 8-10 attacks, 11 genes, 12 items), scope +12 (1 self, 2/4/6
 // one of own side / opposite / anyone, 3/5/7 all of them), side +13 (1 self, 2 own, 3 opposite,
 // 4 any), pick +14 (the AI's target: 1 random, 2 lowest HP, 3 highest, 4 / 5 the first / second),
