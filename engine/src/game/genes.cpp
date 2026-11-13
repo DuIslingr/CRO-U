@@ -175,10 +175,23 @@ void giveStartingItems(GameState& gs, const ItemTable& items) {
 void ensureStartingGenes(GameState&) {} // (CR1's Human Genes; Omega's records carry their plates)
 
 int wornCount(const GameState& gs, int item) {
-    int n = 0;
+    // MuScrList_GetSellNum: one off for each of the pair wearing it (MuScrList_IsNowEquip: its seven
+    // slots, the gear and the four plates), and in scenario 1 one more if the third record wears it
+    // (MuCom_OtherChar_IsNowEquip: the gear only). Scenario 0's third member's gear can be sold
     if (item <= 0) return 0;
-    for (int r = 0; r < 3; ++r)
-        for (int e : gs.party[size_t(r)].equip) n += e == item;
+    const int sc = std::clamp(gs.scenario, 0, kScenarios - 1);
+    const auto& pr = gs.pairs[size_t(sc)];
+    auto wears = [&](int r, bool plates) {
+        if (r < 0 || r >= kCharacters) return false;
+        const PartyMember& m = gs.party[size_t(r)];
+        for (int e : m.equip) if (e == item) return true;
+        if (plates) for (int g : m.genes) if (g == item) return true;
+        return false;
+    };
+    int n = wears(pr[0], true) + wears(pr[1], true);
+    if (sc == 1)
+        for (int r = 0; r < 3; ++r)
+            if (r != pr[0] && r != pr[1]) { n += wears(r, false); break; }
     return n;
 }
 

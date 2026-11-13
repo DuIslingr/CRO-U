@@ -19538,6 +19538,18 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                     bad += named != 0;
                     std::printf("drop rows naming an icon-less item: %d%s %s\n", named, which.c_str(), named ? "WRONG" : "ok");
                 }
+                { // MuScrList_GetSellNum: the pair's worn copies (gear and plates) kept back, and scenario 1's
+                    // third record's gear; scenario 0's third member's can be sold
+                    cr::GameState wg;
+                    wg.scenario = 0;
+                    wg.party[0].equip[0] = 200, wg.party[1].genes[1] = 481, wg.party[2].equip[1] = 300;
+                    const bool s0 = cr::wornCount(wg, 200) == 1 && cr::wornCount(wg, 481) == 1 && cr::wornCount(wg, 300) == 0;
+                    wg.scenario = 1; // (pair 0 and 2: record 1 the third)
+                    wg.party[1].equip[2] = 390;
+                    const bool s1 = cr::wornCount(wg, 300) == 1 && cr::wornCount(wg, 390) == 1 && cr::wornCount(wg, 481) == 0;
+                    bad += !s0 || !s1;
+                    std::printf("worn copies kept from selling: scenario 0 %s, scenario 1 %s\n", s0 ? "ok" : "WRONG", s1 ? "ok" : "WRONG");
+                }
             }
             { // decompile checks: levels from 20 add 10 HP and 1 to the others (Omega's pcparam_change_lv),
               // seeds add 10 into that bonus, to 9999 (use_item, MuCom_GetUsedItemLimitNum), guests' Speed / Luck are their Defense, a monster

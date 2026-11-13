@@ -68,8 +68,9 @@ void splitSharedGenes(GameState& gs, const ItemTable& items);
 void addScenarioItem(GameState& gs, const ItemTable& items, int scenario, int item, int count);
 void ensureStartingGenes(GameState& gs);
 // Omega keeps worn equipment in the bag (prty_init's add_item2 of each record's weapon, armor,
-// jewel; __ChangeEquipItem only sets the slot): copies worn by the records in play, which can't be
-// sold (MuScrList_GetSellNum), and a save from before the port did the same brought in line
+// jewel; __ChangeEquipItem only sets the slot): copies the pair wears (and scenario 1's third
+// record), which can't be sold (MuScrList_GetSellNum), and a save from before the port did the same
+// brought in line
 int wornCount(const GameState& gs, int item);
 void putWornInBag(GameState& gs, const ItemTable& items);
 
