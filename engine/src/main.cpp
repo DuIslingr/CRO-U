@@ -191,6 +191,8 @@ struct App {
     bool showCollision = false;            // C: the collision and trigger meshes over the field (a debugging aid)
     bool showBackground = false;        // B: show the field's pre-rendered background
     bool hideHud = false;               // --capture renders without the text overlay
+    bool padKeyNow = false;             // a key sent for a controller button (padKey): its Esc never quits
+    bool viewer = false;                // launched as the viewer (--viewer / --map / --model ...): its map / model stepping keys
 #ifdef CR_RELEASE
     bool showHud = false;               // the status / key help at the top: off in a Release build (F3)
 #else
@@ -1906,6 +1908,7 @@ void padButton(App& app, int b);
 void padStep(App& app, float dt);
 bool padLive(App& app);
 bool padMenus(const App& app);
+bool titleTapFront(const App& app);
 bool padField(const App& app);
 void offerResume(App& app);
 void openSaveScreen(App& app, bool load);
@@ -13361,17 +13364,26 @@ void updatePlayer(App& app, float dt, float camYaw) {
     float sx = talking ? 0.0f : float(keys[SDL_SCANCODE_D]) - float(keys[SDL_SCANCODE_A]);
     float sy = talking ? 0.0f : float(keys[SDL_SCANCODE_S]) - float(keys[SDL_SCANCODE_W]);
     bool run = keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT];
-    if (padLive(app) && !talking && sx == 0 && sy == 0) { // a controller: the left stick (pushed far: runs) or the D-pad
-        float lx = float(SDL_GetGamepadAxis(app.pad, SDL_GAMEPAD_AXIS_LEFTX)) / 32767.0f;
-        float ly = float(SDL_GetGamepadAxis(app.pad, SDL_GAMEPAD_AXIS_LEFTY)) / 32767.0f;
-        const float mag = std::sqrt(lx * lx + ly * ly);
-        if (mag < 0.25f) lx = ly = 0; // (the dead zone)
-        else run = run || mag > 0.8f;
-        if (!(fieldBarPad(app) && app.fieldMenu.open)) { // (the Vita's bar takes the D-pad while it is open)
-            lx += float(SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) - float(SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_LEFT));
-            ly += float(SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_DOWN)) - float(SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_UP));
+    // A controller as the Vita's CrossKey::update (8103cc38): each stick axis zeroed below 0.2549 (the
+    // pad reader, FUN_81078ee4), then x 50 and held to +-50; with the stick at rest the D-pad sets its
+    // axes to +-50 - a full push. The length walks from 14.5 and runs from 29 (squared 210.25 / 841):
+    // the stick walks past about 0.29 and runs past 0.58, the D-pad always runs. The field bar open
+    // (FieldPCCtrl::operate) the leader stands
+    if (padLive(app) && !talking && sx == 0 && sy == 0 && !(fieldBarPad(app) && app.fieldMenu.open)) {
+        auto axis = [&](SDL_GamepadAxis a) {
+            const float v = float(SDL_GetGamepadAxis(app.pad, a)) / 32767.0f;
+            return std::fabs(v) < 0.2549f ? 0.0f : std::clamp(v * 50.0f, -50.0f, 50.0f);
+        };
+        float lx = axis(SDL_GAMEPAD_AXIS_LEFTX), ly = axis(SDL_GAMEPAD_AXIS_LEFTY);
+        if (lx == 0 && ly == 0) {
+            lx = 50.0f * (float(SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) - float(SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_LEFT)));
+            ly = 50.0f * (float(SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_DOWN)) - float(SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_UP)));
         }
-        sx = std::clamp(lx, -1.0f, 1.0f), sy = std::clamp(ly, -1.0f, 1.0f);
+        const float len2 = lx * lx + ly * ly;
+        if (len2 >= 210.25f) {
+            run = run || len2 >= 841.0f;
+            sx = std::clamp(lx / 50.0f, -1.0f, 1.0f), sy = std::clamp(ly / 50.0f, -1.0f, 1.0f);
+        }
     }
     if (!talking && sx == 0 && sy == 0) { // the touch pad (CrossKey): its offset steers, far out runs
         float tx, ty;
@@ -18961,7 +18973,8 @@ void drawFrame(App& app, bool present = true) {
             const float ex = app.staffRoll.edgeX, ey = app.staffRoll.edgeY; // (Android's hold box: + ex, - ey)
             corner = app.staffRoll.phone ? tx >= 444 + ex && tx < 476 + ex && ty >= -ey && ty < 32 - ey : tx >= 460 && tx < 492 && ty >= -32 && ty < 0;
         }
-        app.staffRoll.fast = keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_RETURN] || corner;
+        app.staffRoll.fast = keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_RETURN] || corner ||
+                             (app.pad && SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_WEST)); // (the Vita's □ held: __menuu_StaffRollPrc)
         for (app.staffRoll.clock += dt; app.staffRoll.clock >= 1.0f / kFramesPerSecond; app.staffRoll.clock -= 1.0f / kFramesPerSecond)
             stepStaffRoll(app);
         drawStaffRoll(app);
@@ -25513,14 +25526,51 @@ int runSelfTest(App& app) {
                 while (app.fieldMenu.anim > 0) stepFieldMenu(app);
                 padButton(app, SDL_GAMEPAD_BUTTON_EAST); // ○ on Camp
                 const bool camp = app.campOpen;
-                padButton(app, SDL_GAMEPAD_BUTTON_NORTH);
+                for (int f = 0; f < 20; ++f) stepCamp(app); // (its windows in)
+                padButton(app, SDL_GAMEPAD_BUTTON_NORTH); // △: the Vita's Camp reads none - still open
+                const bool triangleKept = app.campOpen;
+                padButton(app, SDL_GAMEPAD_BUTTON_SOUTH); // × on its main page closes it (over a few frames)
+                for (int f = 0; f < 20 && app.campOpen; ++f) stepCamp(app);
                 app.fieldMenu = App::FieldMenu();
                 app.video.layout = keepLayout;
                 applyVideo(app);
-                const bool ok = barOpen && stepped && wrapped && shut && camp && !app.campOpen;
+                const bool ok = barOpen && stepped && wrapped && shut && camp && triangleKept && !app.campOpen;
                 problems += !ok;
-                std::printf("controller, the Vita's bar: △ opens it on Camp %s, the cursor steps %s and wraps %s, × shuts it %s, ○ opens Camp %s\n",
-                            barOpen ? "yes" : "NO", stepped ? "yes" : "NO", wrapped ? "yes" : "NO", shut ? "yes" : "NO", camp ? "yes" : "NO");
+                std::printf("controller, the Vita's bar: △ opens it on Camp %s, the cursor steps %s and wraps %s, × shuts it %s, ○ opens Camp %s, "
+                            "△ leaves the Camp %s and × closes it %s\n",
+                            barOpen ? "yes" : "NO", stepped ? "yes" : "NO", wrapped ? "yes" : "NO", shut ? "yes" : "NO", camp ? "yes" : "NO",
+                            triangleKept ? "open" : "SHUT", !app.campOpen ? "yes" : "NO");
+            }
+            { // The Vita's pad elsewhere: L / R on the field leave the map be (they reached the viewer's
+              // map stepping, ten at a time); the D-pad runs (CrossKey: a full push); × on the title's
+              // "touch to start" starts, and never quits
+                const int mapBefore = app.mapIndex;
+                const bool keepViewer = app.viewer;
+                app.viewer = false;
+                padButton(app, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER), padButton(app, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+                const bool mapKept = app.mapIndex == mapBefore;
+                const cr::Vec3 at = app.walker.pos;
+                held(SDL_GAMEPAD_BUTTON_DPAD_RIGHT, true);
+                updatePlayer(app, 1.0f / kFramesPerSecond, 0);
+                const bool runs = app.walker.gait == cr::Gait::Run;
+                held(SDL_GAMEPAD_BUTTON_DPAD_RIGHT, false);
+                updatePlayer(app, 1.0f / kFramesPerSecond, 0);
+                app.walker.pos = at, app.walker.gait = cr::Gait::Stand;
+                app.runner.stop(), app.dialogue.clear(), app.pendingEntry = App::Entry::None;
+                const bool keepTitle = app.titleOpen;
+                const int keepStage = app.titleStage;
+                app.titleOpen = true, app.titleStage = 0;
+                const bool front = titleTapFront(app);
+                SDL_Event e{};
+                e.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN, e.gbutton.which = SDL_GetGamepadID(pad), e.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
+                const bool stays = SDL_AppEvent(&app, &e) != SDL_APP_SUCCESS;
+                const bool started = app.titleStage != 0 || !app.titleOpen;
+                app.titleOpen = keepTitle, app.titleStage = keepStage;
+                app.viewer = keepViewer;
+                const bool ok = mapKept && runs && front && stays && started;
+                problems += !ok;
+                std::printf("controller, the Vita's pad: L / R keep the map %s, the D-pad runs %s, × on the title starts %s and stays %s\n",
+                            mapKept ? "yes" : "NO", runs ? "yes" : "NO", started ? "yes" : "NO", stays ? "yes" : "NO");
             }
             { // A puzzle room's touch from the controller: R3 on a psychokinesis block lifts it, the right
               // stick slides the finger, R3 let go sends it; outside a puzzle room the pointer stays away
@@ -28541,6 +28591,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         for (int i = 1; i < argc; ++i)
             for (const char* f : {"--viewer", "--map", "--model", "--models", "--maps"})
                 viewer = viewer || SDL_strcmp(argv[i], f) == 0;
+        app->viewer = viewer;
         if (!viewer) bootTitle(*app);
     }
     if (SDL_getenv("CR_TRACE_NATIVES")) { // debugging: every native Call, its id and the last args pushed
@@ -28573,7 +28624,16 @@ void padKey(App& app, SDL_Keycode key) { // the button as its key, through the s
     e.type = SDL_EVENT_KEY_DOWN;
     e.key.key = key;
     e.key.down = true;
+    const bool keep = app.padKeyNow;
+    app.padKeyNow = true;
     SDL_AppEvent(&app, &e);
+    app.padKeyNow = keep;
+}
+// The title's "touch to start" in front, nothing over it
+bool titleTapFront(const App& app) {
+    return app.mode == Mode::Maps && app.titleOpen && app.titleStage == 0 && !app.resumePrompt && !app.optionsOpen &&
+           !app.manualOpen && !app.scc.open && !app.collection.open && !app.ach.listOpen && !app.saveScreen.open &&
+           !app.charSelectOpen;
 }
 void padButton(App& app, int b) {
     const bool east = b == SDL_GAMEPAD_BUTTON_EAST, south = b == SDL_GAMEPAD_BUTTON_SOUTH;
@@ -28581,13 +28641,21 @@ void padButton(App& app, int b) {
     const bool puzzle = app.puzzle.stage >= 0 && fieldMenuWanted(app) && !fieldSceneRunning(app);
     if (app.vitaLogo.phase) { if (confirm && app.vitaLogo.phase == 2) app.vitaLogo.skip = true; return; }
     if (fieldBarButton(app, b, confirm, cancel)) return;
+    // the Vita's title (__menuu_TitlePrc 1): any of □ △ ○ × START starts
+    if (titleTapFront(app) && (confirm || cancel || b == SDL_GAMEPAD_BUTTON_WEST || b == SDL_GAMEPAD_BUTTON_NORTH ||
+                               b == SDL_GAMEPAD_BUTTON_START)) {
+        padKey(app, SDLK_RETURN);
+        return;
+    }
     switch (b) {
     case SDL_GAMEPAD_BUTTON_DPAD_UP: if (padMenus(app)) padKey(app, SDLK_UP); return;
     case SDL_GAMEPAD_BUTTON_DPAD_DOWN: if (padMenus(app)) padKey(app, SDLK_DOWN); return;
     case SDL_GAMEPAD_BUTTON_DPAD_LEFT: if (padMenus(app)) padKey(app, SDLK_LEFT); return;
     case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: if (padMenus(app)) padKey(app, SDLK_RIGHT); return;
     case SDL_GAMEPAD_BUTTON_NORTH: // △: the menu
-        if (app.campOpen) { if (!app.camp.notice && app.camp.phase != App::Camp::Exit) app.campOpen = false, menuSound(app, se::kCampClose); } // (not while a message / the Exit runs)
+        if (app.campOpen) { // (not while a message / the Exit runs; the Vita's Camp reads no △ - × closes it)
+            if (!fieldBarPad(app) && !app.camp.notice && app.camp.phase != App::Camp::Exit) app.campOpen = false, menuSound(app, se::kCampClose);
+        }
         else if (padField(app) && fieldBarPad(app)) { // (the Vita's △: the bar, as the corner button)
             if (fieldMenuWanted(app) && !fieldSceneRunning(app) && app.fieldMenu.fade > 0) toggleFieldMenu(app);
         } else if (padField(app)) padKey(app, SDLK_K);
@@ -28926,7 +28994,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             break;
         }
         if (app.mode == Mode::Maps && app.titleOpen) {
-            if (!titleKey(app, event->key.key)) return SDL_APP_SUCCESS;
+            if (!titleKey(app, event->key.key) && !app.padKeyNow) return SDL_APP_SUCCESS; // (Esc quits - the keyboard's, not the pad's ×)
             break;
         }
         if (app.mode == Mode::Maps && app.battle.active) {
@@ -28948,12 +29016,15 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             }
         }
         switch (event->key.key) {
-        case SDLK_ESCAPE: case SDLK_AC_BACK: return SDL_APP_SUCCESS;
-        case SDLK_RIGHT: step(app, 1); break;
-        case SDLK_LEFT: step(app, -1); break;
-        case SDLK_PAGEDOWN: step(app, 10); break;
-        case SDLK_PAGEUP: step(app, -10); break;
+        case SDLK_ESCAPE: case SDLK_AC_BACK: if (app.padKeyNow) break; return SDL_APP_SUCCESS; // (the pad's × never quits)
+        // (the viewer's stepping: a game's field leaves them alone - the pad's L / R send PgUp / PgDn,
+        // and the arrow keys or L / R on the field changed the map, ten at a time)
+        case SDLK_RIGHT: if (app.viewer) step(app, 1); break;
+        case SDLK_LEFT: if (app.viewer) step(app, -1); break;
+        case SDLK_PAGEDOWN: if (app.viewer) step(app, 10); break;
+        case SDLK_PAGEUP: if (app.viewer) step(app, -10); break;
         case SDLK_TAB:
+            if (!app.viewer) break;
             setMode(app, app.mode == Mode::Textures ? Mode::Models
                          : app.mode == Mode::Models ? Mode::Maps : Mode::Textures);
             break;
