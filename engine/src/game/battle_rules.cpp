@@ -723,8 +723,9 @@ std::vector<int> BattleRules::resolveTargets(const BattleActionDef& a, const Ent
     if (e.target2 >= 0 && !isGroupScope(a) && a.scope != 0 && f[size_t(e.target2)].alive() &&
         std::find(out.begin(), out.end(), e.target2) == out.end())
         out.push_back(e.target2); // (btlque_add_counter: all the blow's actors)
-    // btlque_make_que: in pair mode a single target on the pair's side is both
-    if (pair && out.size() == 1 && out[0] < 2 && a.scope != 1) {
+    // btlque_make_que: in pair mode (+0xaf0) a single target on the pair's side is both - whatever
+    // the scope, a self one (1: 220's counter stance, 410, items 109 / 110) too (3.1.0 and 1.0.0 alike)
+    if (pair && out.size() == 1 && out[0] < 2) {
         out.clear();
         for (int i = 0; i < 2; ++i)
             if (f[size_t(i)].alive()) out.push_back(i);
@@ -749,8 +750,8 @@ size_t BattleRules::pickNext() {
         Entry& e = queue_[i];
         if (e.done) continue;
         int sum = 0, n = 0;
-        for (int a : e.actors)
-            if (a >= 0 && f[size_t(a)].alive()) sum += spdOf(a), ++n;
+        for (int a : e.actors) // (btlord_calc_spd: every actor the entry lists, a fallen one too - its
+            if (a >= 0) sum += spdOf(a), ++n; // statuses went with it, so its own Speed)
         if (e.kind != kCmdEscape) e.speed = (n ? sum / n : 0) + (e.actionSpeed);
         const int key = e.counter ? (1 << 22) : e.kind == kCmdEscape ? (1 << 21) : e.speed;
         if (best == queue_.size() || key > bestKey) best = i, bestKey = key;
@@ -807,7 +808,8 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
         out.repeat = e.paid;
         breakFlags &= ~0x3200u; // btl_main 600: per action
         if (e.kind == kCmdEscape) {
-            // btlact_escape_init: certain while the pair holds the Break, else by levels
+            // btlact_escape_init: certain while the pair holds the Break, else by levels (3.1.0 4ef94:
+            // 40 below -49, 50 below 0, 60 below 50, else 70)
             int chance = 100;
             if (group != 664 && breakGauge < 1 && !has(0, 160) && !has(1, 160)) { // 160: Beast Wavelength; group 0x298 always
                 int pl = 0, pn = 0, el = 0, en = 0;
