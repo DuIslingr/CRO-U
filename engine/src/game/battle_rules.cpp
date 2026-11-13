@@ -705,8 +705,19 @@ std::vector<int> BattleRules::resolveTargets(const BattleActionDef& a, const Ent
     if (isGroupScope(a) || a.scope == 0) out = pool;
     else {
         int t = e.target;
-        if (std::find(pool.begin(), pool.end(), t) == pool.end()) // fell meanwhile: someone else there
-            t = pool[size_t(random(int(pool.size())))];
+        if (std::find(pool.begin(), pool.end(), t) == pool.end()) { // fell meanwhile (btlque_make_que):
+            if (a.scope >= 4 && a.scope <= 7) { // a living one of the user's opposite side, drawn
+                std::vector<int> other;
+                for (int i = user < 2 ? 2 : 0; i < (user < 2 ? 5 : 2); ++i)
+                    if (f[size_t(i)].alive()) other.push_back(i);
+                if (other.empty()) return other;
+                t = other[size_t(random(int(other.size())))];
+            } else if (a.scope == 2) { // an own-side single target: the action's own actors
+                for (int k : e.actors)
+                    if (k >= 0 && f[size_t(k)].alive()) out.push_back(k);
+                return out;
+            } else t = pool[size_t(random(int(pool.size())))];
+        }
         out.push_back(t);
     }
     if (e.target2 >= 0 && !isGroupScope(a) && a.scope != 0 && f[size_t(e.target2)].alive() &&
