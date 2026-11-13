@@ -15131,6 +15131,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
         App::Battle::Actor a;
         a.modelId = modelId;
         a.model = cr::kBattleModelFile[modelId];
+        if (SDL_getenv("CR_BATTLE_DEBUG")) std::printf("battle %d: fighter %d model %d %s\n", start.group, fighter, modelId, a.model.c_str());
         if (!b.models.count(a.model)) loadModelFile(app, a.model, b.models[a.model], true);
         if (fighter >= 0 && fighter < 5) battleSlotsLoaded(b.models[a.model], modelId, fighter < 2, fighter >= 2 && b.rules.f[size_t(fighter)].def && b.rules.f[size_t(fighter)].def->strongGrowth);
         a.pos = a.home = {float(place[0]), 0.0f, float(place[1])};
