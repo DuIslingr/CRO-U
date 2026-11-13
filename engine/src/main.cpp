@@ -633,6 +633,8 @@ struct App {
     int fieldSpeed = 1, battleSpeed = 1;
     int padHeld = -1;                      // the direction held for the menus' repeat (0 up 1 down 2 left 3 right)
     float padHeldFor = 0;
+    int padCountDir = 0;                   // a count's L / R (or left / right) held: -1 / +1 (FUN_8105bea8)
+    float padCountFor = 0;
     crinput::HeldOver padHeldOver;         // (dead after a cancel or a session's end, until let go)
     int itemWindowItem = 0;
     int itemWindowRow = 0, itemWindowFade = 0; // Uty_GetItem's band: its row (y = 32 x row - 32) and fade steps
@@ -25589,8 +25591,16 @@ int runSelfTest(App& app) {
                 while (app.fieldMenu.anim > 0) stepFieldMenu(app);
                 const bool barOpen = app.fieldMenu.open && !app.campOpen && !e.empty() && e.back() == 0 &&
                                      app.fieldMenu.cursor == int(e.size()) - 1;
+                SDL_SetJoystickVirtualAxis(js, SDL_GAMEPAD_AXIS_LEFTX, -32767); // the stick a push left: a step
+                SDL_UpdateJoysticks();
+                padStep(app, 1.0f / 60.0f), padStep(app, 1.0f / 60.0f);
+                SDL_SetJoystickVirtualAxis(js, SDL_GAMEPAD_AXIS_LEFTX, 0);
+                SDL_UpdateJoysticks();
+                padStep(app, 1.0f / 60.0f);
+                const bool stickStepped = e.size() > 1 && e[size_t(app.fieldMenu.cursor)] == e[e.size() - 2];
+                padButton(app, SDL_GAMEPAD_BUTTON_DPAD_RIGHT); // (back on Camp)
                 padButton(app, SDL_GAMEPAD_BUTTON_DPAD_LEFT);
-                const bool stepped = e.size() > 1 && e[size_t(app.fieldMenu.cursor)] == e[e.size() - 2];
+                const bool stepped = stickStepped && e[size_t(app.fieldMenu.cursor)] == e[e.size() - 2];
                 padButton(app, SDL_GAMEPAD_BUTTON_DPAD_DOWN), padButton(app, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
                 const bool wrapped = app.fieldMenu.cursor == (e.size() > 1 ? 0 : -1);
                 padButton(app, SDL_GAMEPAD_BUTTON_SOUTH); // × (○ confirms on the Vita)
@@ -28923,7 +28933,41 @@ bool padListFocus(const App& app, int& cur, int& n) {
 }
 
 void padStep(App& app, float dt) {
-    if (!padLive(app) || !padMenus(app)) { app.padHeld = -1; return; }
+    // The Vita's field bar open (__menuf_mainPrc): the stick moves its cursor as the D-pad does, a step
+    // a push (the reader turns the stick into D-pad presses; the bar has no repeat)
+    if (app.pad && fieldBarPad(app) && app.fieldMenu.open && !padMenus(app)) {
+        const float bx = float(SDL_GetGamepadAxis(app.pad, SDL_GAMEPAD_AXIS_LEFTX)) / 32767.0f;
+        const float by = float(SDL_GetGamepadAxis(app.pad, SDL_GAMEPAD_AXIS_LEFTY)) / 32767.0f;
+        int dir = -1;
+        if (std::max(std::fabs(bx), std::fabs(by)) >= 0.2549f)
+            dir = std::fabs(by) >= std::fabs(bx) ? (by < 0 ? 0 : 1) : (bx < 0 ? 2 : 3);
+        static const int kBarDir[4] = {SDL_GAMEPAD_BUTTON_DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_DOWN, SDL_GAMEPAD_BUTTON_DPAD_LEFT,
+                                       SDL_GAMEPAD_BUTTON_DPAD_RIGHT};
+        if (dir != app.padHeld) {
+            app.padHeld = dir, app.padHeldFor = 0;
+            if (dir >= 0) fieldBarButton(app, kBarDir[dir], false, false);
+        }
+        return;
+    }
+    if (!padLive(app) || !padMenus(app)) { app.padHeld = -1; app.padCountDir = 0; return; }
+    // A count (the shop's, the Camp's seeds - FUN_8105bea8): L / R held change it a step a press,
+    // then from the 20th frame held one a frame (left / right the same)
+    {
+        const bool count = (app.shop.open && app.shop.phase == App::Shop::Count) ||
+                           (app.campOpen && app.camp.page == App::Camp::Items && app.camp.phase == App::Camp::Ask);
+        int cd = 0;
+        if (count) {
+            if (SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) || SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_LEFT)) cd = -1;
+            else if (SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) || SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) cd = 1;
+        }
+        if (cd != app.padCountDir) app.padCountDir = cd, app.padCountFor = 0; // (the press itself came as its button)
+        else if (cd) {
+            const float before = app.padCountFor;
+            app.padCountFor += dt;
+            if (app.padCountFor >= 1.0f && std::floor((app.padCountFor - 1.0f) / 0.05f) != std::floor((before - 1.0f) / 0.05f))
+                padKey(app, cd < 0 ? SDLK_LEFT : SDLK_RIGHT);
+        }
+    }
     const float lx = float(SDL_GetGamepadAxis(app.pad, SDL_GAMEPAD_AXIS_LEFTX)) / 32767.0f;
     const float ly = float(SDL_GetGamepadAxis(app.pad, SDL_GAMEPAD_AXIS_LEFTY)) / 32767.0f;
     int dir = -1;
