@@ -60,6 +60,10 @@ void changeScenario(GameState& gs, const ItemTable& items, int scenario);
 bool sharedItem(const ItemTable& items, int item); // kinds 4, 5, 9, 10: one count for both scenarios
 // prty_init_new's genes and items; ensureStartingGenes only adds what an older save lacks
 void giveStartingItems(GameState& gs, const ItemTable& items);
+// _GetItmCnt: the other scenario's Human Genes plates (scenario 0: 477..480, 1: 474..476) count none
+bool otherScenarioPlate(const GameState& gs, int item);
+// An old save's one shared set of entries: each scenario keeps it, learned apart from here on
+void splitSharedGenes(GameState& gs, const ItemTable& items);
 // add_item while scenario `scenario` is set: its own bag, or the shared one
 void addScenarioItem(GameState& gs, const ItemTable& items, int scenario, int item, int count);
 void ensureStartingGenes(GameState& gs);

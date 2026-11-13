@@ -29,6 +29,7 @@ constexpr std::array<int, 8> kPlate[kPlates] = {
 constexpr std::array<int, 8> kNone{};
 
 int owned(const GameState& gs, int item) {
+    if (otherScenarioPlate(gs, item)) return 0;
     auto it = gs.items.find(item);
     return it == gs.items.end() ? 0 : it->second;
 }
@@ -109,6 +110,21 @@ bool localScenarioItem(const GameState& gs, const ItemTable& items, int item) {
     return !sharedItem(items, item);
 }
 
+// _GetItmCnt: the other scenario's Human Genes plates count none (scenario 0: 477..480; 1: 474..476)
+bool otherScenarioPlate(const GameState& gs, int item) {
+    return gs.scenario == 0 ? item >= 477 && item <= 480 : gs.scenario == 1 && item >= 474 && item <= 476;
+}
+
+// A save from before the scenarios kept their own entries (one shared set): each scenario takes what
+// is known now, from here on learned apart (who learned what was never kept - nothing is lost)
+void splitSharedGenes(GameState& gs, const ItemTable& items) {
+    if (gs.scenarioGenes) return;
+    gs.scenarioGenes = true;
+    for (const auto& [item, n] : gs.items)
+        if (n > 0 && localScenarioItem(gs, items, item) && sharedItem(items, item) && !gs.otherBag.count(item))
+            gs.otherBag[item] = n;
+}
+
 void changeScenario(GameState& gs, const ItemTable& items, int scenario) {
     scenario = std::clamp(scenario, 0, kScenarios - 1);
     for (int k = 0; k < 3; ++k) gs.party[size_t(4 + 3 * gs.scenario + k)] = gs.party[size_t(k)];
@@ -135,6 +151,8 @@ void addScenarioItem(GameState& gs, const ItemTable& items, int scenario, int it
 }
 
 void giveStartingItems(GameState& gs, const ItemTable& items) {
+    // (a new game keeps each scenario's own gene / skill entries apart, as 3.1.0's flags do)
+    gs.scenarioGenes = true;
     // prty_init: records 3..6 fill scenario 0's bag, 7..9 scenario 1's - their plates, two extras
     // and what they wear (add_item2: worn equipment stays in the bag) -, scenario 1 also gets 480, 82 and
     // 188, scenario 0 _prty_init_item_all; then plate 475 (record 6's) and 369 go again

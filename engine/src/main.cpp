@@ -5597,7 +5597,7 @@ std::string dataPath(const App& app) { return savePath(app, "data.dat"); }
 // leader, treasure pick and saved place, its flags are added to the one flag array (the original
 // holds both scenarios' in it) and its shared genes / skills / manual / plates counted in
 bool readData(const App& app, cr::SaveData& d) {
-    if (cr::readSave(dataPath(app), d)) return true;
+    if (cr::readSave(dataPath(app), d)) { cr::splitSharedGenes(d.game, app.itemTable); return true; }
     std::vector<std::pair<int, cr::SaveData>> slots;
     for (int pair = 1; pair <= 4; ++pair) {
         cr::SaveData s;
@@ -5637,6 +5637,7 @@ bool readData(const App& app, cr::SaveData& d) {
             d.game.oz = oz;
         } else d.game.otherBag = own, d.game.otherOz = oz;
     }
+    cr::splitSharedGenes(d.game, app.itemTable);
     cr::writeSave(dataPath(app), d);
     return true;
 }
@@ -6039,6 +6040,7 @@ int shopCharacter(const App& app) { return campCharacter(app, app.shop.member); 
 bool shopEquipment(const App& app) { return app.shop.category >= 1 && app.shop.category <= 3; }
 
 int ownedCount(const App& app, int item) {
+    if (cr::otherScenarioPlate(app.game, item)) return 0; // (_GetItmCnt)
     auto it = app.game.items.find(item);
     return it == app.game.items.end() ? 0 : it->second;
 }
@@ -6055,7 +6057,11 @@ int shopUnitPrice(const App& app, int item) {
 }
 
 int shopMaxCount(const App& app, int item) {
-    if (app.shop.selling) return std::clamp(ownedCount(app, item) - cr::wornCount(app.game, item), 0, cr::kMaxItemCount);
+    if (app.shop.selling) { // (MuScrList_GetChoiceListNo 9: refused with none to sell or no price - jewel 387 & co)
+        const cr::ItemParam* sp = app.itemTable.item(item);
+        if (!sp || sp->price == 0) return 0;
+        return std::clamp(ownedCount(app, item) - cr::wornCount(app.game, item), 0, cr::kMaxItemCount);
+    }
     const int n = cr::maxPurchase(shopUnitPrice(app, item), app.game.oz, ownedCount(app, item));
     // ShopPrc: a gene, skill or OMU item (kinds 4 / 5 / 11) already owned is greyed and refused; the
     // genes' and skills' stock (81..198) and the OMU items (521..540) are bought one at a time
@@ -10054,6 +10060,7 @@ void openResumePrompt(App& app) { // TitlePrc 0x1a
 void offerResume(App& app) {
     if (app.resumePrompt || app.resumeNotice || !app.persist) return;
     if (!cr::readSave(savePath(app, "resume.dat"), app.resumeData)) return;
+    cr::splitSharedGenes(app.resumeData.game, app.itemTable);
     if (!allPairsFlags(app).flag(0x44) && !app.game.flag(0x44) && !app.interruptShown) { // 0x16
         app.game.setFlag(0x44, true);
         markSeen(app, 0x44);
@@ -13347,8 +13354,9 @@ void stepEvents(App& app) {
 // banks 1 EXP for the pair (to 100000; one a step at most)
 void fieldWalked(App& app, float dist) {
     if (!app.noEncounters && !fieldEncountersOff(app)) app.encounters.walked(dist);
-    const int pr = fieldRoute(app) * 2;
-    if (!cr::hasSkill(app.game, pr, 174) && !cr::hasSkill(app.game, pr + 1, 174)) return;
+    // (_chk_gene on the scenario's current pair - sectname[scen*2+2 / +3], as btl_prty_init reads it)
+    const auto& pair = app.game.pairs[size_t(fieldRoute(app))];
+    if (!(pair[0] >= 0 && cr::hasSkill(app.game, pair[0], 174)) && !(pair[1] >= 0 && cr::hasSkill(app.game, pair[1], 174))) return;
     app.walkExpDistance += dist;
     if (app.walkExpDistance >= 10) {
         int& bank = app.game.walkExp[size_t(fieldRoute(app))];
@@ -15316,7 +15324,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     rules.story = &app.game;
     rules.scenario = std::clamp(app.game.scenario, 0, cr::kScenarios - 1);
     rules.formation = b.formation;
-    rules.allyAuto = rules.scenario == 0 && start.group == 694; // btlord_enemy_rand: 0x2b6's member 1 attacks on its own
+    rules.allyAuto = rules.scenario == 0 && start.group == 695; // btlord_enemy_rand: ctx 0x2b6 - group 695, the guest - member 1 attacks on its own
     // __menub_mainPrc: Escape is dimmed and refused while a script runs (G+0x364 bit 0 - an
     // event battle), group 0x298 apart; the opcode's flags byte (0x8a53e) is never read
     rules.escapeBlocked = app.runner.running() && start.group != 0x298;
@@ -17055,7 +17063,10 @@ void victoryShown(App& app) {
     App::Battle& b = app.battle;
     btlvoice::victory(app); // btl_main 0x3e9
     int& bank = app.game.walkExp[size_t(fieldRoute(app))]; // skill 174's walking EXP joins the battle's
-    if (!b.settled) b.rules.expGained += bank, bank = 0;   // (before the Apples double it)
+    if (!b.settled) { // (btl_main 0x44b: the second scenario's EXP a fifth more, then the walked bank, then the Apples)
+        if (app.game.scenario == 1) b.rules.expGained += int(unsigned(b.rules.expGained) * 2 / 10);
+        b.rules.expGained += bank, bank = 0;
+    }
     settleBattle(app);
     { // var 59: the victory tune (10 for random encounters) - none when it's the battle's own (var 58),
         // or 997 / 998, the battle's music played on (btl_main 0x3e9)
@@ -19388,7 +19399,8 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 cr::GameState g;
                 cr::giveStartingItems(g, app.itemTable);
                 const std::vector<int> own = cr::usableAbilities(g, 0);
-                bad += own != std::vector<int>{85, 114} || !cr::hasSkill(g, 0, 135) || cr::hasSkill(g, 0, 131); // plate 474
+                // plate 474 in scenario 0: 85 and 135 known (114 is scenario 1's own - _chk_geneplateno's flags)
+                bad += own != std::vector<int>{85} || !cr::hasSkill(g, 0, 135) || cr::hasSkill(g, 0, 131);
                 g.items[481] = 1, g.items[108] = 1;
                 g.party[0].genes[1] = 481;
                 const std::vector<int> more = cr::usableAbilities(g, 0);
@@ -19434,6 +19446,22 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 bad += !cast || pr.f[0].mp != mp0 - cost || pr.f[1].mp != mp1 - cost;
                 std::printf("genes: new game knows %zu, a plate adds %zu, plates dropped %d/40, genes taught %d/40\n", own.size(),
                             more.size() - own.size(), plates, taught);
+                { // each scenario's own entries apart (_chk_geneplateno's flags), the other's Human Genes plates
+                    // none (_GetItmCnt): scenario 0 knows 85 / 135 of 474, not 114 / 187; scenario 1 the reverse
+                    cr::GameState sg;
+                    cr::giveStartingItems(sg, app.itemTable);
+                    auto have = [&](int it) { return !cr::otherScenarioPlate(sg, it) && sg.items.count(it) && sg.items.at(it) > 0; };
+                    const bool s0 = have(85) && have(135) && !have(114) && !have(187) && have(474) && !have(477) && !have(480);
+                    cr::changeScenario(sg, app.itemTable, 1);
+                    const bool s1 = have(114) && have(187) && !have(474) && have(477);
+                    cr::GameState old; // an old save's shared set: kept in both
+                    old.items[114] = 1;
+                    cr::splitSharedGenes(old, app.itemTable);
+                    const bool split = old.scenarioGenes && old.items.count(114) && old.otherBag.count(114);
+                    bad += !s0 || !s1 || !split;
+                    std::printf("genes per scenario: scenario 0's own %s, scenario 1's own %s, an old save split %s\n", s0 ? "yes" : "NO",
+                                s1 ? "yes" : "NO", split ? "yes" : "NO");
+                }
             }
             { // decompile checks: levels from 20 add 10 HP and 1 to the others (Omega's pcparam_change_lv),
               // seeds add 10 into that bonus, to 9999 (use_item, MuCom_GetUsedItemLimitNum), guests' Speed / Luck are their Defense, a monster
