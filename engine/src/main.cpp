@@ -601,6 +601,7 @@ struct App {
     struct CampPointer {
         bool down = false, dragging = false, bar = false;
         float startX = 0, startY = 0, lastY = 0, remainder = 0;
+        float leftX = -1e9f, leftY = -1e9f;   // where it is now, in the left group's menu units (the buttons below the boards)
         Camp::Page page = Camp::Main;
         Camp::Phase phase = Camp::List;
     } campPointer;
@@ -7666,12 +7667,27 @@ void campPointerPoint(const App& app, float px, float py, float& mx, float& my) 
     app.renderer.toLogical(px, py, lx, ly);
     menuPointAt(app, lx, ly, wideRight(app), mx, my);
 }
+void campPointerLeft(const App& app, float px, float py, float& mx, float& my) {
+    float lx, ly;
+    app.renderer.toLogical(px, py, lx, ly);
+    menuPointAt(app, lx, ly, wideLeft(app), mx, my);
+}
+// A touch held on a button below the boards (0 Scenarios, 1 Collection): 3.1.0 lights it (picture
+// 163 under it) while _pad_chk_updw_box finds the finger on it
+bool campButtonHeld(const App& app, int k) {
+    const auto& p = app.campPointer;
+    if (!p.down || app.camp.page != App::Camp::Main) return false;
+    const short* sp = cr::kMenuPicture[k == 0 ? 162 : 161];
+    const float x = k == 0 ? 12.0f : 84.0f;
+    return p.leftX >= x && p.leftX < x + sp[2] && p.leftY >= 236 && p.leftY < 236 + sp[3];
+}
 void campPointerDown(App& app, float px, float py) {
     auto& p = app.campPointer;
     p = App::CampPointer();
     p.down = true, p.page = app.camp.page, p.phase = app.camp.phase;
     campPointerPoint(app, px, py, p.startX, p.startY);
     p.lastY = p.startY;
+    campPointerLeft(app, px, py, p.leftX, p.leftY);
     const bool list = campScrollable(app);
     p.bar = list && campScrollCount(app) > 1 && p.startX >= campui::kGaugeX - 2 && p.startX < campui::kGaugeX + 22 &&
         p.startY >= campui::kGaugeY + 12 && p.startY < campui::kGaugeY + campui::kGaugeH - 12;
@@ -7682,6 +7698,7 @@ void campPointerMove(App& app, float px, float py) {
     if (!app.campOpen || app.camp.page != p.page || app.camp.phase != p.phase) { p = App::CampPointer(); return; }
     float mx, my;
     campPointerPoint(app, px, py, mx, my);
+    campPointerLeft(app, px, py, p.leftX, p.leftY);
     const bool list = campScrollable(app);
     const bool inList = p.startX >= campListX(app) && p.startX < campListX(app) + 256 &&
         p.startY >= campui::kListTop && p.startY < campui::kListBottom;
@@ -9655,10 +9672,10 @@ void drawCamp(App& app) {
     if (main || outA < 1) { // __menuu_CampMainPut: Scenarios (162; 128 "new" over it while no cell is open) and, in the
         // second scenario only (window 0x15), Collection (161) under the boards
         // (the one lit - the pad's place on them; 3.1.0 a touch held - picture 163 under it: 0xd3770 / 0xd37d0)
-        if (main && c.btnRow == 0) m.picture(163, 12 - 120 * out, 236, 1 - outA);
+        if (main && (c.btnRow == 0 || campButtonHeld(app, 0))) m.picture(163, 12 - 120 * out, 236, 1 - outA);
         m.picture(162, 12 - 120 * out, 236, 1 - outA); // (windows 0x14 / 0x15: WinDispOn / Off at x -120)
         if (campScenariosNew(app)) m.picture(128, 12 - 120 * out, 236, 1 - outA);
-        if (app.game.scenario != 0 && main && c.btnRow == 1) m.picture(163, 84 - 120 * out, 236, 1 - outA);
+        if (app.game.scenario != 0 && main && (c.btnRow == 1 || campButtonHeld(app, 1))) m.picture(163, 84 - 120 * out, 236, 1 - outA);
         if (app.game.scenario != 0) m.picture(161, 84 - 120 * out, 236, 1 - outA);
     }
     const int ch = campCharacter(app, c.member);
