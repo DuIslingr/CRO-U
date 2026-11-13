@@ -3680,9 +3680,10 @@ struct ViewerHost : cr::EventHost {
     void addLevels(int c, int n) override { // pcparam_change_lv: to 255; the growth goes with it
         if (c < 0 || c >= cr::kCharacters) return;
         cr::PartyMember& m = app.game.party[size_t(c)];
-        const int before = m.level;
         m.level = std::clamp(m.level + n, 1, cr::kMaxLevel);
-        if (m.level > before) cr::levelUpBoosts(app.game, c, m.level - before);
+        // (3.1.0 _pcparam_change_lv: the level-20-on growth only for the levels below 255, but the
+        // 164..169 boosts for every level asked, past the cap too)
+        if (n > 0) cr::levelUpBoosts(app.game, c, n);
     }
     void treasureBoxesShown(bool on) override { // Uty_TBox_Init: every box of the room and its lid (id + 1) -
         // 0 Kills them (not drawn, not solid, not examined); 1 Borns those killed whose create flags pass
@@ -7301,8 +7302,8 @@ bool campUseItem(App& app, int character, int item, int count) {
     }
     if (item >= 24 && item <= 27) {
         const int most = cr::memberStat(app.game, character, cr::kMp, app.itemTable);
-        const int mp = pm.mp < 0 ? most : std::min(pm.mp, most);
-        if (mp >= most || ownedCount(app, item) <= 0) return false;
+        const int mp = pm.mp < 0 ? most : pm.mp; // (FUN_00066428: refused at exactly the most; above it -
+        if (mp == most || ownedCount(app, item) <= 0) return false; // gear taken off - used, and clamped)
         static const int kGain[3] = {100, 250, 500};
         pm.mp = item == 27 ? most : std::min(most, mp + kGain[item - 24]);
         used();
@@ -19521,6 +19522,21 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                     }
                     bad += good != 12;
                     std::printf("counter after a multi-go move's last go: %d/12 %s\n", good, good == 12 ? "ok" : "WRONG");
+                }
+                { // _add_item takes no item whose icon byte (+0x10) is 0 (225-228, 310-312, 395-418, ...):
+                    // does a monster's drop or steal row (+0xc8..+0xda) name one? (none: no guard needed)
+                    int named = 0;
+                    std::string which;
+                    for (int id = 1; id <= app.battleData.monsterCount(); ++id)
+                        if (const cr::MonsterDef* m = app.battleData.monster(id))
+                            for (int off = 0xc8; off <= 0xda; off += 2) {
+                                const int it = int16_t(m->raw[size_t(off)] | m->raw[size_t(off + 1)] << 8);
+                                if (it <= 0 || (it >= 81 && it <= 191)) continue; // (genes / skills: learned, not bagged)
+                                const cr::ItemParam* ip = app.itemTable.item(it);
+                                if (!ip || ip->icon < 0) ++named, which += " " + std::to_string(id) + ":" + std::to_string(it);
+                            }
+                    bad += named != 0;
+                    std::printf("drop rows naming an icon-less item: %d%s %s\n", named, which.c_str(), named ? "WRONG" : "ok");
                 }
             }
             { // decompile checks: levels from 20 add 10 HP and 1 to the others (Omega's pcparam_change_lv),

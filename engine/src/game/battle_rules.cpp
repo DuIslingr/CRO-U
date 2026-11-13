@@ -981,9 +981,9 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                 out.hits.push_back(h);
                 continue;
             }
-            case 14: // 0419: everything back
-                tx.mp = tx.mpMax;
-                h.amount = -tx.hpMax;
+            case 14: // 0419: everything back - dmg_hp(-max HP), its figure shown << 155 (twice the most HP
+                tx.mp = tx.mpMax; // with the user's skill 155; the HP stops at the most all the same)
+                h.amount = -recovery(tx.hpMax);
                 break;
             case 15: h.amount = -recovery(tx.hpMax * a->power / 100); break; // 0420: power% of the most HP
             case 16: { // 0421: power% of the most MP
