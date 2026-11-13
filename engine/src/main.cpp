@@ -542,6 +542,7 @@ struct App {
         bool swayBack = false;
         bool holding = false;      // a finger on the cord (DAT_e599d)
         float holdY = 0, pull = 0; // ... where it went down, how far it's pulled (0..24)
+        bool padPull = false, padPullFresh = false; // the Vita's Down held pulling it (a fresh press each turn)
         int bob = 0;               // the arrow's PictMove (0..4, 2 a step)
         bool bobBack = false;
         float clock = 0;
@@ -11253,6 +11254,23 @@ void charSelectTurn(App& app) { // the second page, once it's open
 
 void stepCharSelect(App& app) {
     App::StartPage& sp = app.startPage;
+    // The Vita's pad (__menuu_StartPrc): Down pressed and held pulls the cord 2 a frame - at 24 (12
+    // frames) the page turns (0x12d), as the finger's pull; let go, it springs back
+    if (app.pad && !sp.phase && laterPairsOpen(app) && !app.pointerLast) {
+        const bool down = SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_DPAD_DOWN) ||
+                          float(SDL_GetGamepadAxis(app.pad, SDL_GAMEPAD_AXIS_LEFTY)) / 32767.0f >= 0.2549f;
+        if (!down) sp.padPull = false, sp.pull = sp.holding ? sp.pull : 0;
+        else if (!sp.padPull && !sp.holding) sp.padPull = true, sp.padPullFresh = true, sp.pull = 0;
+        else if (sp.padPull && sp.padPullFresh) {
+            sp.pull = std::min(24.0f, sp.pull + 2.0f);
+            if (sp.pull >= 24) {
+                menuSound(app, se::kSlide);
+                sp.sway = 0, sp.swayStep = 0, sp.swayBack = false;
+                sp.padPullFresh = false, sp.pull = 0;
+                charSelectTurn(app);
+            }
+        }
+    }
     const float top = pageTop(app);
     switch (sp.phase) {
     case 1:
@@ -25691,7 +25709,25 @@ int runSelfTest(App& app) {
                 const bool started = app.titleStage != 0 || !app.titleOpen;
                 app.titleOpen = keepTitle, app.titleStage = keepStage;
                 app.viewer = keepViewer;
-                const bool ok = mapKept && runs && front && stays && started;
+                // Character Select: Down held pulls the cord, the page turning at 12 frames (__menuu_StartPrc)
+                const cr::GameState keepCs = app.game;
+                const bool keepPointer = app.pointerLast;
+                app.pointerLast = false;
+                app.game.setFlag(31, true);
+                openCharSelect(app);
+                for (int f = 0; f < 400 && app.startPage.phase; ++f) stepCharSelect(app);
+                const int page0 = app.charSelectPage;
+                held(SDL_GAMEPAD_BUTTON_DPAD_DOWN, true);
+                for (int f = 0; f < 11; ++f) stepCharSelect(app);
+                const bool notYet = app.charSelectPage == page0 && !app.startPage.phase;
+                for (int f = 0; f < 3; ++f) stepCharSelect(app);
+                const bool pulled = app.startPage.phase != 0 || app.charSelectPage != page0;
+                held(SDL_GAMEPAD_BUTTON_DPAD_DOWN, false);
+                for (int f = 0; f < 400 && app.startPage.phase; ++f) stepCharSelect(app);
+                app.charSelectOpen = false;
+                app.game = keepCs, app.pointerLast = keepPointer;
+                const bool ok = mapKept && runs && front && stays && started && notYet && pulled;
+                std::printf("controller, the Vita's Select Scenario: Down held turns the page at 12 frames %s\n", notYet && pulled ? "yes" : "NO");
                 problems += !ok;
                 std::printf("controller, the Vita's pad: L / R keep the map %s, the D-pad runs %s, × on the title starts %s and stays %s\n",
                             mapKept ? "yes" : "NO", runs ? "yes" : "NO", started ? "yes" : "NO", stays ? "yes" : "NO");
