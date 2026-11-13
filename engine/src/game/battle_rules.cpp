@@ -743,9 +743,12 @@ std::vector<int> BattleRules::resolveTargets(const BattleActionDef& a, const Ent
 size_t BattleRules::pickNext() {
     // btlque_make_que: btlord_calc first (every entry's speed from its actors as they are now - a
     // Speed Up, Down or Ward taken this round moves the rest of it), then a counter, then an escape,
-    // then the fastest - the first of equals (the entries stand in fighter order)
+    // then the fastest - the first of equals in slot (fighter) order: make_que's strict > over
+    // slots 0..4, so a further go of a slot keeps its slot's place in a tie, wherever the port's
+    // queue put it (counters, in the que, first come first)
     size_t best = queue_.size();
     int bestKey = 0;
+    auto slot = [](const Entry& x) { return x.actors[0] >= 0 ? x.actors[0] : x.actors[1]; };
     for (size_t i = next_; i < queue_.size(); ++i) {
         Entry& e = queue_[i];
         if (e.done) continue;
@@ -754,7 +757,9 @@ size_t BattleRules::pickNext() {
             if (a >= 0) sum += spdOf(a), ++n; // statuses went with it, so its own Speed)
         if (e.kind != kCmdEscape) e.speed = (n ? sum / n : 0) + (e.actionSpeed);
         const int key = e.counter ? (1 << 22) : e.kind == kCmdEscape ? (1 << 21) : e.speed;
-        if (best == queue_.size() || key > bestKey) best = i, bestKey = key;
+        if (best == queue_.size() || key > bestKey ||
+            (key == bestKey && !e.counter && slot(e) < slot(queue_[best])))
+            best = i, bestKey = key;
     }
     return best;
 }
