@@ -21,7 +21,7 @@ video moves under a seek: pause it first, and label each grab with the frame cal
 | A page cleared by `0x10` replaces the page | Part 3 2100-2103 s: "Do for her?" replaced by "No, the only "remedy"..." (3403) | Confirmed |
 | `0x12` followed by text continues on the same line at once (174094b) | - | Not found in the videos checked: code reading only |
 | The player's field shadow (8e8c370) | Part 2 (bMgJjj3q8GQ) 390 s: a dark oval under the running leader in the first dungeon | Confirmed |
-| Battle floor shadows (54a299d) | Part 3 1111.2-1112.4 s: dark ovals under the flying monster and the pair on the library floor | Confirmed (snow battles in Part 2 hide them) |
+| Battle floor shadows (54a299d) | Part 3 1111.2-1112.4 s: dark ovals under the flying monster and the pair on the library floor | Confirmed (snow battles in Part 2 hide them). 2026-11-13: their edge - the flyer's shadow at 1112.2 s is darkest at its middle and fades out with no rim; 3.1.0's fans give the centre the alpha and both rim points 0 (0x161f4 / 0x1621c / 0x16224, r5 = 0) - the port had every vertex at the alpha (a hard oval): fixed, field shadows too |
 | Field HUD cut, no fade (37a73cf) | Part 3 2079.557 -> 2079.594 s: the corner button fully drawn, then gone on the next frame; 1098.445 -> 1098.514 s: absent, then fully drawn | Confirmed both ways |
 | Battle fade-in over 20 frames (pass 2 / 54a299d) | Part 3 1110.79-1111.75 s: linear from white over about 0.96 s | Confirmed |
 | Solid white before the fade (54a299d: about 5 frames) | Part 3 1110.30-1110.75 s: about 9 frames | Longer in the video; the original holds white while the battle loads, so the length depends on the device - the port's is the minimum |
@@ -309,6 +309,8 @@ half?" (not in the videos at a settled frame).
 
 | Check | Reference | Verdict |
 |---|---|---|
+| A physical gene - action class 9: Twin Lunar Lion, Asura Lotus, Divine Fist, Risk Breaker, Trompe-L'œil, Soul's Appeasement, Magnum Fang - goes as an attack (btlque_make_que, 3.1.0 decomp 34613: +0x542 = 1, so btlact_attack_init) | Part 4 (d9G1EkeZyUM) 2017.0-2021.5 s, Olgar's Twin Lunar Lion on the spider boss: the wide attack camera, Olgar walks up, swings (233), walks back, a second pass (226); the name on the first only; MP 72 less | Contradicted, fixed: the port cast it - the cast pose and glow, the cast camera, no walk. `CR_BATTLE_GENE=114 CR_BATTLE_DEBUG=1 --battle 1 0 --battle-view genehit@400`: two slot-8 passes with the walk, camera 126, the banner once, MP 999 -> 927. Found by metastigma's fork (its 234 / 239 special case); the class rule from 3.1.0 |
+| After a defeat at the Ark (btl_main 0x4b1 sets flag 0xffd; j001_t01 / c101_t01's area script plays the scene and clears it) | - (no defeat in the videos) | Code reading: the port never set the flag, so the scene never played; fixed - the self-test's lost battle now plays it |
 | A puzzle room's third button, "Skip" (menuf_mainPut, 3.1.0 decomp.c 35933: picture (420, 216) 44 x 32 at (160, 14) while flag map + 0xb1f - 3000 + stage - is clear and var map - 89 - 64 + stage - is above 2) | Part 6 (UU3-os1kzGg) 58-62 s: after "Retry puzzle?" the panel shows Left 3, HELP, a blue "Skip" and Retry | Confirmed: `CR_CAPTURE_VARS=64:3 CR_CAPTURE_SIZE=1280x720 --layout android --capture p0002_10.cmp <out> --area 1 --frames 3000` beside 62 s: the panel, "Left 3", HELP, Skip and Retry at the same pixels. What raises var 64 + stage is the rooms' scripts (data) |
 
 See also the rows updated in place: area title cards, the "next" mark's art, the opening's boxless
