@@ -602,7 +602,7 @@ struct App {
     struct CampPointer {
         bool down = false, dragging = false, bar = false;
         float startX = 0, startY = 0, lastY = 0, remainder = 0;
-        float leftX = -1e9f, leftY = -1e9f;   // where it is now, in the left group's menu units (the buttons below the boards)
+        float curPx = -1e9f, curPy = -1e9f;   // where it is now (the frame's pixels): the control held lights
         Camp::Page page = Camp::Main;
         Camp::Phase phase = Camp::List;
     } campPointer;
@@ -637,6 +637,9 @@ struct App {
     int fieldSpeed = 1, battleSpeed = 1;
     int padHeld = -1;                      // the direction held for the menus' repeat (0 up 1 down 2 left 3 right)
     float padHeldFor = 0;
+    // A touch held on a menu (_pad_chk_updw_box): the screen it went down on and where it is now (the
+    // frame's pixels). The control under it is lit while held; its action runs as it lifts there (trg)
+    struct Press { bool down = false; int screen = 0; float px = 0, py = 0; } press;
     int padCountDir = 0;                   // a count's L / R (or left / right) held: -1 / +1 (FUN_8105bea8)
     float padCountFor = 0;
     crinput::HeldOver padHeldOver;         // (dead after a cancel or a session's end, until let go)
@@ -1919,6 +1922,12 @@ void padStep(App& app, float dt);
 bool padLive(App& app);
 bool padMenus(const App& app);
 bool titleTapFront(const App& app);
+// A menu's held touch (App::press): its screen, and whether it is now inside a control's box - in
+// menu units of the group drawn from `origin` (uiX, wideLeft, wideRight)
+enum PressScreen { kPressNone = 0, kPressSave, kPressCharSelect, kPressCamp, kPressLastBattle, kPressWorld, kPressShop,
+                   kPressBattle, kPressResume, kPressTitle };
+int pressScreen(const App& app);
+bool pressIn(const App& app, int screen, float origin, float x, float y, float w, float h);
 bool padField(const App& app);
 void offerResume(App& app);
 void openSaveScreen(App& app, bool load);
@@ -5139,6 +5148,13 @@ void menuPointAt(const App& app, float lx, float ly, float origin, float& mx, fl
     mx = (lx - origin) / 2, my = ly / 2;
     phoneMenuPoint(app, mx, my);
 }
+bool pressIn(const App& app, int screen, float origin, float x, float y, float w, float h) {
+    if (!app.press.down || app.press.screen != screen) return false;
+    float lx, ly, mx, my;
+    app.renderer.toLogical(app.press.px, app.press.py, lx, ly);
+    menuPointAt(app, lx, ly, origin, mx, my);
+    return mx >= x && mx < x + w && my >= y && my < y + h;
+}
 // The port's own screens (the denser Options, the manual), made for the iPad's 512 x 384: in the
 // iPhone layout the whole of it scaled to the screen's height (x 0.833), centred
 constexpr float kPhoneFitK = 320.0f / 384.0f, kPhoneFitX = 16 + (480 - 512 * kPhoneFitK) / 2, kPhoneFitY = 32;
@@ -5860,10 +5876,11 @@ void drawSaveScreen(App& app) {
         const std::vector<int> plates = savePlates(app);
         static const int kWord[3] = {4, 7, 6};
         for (size_t i = 0; i < plates.size(); ++i)
-            m.plate(328, 136 + 48.0f * float(plates[i]), plateIcon(kWord[plates[i]]), kWord[plates[i]], ss.cursor == int(i), a,
-                    false); // (window 3; the icon is the word's: ComUty_ChoicePlateDraw)
+            m.plate(328, 136 + 48.0f * float(plates[i]), plateIcon(kWord[plates[i]]), kWord[plates[i]],
+                    (ss.cursor == int(i) && !app.pointerLast) || pressIn(app, kPressSave, wideRight(app), 328, 136 + 48.0f * float(plates[i]), 136, 40),
+                    a, false); // (window 3; the icon is the word's: ComUty_ChoicePlateDraw; lit while held: DAT_000ecca0)
         r.setOrigin(r.uiX());
-        m.backBar(192, 288, false, a); // (Omega's ComUty_BackButtonDraw mode 1: CmdBack at (192, 288), no arrows)
+        m.backBar(192, 288, pressIn(app, kPressSave, app.renderer.uiX(), 192, 288, 232, 24), a); // (Omega's ComUty_BackButtonDraw mode 1: CmdBack at (192, 288), no arrows; lit while held)
     } else { // SaveLoadPut, in every layout (Omega's iPad screen is the iPhone's doubled): the message
         // board (ComUty_MsgBoardDraw, picture 12) at (0, 220), lines from (24, 234); Yes / No the
         // plates at window 6 + (336, 104) / (336, 160) (ComUty_YesNoChoiceDraw)
@@ -5878,8 +5895,9 @@ void drawSaveScreen(App& app) {
         for (int l : ss.lines)
             if (l > 0) m.text(sysText(app, l), 24, 234 + 16.0f * float(++extra), false, a, 13);
         if (ss.phase == 1) {
-            m.plate(336, 104, 0, 0, ss.confirm == 0, a, false);
-            m.plate(336, 160, 1, 1, ss.confirm == 1, a, false);
+            const bool hy = pressIn(app, kPressSave, wideRight(app), 336, 104, 136, 40), hn = pressIn(app, kPressSave, wideRight(app), 336, 160, 136, 40);
+            m.plate(336, 104, 0, 0, hy || (!hn && ss.confirm == 0), a, false); // (a held plate takes the cursor)
+            m.plate(336, 160, 1, 1, hn || (!hy && ss.confirm == 1), a, false);
         }
     }
     r.setOrigin(wideLeft(app));
@@ -6421,6 +6439,19 @@ void drawScrGauge(cr::MenuPainter& m, float x, float y, float len, int n, float 
     m.piece(x, top + knob - 8, 160, 212, 16, 8, a);
 }
 
+// A touch held on the shop (shopClick's units: cx the centre group, rx the right-hand one) inside a box
+bool shopPressIn(const App& app, bool right, float x, float y, float w, float h) {
+    if (!app.press.down || app.press.screen != kPressShop) return false;
+    float lx, ly;
+    app.renderer.toLogical(app.press.px, app.press.py, lx, ly);
+    const float uiX = app.renderer.uiX(), rightX = app.renderer.phoneLayout() ? uiX : 2 * uiX;
+    float cx = (lx - uiX) / 2, rx = (lx - rightX) / 2, my = ly / 2;
+    phoneMenuPoint(app, cx, my);
+    if (app.renderer.phoneLayout()) rx -= 16;
+    const float px = right ? rx : cx;
+    return px >= x && px < x + w && my >= y && my < y + h;
+}
+
 void drawShop(App& app) {
     using namespace shopui;
     App::Shop& s = app.shop;
@@ -6470,14 +6501,19 @@ void drawShop(App& app) {
     drawShopNumber(m, app.game.oz, 362, 0, 9, 12, 1);
     if (s.phase == App::Shop::Main)
         for (int i = 0; i < 3; ++i)
-            m.plate(328 + 240 * slide, 144 + 48.0f * float(i), kMainIcons[i], kMainWords[i], s.cursor == i, a, false);
+            m.plate(328 + 240 * slide, 144 + 48.0f * float(i), kMainIcons[i], kMainWords[i],
+                    (s.cursor == i && !app.pointerLast) || shopPressIn(app, true, 328, 144 + 48.0f * float(i), 136, 40), a, false);
     if (s.phase == App::Shop::Category)
-        for (int i = 0; i < categories(app); ++i)
-            m.plate(328 + 240 * slide, (categories(app) == 5 ? 48 : 96) + 48.0f * float(i), kCategoryIcons[i], kCategoryWords[i], s.category == i, a, false);
+        for (int i = 0; i < categories(app); ++i) {
+            const float cy = (categories(app) == 5 ? 48 : 96) + 48.0f * float(i);
+            m.plate(328 + 240 * slide, cy, kCategoryIcons[i], kCategoryWords[i],
+                    (s.category == i && !app.pointerLast) || shopPressIn(app, true, 328, cy, 136, 40), a, false);
+        }
     if (s.phase == App::Shop::Member) // __CharChoiceDraw: window 9, the pair at (328, 176 + 56k) (Part 8 3475 s)
         for (int k = 0; k < campMembers(app); ++k) {
             const int word = memberWord(app, campCharacter(app, k));
-            m.plate(328 + 240 * slide, 176 + 56.0f * float(k), plateIcon(word), word, s.member == k, a, false);
+            m.plate(328 + 240 * slide, 176 + 56.0f * float(k), plateIcon(word), word,
+                    (s.member == k && !app.pointerLast) || shopPressIn(app, true, 328, 176 + 56.0f * float(k), 136, 40), a, false);
         }
     if (list) {
         const int n = int(s.list.size());
@@ -6511,8 +6547,10 @@ void drawShop(App& app) {
             m.picture(73, 362, 49, 1);
             drawNumCount(m, s.count);
         }
-        m.plate(336, 104, 0, 0, s.confirm == 0, 1, false); // Yes
-        m.plate(336, 160, 1, 1, s.confirm == 1, 1, false); // No
+        // (a held plate takes the cursor: __ComUty_YesNoChoiceProc)
+        const bool hy = shopPressIn(app, true, 336, 104, 136, 40), hn = shopPressIn(app, true, 336, 160, 136, 40);
+        m.plate(336, 104, 0, 0, hy || (!hn && s.confirm == 0), 1, false); // Yes
+        m.plate(336, 160, 1, 1, hn || (!hy && s.confirm == 1), 1, false); // No
     }
 
     // Centre: Back (with ◀ ▶ for equipment lists) and the message board
@@ -6528,9 +6566,9 @@ void drawShop(App& app) {
             !have[0].empty())
             m.text(have[0][0], 24, 250, false, 1, kFont);
     } else if (list && shopEquipment(app)) {
-        m.backButton(kBackX, kBackY, false, s.bob, a); // ComUty_CmdBack 2: < Back >
+        m.backButton(kBackX, kBackY, shopPressIn(app, false, kBackX + 51, kBackY, 130, 24), s.bob, a); // ComUty_CmdBack 2: < Back >
     } else {
-        m.backBar(kBackX, kBackY, false, a);
+        m.backBar(kBackX, kBackY, shopPressIn(app, false, kBackX, kBackY, 232, 24), a); // (lit while held: DAT_000ec80c)
     }
     const char* help = s.phase == App::Shop::Count     ? "Left/Right: 1  Shift: 10  Up/Down: Yes / No  Enter  Esc"
                        : s.phase == App::Shop::EquipAsk ? "Up/Down  Enter  Esc: no"
@@ -7668,19 +7706,21 @@ void campPointerPoint(const App& app, float px, float py, float& mx, float& my) 
     app.renderer.toLogical(px, py, lx, ly);
     menuPointAt(app, lx, ly, wideRight(app), mx, my);
 }
-void campPointerLeft(const App& app, float px, float py, float& mx, float& my) {
-    float lx, ly;
-    app.renderer.toLogical(px, py, lx, ly);
-    menuPointAt(app, lx, ly, wideLeft(app), mx, my);
-}
-// A touch held on a button below the boards (0 Scenarios, 1 Collection): 3.1.0 lights it (picture
-// 163 under it) while _pad_chk_updw_box finds the finger on it
-bool campButtonHeld(const App& app, int k) {
+// A touch held inside a Camp box (menu units of the group drawn from `origin`): 3.1.0 lights the control
+// while _pad_chk_updw_box finds the finger on it (not once it drags a list)
+bool campPressIn(const App& app, float origin, float x, float y, float w, float h) {
     const auto& p = app.campPointer;
-    if (!p.down || app.camp.page != App::Camp::Main) return false;
+    if (!p.down || p.dragging) return false;
+    float lx, ly, mx, my;
+    app.renderer.toLogical(p.curPx, p.curPy, lx, ly);
+    menuPointAt(app, lx, ly, origin, mx, my);
+    return mx >= x && mx < x + w && my >= y && my < y + h;
+}
+// ... on a button below the boards (0 Scenarios, 1 Collection): picture 163 under it
+bool campButtonHeld(const App& app, int k) {
+    if (app.camp.page != App::Camp::Main) return false;
     const short* sp = cr::kMenuPicture[k == 0 ? 162 : 161];
-    const float x = k == 0 ? 12.0f : 84.0f;
-    return p.leftX >= x && p.leftX < x + sp[2] && p.leftY >= 236 && p.leftY < 236 + sp[3];
+    return campPressIn(app, wideLeft(app), k == 0 ? 12.0f : 84.0f, 236, sp[2], sp[3]);
 }
 void campPointerDown(App& app, float px, float py) {
     auto& p = app.campPointer;
@@ -7688,7 +7728,7 @@ void campPointerDown(App& app, float px, float py) {
     p.down = true, p.page = app.camp.page, p.phase = app.camp.phase;
     campPointerPoint(app, px, py, p.startX, p.startY);
     p.lastY = p.startY;
-    campPointerLeft(app, px, py, p.leftX, p.leftY);
+    p.curPx = px, p.curPy = py;
     const bool list = campScrollable(app);
     p.bar = list && campScrollCount(app) > 1 && p.startX >= campui::kGaugeX - 2 && p.startX < campui::kGaugeX + 22 &&
         p.startY >= campui::kGaugeY + 12 && p.startY < campui::kGaugeY + campui::kGaugeH - 12;
@@ -7699,7 +7739,7 @@ void campPointerMove(App& app, float px, float py) {
     if (!app.campOpen || app.camp.page != p.page || app.camp.phase != p.phase) { p = App::CampPointer(); return; }
     float mx, my;
     campPointerPoint(app, px, py, mx, my);
-    campPointerLeft(app, px, py, p.leftX, p.leftY);
+    p.curPx = px, p.curPy = py;
     const bool list = campScrollable(app);
     const bool inList = p.startX >= campListX(app) && p.startX < campListX(app) + 256 &&
         p.startY >= campui::kListTop && p.startY < campui::kListBottom;
@@ -9665,8 +9705,10 @@ void drawCamp(App& app) {
     right();
     for (int i = 0; i < campEntries(app); ++i) {
         const bool save = i == 5;
+        // (lit: the keys' cursor - touch play none -, or a touch holding it: FUN_0006c548's DAT_000ec590)
+        const bool held = main && campPressIn(app, wideRight(app), kPlateX, kPlateY + kPlateStep * float(i), 136, 40);
         m.plate(kPlateX + 360 * out, kPlateY + kPlateStep * float(i), save ? 6 : plateIcon(kWords[i]), save ? -1 : kWords[i],
-                main && c.cursor == i && c.btnRow < 0, 1 - outA, !save && !kReady[i], save ? "Save" : "");
+                (main && c.cursor == i && c.btnRow < 0 && !app.pointerLast) || held, 1 - outA, !save && !kReady[i], save ? "Save" : "");
     }
     centre();
     left();
@@ -9686,7 +9728,11 @@ void drawCamp(App& app) {
         for (int k = 0; k < campMembers(app); ++k) {
             const int word = memberWord(app, campCharacter(app, k));
             // (window 8: WinDispOn(8, 0x168) - in from 360 to the right, as the main plates go out)
-            m.plate(kPlateX + 360 * (1 - e), kMemberY + kMemberStep * float(k), plateIcon(word), word, lit && c.member == k, e, false);
+            // (__MuCommon_CharChoiceProc: the plate - or the member's face board - held lights it)
+            const bool held = lit && (campPressIn(app, wideRight(app), kPlateX, kMemberY + kMemberStep * float(k), 136, 40) ||
+                                      campPressIn(app, wideLeft(app), 8, 0x30 + 0x58 * float(k), 0xfc, 0x50));
+            m.plate(kPlateX + 360 * (1 - e), kMemberY + kMemberStep * float(k), plateIcon(word), word,
+                    (lit && c.member == k && !app.pointerLast) || held, e, false);
         }
         left();
     };
@@ -9880,10 +9926,12 @@ void drawCamp(App& app) {
     // (window 4: CampMain 6 takes it off for Items - the list brings its own and takes it with it, Part 13
     // 1171.9-1172.1 s, 1182.1-1182.5 s -; Equip, Genes and Status keep the main page's)
     const float barA = main ? std::min(1 - leave, c.barIn ? ease : 1.0f) : items ? std::min(ease, campPhaseEase(app, App::Camp::List)) : 1.0f;
-    if (campBackShown(app)) {
-        if (campOkBar(app)) m.backOkBar(kBackX, campBackY(app), 0, barA);
-        else if (campArrows(app)) m.backButton(kBackX, campBackY(app), false, 0, barA);
-        else m.backBar(kBackX, campBackY(app), false, barA);
+    if (campBackShown(app)) { // (lit while a touch holds it - the boxes campClick tests)
+        const float ux = app.renderer.uiX(), by = campBackY(app);
+        if (campOkBar(app))
+            m.backOkBar(kBackX, by, campPressIn(app, ux, 0xc0, by, 0x72, 34) ? 1 : campPressIn(app, ux, 0x137, by, 0x72, 34) ? 5 : 0, barA);
+        else if (campArrows(app)) m.backButton(kBackX, by, campPressIn(app, ux, 0xf8, by, 0x78, 34), 0, barA);
+        else m.backBar(kBackX, by, campPressIn(app, ux, kBackX, by, 256, 34), barA);
     }
     if (items && !c.pageOut && ease <= 0) m.backBar(kBackX, campBackY(app), false, 1 - outA); // (the main page's going)
     // The title and section lines over everything else of the page: the section's line runs over the HELP
@@ -11534,7 +11582,9 @@ void drawTitleMenu(App& app) {
         const float q = std::min(1.0f, float(app.titleOut) / 4.0f), dx = 240 * (1 - ease) + 240 * q * q, pa = t * (1 - q);
         app.renderer.setOrigin(wideRight(app)); // (widescreen: the plates to the screen's right)
         for (int i = 0; i < 3; ++i)
-            m.plate(328 + dx, 114 + 56.0f * float(i), kTitleIcons[i], kTitleWords[i], app.titleCursor == i, pa, !titleChoiceReady(i));
+            m.plate(328 + dx, 114 + 56.0f * float(i), kTitleIcons[i], kTitleWords[i],
+                    (app.titleCursor == i && !app.pointerLast) || pressIn(app, kPressTitle, wideRight(app), 328, 114 + 56.0f * float(i), 136, 40),
+                    pa, !titleChoiceReady(i)); // (lit: the keys' cursor, or a touch holding it - TitlePrc's DAT_000ecb60)
         app.renderer.setOrigin(wideLeft(app)); // (... and the pictures down the left to its left)
         m.picture(125, 8 + dx, 16, pa);
         m.picture(126, 8 + dx, 96, pa);
@@ -17318,7 +17368,18 @@ void stepMenuView(App& app) {
 
 // The command pages' cursor plate lit: always for keys and pads; after a touch or click only as the
 // page goes (the plate just tapped) - 3.1.0 is touch-only and lights none till a tap
-bool battleCursorLit(const App& app) { return !app.pointerLast || app.battle.viewState == 3; }
+// (touch play: none - the held plate lights instead, and goes dark as the page leaves: Part 2
+// 1249.18-1249.26 s, Pair lit while held, dark from the slide's first frame)
+bool battleCursorLit(const App& app) { return !app.pointerLast; }
+// A touch held inside a battle box (battleClick's units: rx from the right-hand group, my), x / y / w / h
+bool battlePressIn(const App& app, float x, float y, float w, float h) {
+    if (!app.press.down || app.press.screen != kPressBattle) return false;
+    float lx, ly;
+    app.renderer.toLogical(app.press.px, app.press.py, lx, ly);
+    const float uiX = app.renderer.uiX(), rightX = app.renderer.phoneLayout() ? uiX : 2 * uiX;
+    const float rx = (lx - rightX) / 2, my = ly / 2;
+    return rx >= x && rx < x + w && my >= y && my < y + h;
+}
 
 // Taps are taken once the page is in (and the logic's page is the one shown)
 bool battleMenuReady(const App& app) {
@@ -18205,15 +18266,17 @@ void drawBattleHud(App& app, float W, float H) {
             for (int i = 0; i < 4; ++i) {
                 const bool dim = (i == 1 && (!(b.rules.f[0].alive() && b.rules.f[1].alive()) || b.rules.allyAuto)) ||
                                  (i == 2 && b.rules.escapeBlocked);
-                drawBattleButton(m, kButtonX, kButtonY + kButtonStep * float(i), kTopIcon[i], kTopWord[i], v.cursor == i && cursorLit, dim, a);
+                const bool held = !dim && v.menu == b.menu && battlePressIn(app, kButtonX, kButtonY + kButtonStep * float(i), 136, 40);
+                drawBattleButton(m, kButtonX, kButtonY + kButtonStep * float(i), kTopIcon[i], kTopWord[i], (v.cursor == i && cursorLit) || held, dim, a);
             }
             break;
         case App::Battle::Commands:
             for (int i = 0; i < 4; ++i) {
                 const bool dim = i == 1 && (battleGeneList(app).empty() || battleGenesSilenced(app));
-                drawBattleButton(m, kButtonX, kButtonY + kButtonStep * float(i), kCmdIcon[i], kCmdWord[i], v.cursor == i && cursorLit, dim, a);
+                const bool held = !dim && v.menu == b.menu && battlePressIn(app, kButtonX, kButtonY + kButtonStep * float(i), 136, 40);
+                drawBattleButton(m, kButtonX, kButtonY + kButtonStep * float(i), kCmdIcon[i], kCmdWord[i], (v.cursor == i && cursorLit) || held, dim, a);
             }
-            m.backBar(kBackX, kBackY, false, a);
+            m.backBar(kBackX, kBackY, v.menu == b.menu && battlePressIn(app, kBackX, kBackY, 232, 24), a); // (_cmd_back: lit while held)
             break;
         case App::Battle::Targets: {
             const int n = int(v.picks.size());
@@ -18221,7 +18284,7 @@ void drawBattleHud(App& app, float W, float H) {
             const bool all = act && b.rules.isGroupScope(*act);
             for (int i = 0; i < n; ++i)
                 drawBattlePlate(app, m, kPlateX, kPlateBottom - 48.0f * float(n - i), v.picks[size_t(i)], all || v.pick == i, a);
-            m.backBar(kBackX, kBackY, false, a);
+            m.backBar(kBackX, kBackY, v.menu == b.menu && battlePressIn(app, kBackX, kBackY, 232, 24), a);
             break;
         }
         case App::Battle::Items: { // MuScrList: the battle items in the bag, how many of each
@@ -18233,7 +18296,7 @@ void drawBattleHud(App& app, float W, float H) {
                 const auto it = app.game.items.find(item);
                 drawCampRow(app, m, 232, y, item, it == app.game.items.end() ? 0 : it->second, index == v.pick, a);
             }
-            m.backBar(kBackX, kBackY, false, a);
+            m.backBar(kBackX, kBackY, v.menu == b.menu && battlePressIn(app, kBackX, kBackY, 232, 24), a);
             if (v.pick >= 0 && v.pick < n) helpBoard(v.picks[size_t(v.pick)]); // (MuScrList_SetIdInfo's help: the items' too)
             break;
         }
@@ -18248,14 +18311,18 @@ void drawBattleHud(App& app, float W, float H) {
                 m.picture(27, 232 + 188, y + 34, ra);
                 drawShopNumber(m, cost, 232 + 218, y + 30, 3, 10, ra, 2); // (ComUty_PictNumDraw: the field from 218, right-aligned)
             }
-            m.backBar(kBackX, kBackY, false, a);
+            m.backBar(kBackX, kBackY, v.menu == b.menu && battlePressIn(app, kBackX, kBackY, 232, 24), a);
             if (v.pick >= 0 && v.pick < n) helpBoard(v.picks[size_t(v.pick)]); // the gene's target and effect
             break;
         }
         case App::Battle::EscapeAsk: // 800: "Run from battle?" on the banner; ComUty_YesNoChoiceDraw's
             // plates in window 6 (its x the page's slide): Yes at (336, 104), No at (336, 160)
-            drawBattleButton(m, kYesNoX, kYesY, 0, 0, v.confirm == 0, false, a);
-            drawBattleButton(m, kYesNoX, kNoY, 1, 1, v.confirm == 1, false, a);
+        { // (__ComUty_YesNoChoiceProc: a held plate takes the cursor - the lit one follows the finger)
+            const bool live = v.menu == b.menu;
+            const bool hy = live && battlePressIn(app, kYesNoX, kYesY, 136, 40), hn = live && battlePressIn(app, kYesNoX, kNoY, 136, 40);
+            drawBattleButton(m, kYesNoX, kYesY, 0, 0, hy || (!hn && v.confirm == 0), false, a);
+            drawBattleButton(m, kYesNoX, kNoY, 1, 1, hn || (!hy && v.confirm == 1), false, a);
+        }
             break;
         }
         m.setOffset(0, 0);
@@ -26220,10 +26287,22 @@ int runSelfTest(App& app) {
                 const bool inDark = b.viewState == 2 && !battleCursorLit(app);
                 const int keepState = b.viewState;
                 b.viewState = 3;
-                const bool goingLit = battleCursorLit(app);
+                const bool goingDark = !battleCursorLit(app); // (the video: dark as the page leaves)
                 b.viewState = keepState;
+                // a touch held on a plate lights it (battlePressIn: the plate's box from battleClick)
+                float lx = 0, ly = 0;
+                { // (the box's middle back to the frame's pixels)
+                    const float uiX = app.renderer.uiX(), rightX = app.renderer.phoneLayout() ? uiX : 2 * uiX;
+                    lx = rightX + 2 * (btlui::kButtonX + 68), ly = 2 * (btlui::kButtonY + btlui::kButtonStep + 20);
+                }
+                float ax, ay, bx, by;
+                app.renderer.toLogical(0, 0, ax, ay), app.renderer.toLogical(1000, 1000, bx, by);
+                app.press = App::Press{true, kPressBattle, (lx - ax) * 1000 / (bx - ax), (ly - ay) * 1000 / (by - ay)};
+                const bool heldLit = battlePressIn(app, btlui::kButtonX, btlui::kButtonY + btlui::kButtonStep, 136, 40) &&
+                                     !battlePressIn(app, btlui::kButtonX, btlui::kButtonY, 136, 40);
+                app.press = App::Press();
                 app.pointerLast = false;
-                touchLook = keyLit && inDark && goingLit;
+                touchLook = keyLit && inDark && goingDark && heldLit;
             }
             // Escape: Top goes (4), the ask comes (4) with its line on the banner, held
             b.cursor = 2;
@@ -28125,6 +28204,18 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             followPlayerScroll(app, 1.0f);
         } else std::printf("--at %.1f %.1f: no floor there\n", app.captureAt[0], app.captureAt[1]);
     }
+    if (const char* pr = SDL_getenv("CR_CAPTURE_PRESS")) { // (tests: a touch held there - fractions of the frame - as drawn)
+        float fx = 0, fy = 0;
+        if (std::sscanf(pr, "%f,%f", &fx, &fy) == 2) {
+            app.pointerLast = true;
+            app.press = App::Press{true, pressScreen(app), fx * float(app.renderer.frameWidth()), fy * float(app.renderer.frameHeight())};
+            if (app.campOpen) { // (the Camp's own pointer)
+                app.campPointer = App::CampPointer();
+                app.campPointer.down = true, app.campPointer.page = app.camp.page, app.campPointer.phase = app.camp.phase;
+                app.campPointer.curPx = app.press.px, app.campPointer.curPy = app.press.py;
+            }
+        }
+    }
     settleMenuMask(app);
     // The capture shows exactly the frames stepped above; --settle draws that moment first (an
     // upscaler's history converges on it)
@@ -28855,6 +28946,47 @@ bool padField(const App& app) { // the field itself, nothing over it
     return app.mode == Mode::Maps && app.havePlayer && !app.titleOpen && !app.booting && !app.runner.running() &&
            app.dialogue.empty() && !app.battle.active && !app.itemWindowOpen && !padMenus(app);
 }
+// The menu a touch goes down on (the mouse-down's order)
+int pressScreen(const App& app) {
+    if (app.saveScreen.open) return kPressSave;
+    if (app.charSelectOpen) return kPressCharSelect;
+    if (app.campOpen) return kPressCamp;
+    if (app.lastBattle.open) return kPressLastBattle;
+    if (app.worldChoiceOpen) return kPressWorld;
+    if (app.shop.open && app.shop.phase != App::Shop::Talk) return kPressShop;
+    if (app.mode == Mode::Maps && app.battle.active) return kPressBattle;
+    if (app.resumePrompt) return kPressResume;
+    if (app.mode == Mode::Maps && app.titleOpen) return kPressTitle;
+    return kPressNone;
+}
+// Select Scenario's cord takes the touch as it goes down (ComUty_PadChkMove); true when it did
+bool charSelectCord(App& app, float px, float py) {
+    if (app.startPage.phase) return true; // (the page on its way: nothing)
+    float lx, ly, mx, my;
+    app.renderer.toLogical(px, py, lx, ly);
+    menuPoint(app, lx, ly, mx, my);
+    charSelectPress(app, mx, my);
+    return app.startPage.holding;
+}
+// A battle's touch held for its menus (the command pages, lists, targets, the escape question); a
+// talk and the one-tap phases (results, victory, defeat, Analyze) take it as it goes down
+bool battleMenuPress(const App& app) {
+    return !battletalk::on(app) && !app.battle.analyze.on && app.battle.phase == App::Battle::Command;
+}
+// The touch lifting on screen `screen`: its click there
+void pressRelease(App& app, int screen, float px, float py) {
+    switch (screen) {
+    case kPressSave: saveScreenClick(app, px, py); break;
+    case kPressCharSelect: charSelectClick(app, px, py); break;
+    case kPressLastBattle: lastBattleClick(app, px, py); break;
+    case kPressWorld: worldSelectClick(app, px, py); break;
+    case kPressShop: shopClick(app, px, py); break;
+    case kPressBattle: battleClick(app, px, py); break;
+    case kPressResume: resumeClick(app, px, py); break;
+    case kPressTitle: titleClick(app, px, py); break;
+    default: break;
+    }
+}
 void padKey(App& app, SDL_Keycode key) { // the button as its key, through the same handling
     SDL_Event e{};
     e.type = SDL_EVENT_KEY_DOWN;
@@ -29450,15 +29582,14 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             const float kx = ww > 0 ? float(app.renderer.frameWidth()) / float(ww) : 1.0f;
             const float ky = wh > 0 ? float(app.renderer.frameHeight()) / float(wh) : 1.0f;
             const float px = event->button.x * kx, py = event->button.y * ky;
-            if (app.saveScreen.open) saveScreenClick(app, px, py);
-            else if (app.charSelectOpen) charSelectClick(app, px, py);
-            else if (app.campOpen) campPointerDown(app, px, py);
-            else if (app.lastBattle.open) lastBattleClick(app, px, py);
-            else if (app.worldChoiceOpen) worldSelectClick(app, px, py);
-            else if (app.shop.open) shopClick(app, px, py);
-            else if (app.mode == Mode::Maps && app.battle.active) battleClick(app, px, py);
-            else if (app.resumePrompt) resumeClick(app, px, py);
-            else titleClick(app, px, py);
+            // (3.1.0's menus act on the touch lifting inside a control - _pad_chk_updw_box's trg - and light
+            // it while held: the press is kept, the click runs on the release. A battle's talk and its
+            // one-tap phases, the Camp's pointer and Select Scenario's cord take the press itself)
+            const int screen = pressScreen(app);
+            if (app.campOpen) campPointerDown(app, px, py);
+            else if (screen == kPressCharSelect && charSelectCord(app, px, py)) {}
+            else if (screen == kPressBattle && !battleMenuPress(app)) battleClick(app, px, py);
+            else if (screen) app.press = App::Press{true, screen, px, py};
             break;
         }
         if (app.staffRoll.open) { // _pad_chk_updw_box(-16, -32, 512, 384): the end card's tap
@@ -29514,7 +29645,18 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         break;
     case SDL_EVENT_MOUSE_BUTTON_UP:
         holdSkip(app, kSkipPointer, false); // the finger off the skip corner
-        if (app.pointerCancelled) break; // cancellation is not a click or a puzzle release
+        if (app.pointerCancelled) { app.press = App::Press(); break; } // cancellation is not a click or a puzzle release
+        if (app.press.down) { // a menu's touch lifting: the control it lifts on (if the screen is still the one)
+            int ww = 0, wh = 0;
+            SDL_GetWindowSize(app.window, &ww, &wh);
+            const float px = event->button.x * (ww > 0 ? float(app.renderer.frameWidth()) / ww : 1.0f);
+            const float py = event->button.y * (wh > 0 ? float(app.renderer.frameHeight()) / wh : 1.0f);
+            const App::Press pr = app.press;
+            app.press = App::Press();
+            if (pressScreen(app) == pr.screen) pressRelease(app, pr.screen, px, py);
+            if (app.charSelectOpen) charSelectRelease(app);
+            break;
+        }
         if (app.campPointer.down) {
             int ww = 0, wh = 0;
             SDL_GetWindowSize(app.window, &ww, &wh);
@@ -29545,6 +29687,12 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         app.fingers.held = std::max(0, app.fingers.held - 1);
         break;
     case SDL_EVENT_MOUSE_MOTION:
+        if (app.press.down) { // (the held control follows the finger)
+            int ww = 0, wh = 0;
+            SDL_GetWindowSize(app.window, &ww, &wh);
+            app.press.px = event->motion.x * (ww > 0 ? float(app.renderer.frameWidth()) / ww : 1.0f);
+            app.press.py = event->motion.y * (wh > 0 ? float(app.renderer.frameHeight()) / wh : 1.0f);
+        }
         if (app.mode == Mode::Maps && app.puzzle.pkHeld && (event->motion.state & SDL_BUTTON_LMASK)) {
             int ww = 0, wh = 0; // the held block's touch: the detector follows it
             SDL_GetWindowSize(app.window, &ww, &wh);
