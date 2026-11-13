@@ -18392,6 +18392,10 @@ cr::Mat4 scriptCameraView(const App& app, const cr::Vec3& eye, const cr::Vec3& t
 // 198) at (-140, -1, 25) facing 180, a fifth of the Oz gone
 void loseToArk(App& app) {
     endBattle(app, false);
+    // btl_main 0x4b1 (3.1.0 decomp 6896): the defeat sets flag 0xffd - btl_lose acts on it, and the
+    // Ark's area script (j001_t01 0x4782 -> 0x5831, c101_t01 0x4945 -> 0x4edc) plays the scene after a
+    // defeat while it is set, then clears it
+    app.game.setFlag(0xffd, true);
     const bool second = app.game.scenario == 1;
     cr::WarpRequest w;
     w.valid = true;
@@ -25612,9 +25616,19 @@ int runSelfTest(App& app) {
         const bool areaScript = app.pendingEntry == App::Entry::Area;
         stepEvents(app);
         const bool script0 = areaScript && (!app.runner.running() || app.runner.eventNo() == 0) && app.runnerWhat == "area entry script";
-        problems += !ordinary || !ark || !oz || !script0;
-        std::printf("battle lost: back to the Ark (area %d, room %d) %s, Oz %d (a fifth gone %s), the area's script 0 %s; %d problems\n",
-                    app.area, app.mapNumber, ark ? "yes" : "NO", app.game.oz, oz ? "yes" : "NO", script0 ? "yes" : "NO", problems);
+        // the defeat's flag 0xffd: set, and the Ark's script plays its scene (a talk) and clears it
+        const bool flagSet = app.game.flag(0xffd);
+        bool talked = false;
+        for (int f = 0; f < 4000 && (app.runner.running() || !app.dialogue.empty()); ++f) {
+            if (!app.dialogue.empty()) talked = true, tapDialogue(app);
+            stepEvents(app);
+        }
+        const bool afterScene = flagSet && talked && !app.game.flag(0xffd);
+        problems += !ordinary || !ark || !oz || !script0 || !afterScene;
+        std::printf("battle lost: back to the Ark (area %d, room %d) %s, Oz %d (a fifth gone %s), the area's script 0 %s, "
+                    "the defeat's scene (flag 0xffd) %s; %d problems\n",
+                    app.area, app.mapNumber, ark ? "yes" : "NO", app.game.oz, oz ? "yes" : "NO", script0 ? "yes" : "NO",
+                    afterScene ? "played" : flagSet ? (talked ? "played, the flag LEFT SET" : "NOT PLAYED") : "NOT SET", problems);
         mapErrors += problems;
         app.runner.stop();
         app.pendingEntry = App::Entry::None;
