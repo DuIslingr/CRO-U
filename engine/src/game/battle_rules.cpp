@@ -1037,6 +1037,9 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                             self.target = k;
                             self.silent = true; // (chk_dead kind 99)
                             self.amount = u.hp / 4;
+                            // (btlcalc_dmg_hp2: 0x2b5's solo rule, chk_karaok; no Is_invincible, no story heal rules)
+                            if (scenario == 0 && group == 693 && e.actors[0] < 2 && e.actors[1] < 0 && self.amount > 0)
+                                self.amount = 0, nullHit = true;
                             self.amount = floored(k, self.amount);
                             if (self.amount > 0) breakEvent(e.actors[0], 2, t);
                             u.hp = std::max(0, u.hp - self.amount);
@@ -1197,16 +1200,10 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                 breakEvent(breakBy, 0x10, t);
             }
             if (h.amount > 0 && tf.hp > 0) { // (btlcalc_chk_dead: whichever side the blow came from)
-                // 153: at a quarter of the HP or less the target may start guarding
-                if (tf.hp <= tf.hpMax / 4 && !tf.guarding && has(t, 153) && random(100) < (holdsBreak(t) ? 20 : 10)) {
-                    // (btlord_chk_autoguard: a pair - +0xaf0 for the party, +0xaf4 for the enemies -
-                    // guards as one: fighters 0 and 1, or 2 and 3)
-                    if (t < 2 && pair) f[0].guarding = f[1].guarding = true;
-                    else if (t >= 2 && enemyPair) f[2].guarding = f[3].guarding = true;
-                    else tf.guarding = true;
-                }
-                // 154 (or calc 34's stance): a physical hit may be answered with the target's attack
-                if (calc == 0 && counterBy < 0 && !e.counter &&
+                autoGuard(t);
+                // 154 (or calc 34's stance): a blow with the swing (the action's +0x1d, its motion, 1 -
+                // every calc-0 action's, and 220's) may be answered with the target's attack
+                if (a->motion == 1 && counterBy < 0 && !e.counter &&
                     (tf.counterStance || (has(t, 154) && (random(100), true))) && // (3.1.0: the draw is made but not compared - 1.0.0 took 10 / 20 %)
                     lastGo)
                     counterBy = t;
@@ -1254,14 +1251,20 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             } else
                 out.message = 57038; // failed
         }
-        if (a->calc == 7) // 0412: the users give up their HP to 1
-            for (int k : e.actors)
+        if (a->calc == 7) // 0412: the users give up their HP to 1 - through btlcalc_dmg_hp2 (0x2b5's solo
+            for (int k : e.actors) // rule, the floors) and chk_dead(user, loss, user, 99): 153 may guard
                 if (k >= 0 && f[size_t(k)].alive()) {
+                    Fighter& u = f[size_t(k)];
                     BattleHit self;
                     self.target = k;
                     self.silent = true; // (chk_dead kind 99)
-                    self.amount = f[size_t(k)].hp - 1;
-                    f[size_t(k)].hp = 1;
+                    self.amount = u.hp - 1;
+                    if (scenario == 0 && group == 693 && e.actors[0] < 2 && e.actors[1] < 0 && self.amount > 0)
+                        self.amount = 0, nullHit = true;
+                    self.amount = floored(k, self.amount);
+                    if (self.amount > 0) breakEvent(e.actors[0], 2, firstTarget_);
+                    u.hp = std::max(0, u.hp - self.amount);
+                    if (self.amount > 0 && u.hp > 0) autoGuard(k);
                     out.hits.push_back(self);
                 }
         int users = 0; // (G+0xc2: the action's users - btlque_make_que counts +0x84..+0x8e)
@@ -1334,6 +1337,7 @@ void BattleRules::endRound() {
         if (regenFull[size_t(i)]) d = x.hp - x.hpMax; // (group 0x293's, until flag 0x58c)
         if (storyNoHeal(i, d)) d = 0; // (dmg_hp's story rules here too)
         if (d > 0) d = floored(i, d);
+        if (d > 0 && invincible(i)) d = 0; // (dmg_hp's Is_invincible: poison and the stage's loss none either)
         const int before = x.hp;
         x.hp = std::clamp(x.hp - d, 0, x.hpMax);
         if (x.hp == 0 && d > 0 && x.status[kStatusEndure]) x.hp = 1, x.status[kStatusEndure] = 0; // (btlcalc_dmg_hp: Endure holds here too)
@@ -1358,7 +1362,9 @@ void BattleRules::endRound() {
 }
 
 // _btlcalc_dmg_hp (scenario 0; the encounter's group, gac + 0x8a90c): 0x290 - a heal on Olgar (+0xa2 kind 9)
-// none; 0x292 - a heal on the party (kind <= 0xb) none while the enemies hold the Break (G2+0x12 < 0)
+// none; 0x292 - a heal on the party (kind <= 0xb) none while the enemies hold the Break (G2+0x12 < 0).
+// (Its third, 0x29c - an enemy's damage 1 at most under the enemies' Break - sits in the same
+// scenario-0 block though 0x29c is scenario 2's group: never met, left out.)
 bool BattleRules::storyNoHeal(int t, int amount) const {
     if (scenario != 0 || amount >= 0 || t < 0 || t >= 2) return false;
     if (group == 656) return f[size_t(t)].character == 1;
@@ -1367,6 +1373,17 @@ bool BattleRules::storyNoHeal(int t, int amount) const {
 }
 // ... and 0x290's Olgar left at 0 HP stays at 1
 bool BattleRules::storyKeepsUp(int t) const { return scenario == 0 && group == 656 && t >= 0 && t < 2 && f[size_t(t)].character == 1; }
+
+// btlord_chk_autoguard (from btlcalc_chk_dead, a fighter hurt and standing): 153 at a quarter of the
+// HP or less, not guarding yet - 10% (20% holding the Break); a pair (+0xaf0 the party's, +0xaf4 the
+// enemies') guards as one: fighters 0 and 1, or 2 and 3
+void BattleRules::autoGuard(int t) {
+    Fighter& x = f[size_t(t)];
+    if (x.hp > x.hpMax / 4 || x.guarding || !has(t, 153) || random(100) >= (holdsBreak(t) ? 20 : 10)) return;
+    if (t < 2 && pair) f[0].guarding = f[1].guarding = true;
+    else if (t >= 2 && enemyPair) f[2].guarding = f[3].guarding = true;
+    else x.guarding = true;
+}
 
 bool BattleRules::invincible(int t) const {
     if (t < 0 || t > 4) return false;

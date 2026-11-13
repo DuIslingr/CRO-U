@@ -352,6 +352,7 @@ private:
         int order = 0;
     };
     size_t pickNext();            // btlque_make_que: the fastest entry left (speeds read afresh), counters and the escape first
+    void autoGuard(int t);        // btlord_chk_autoguard: skill 153
     bool invincible(int t) const; // Is_invincible: a pair's (or enemy pair's) either member
     std::vector<Entry> queue_;
     size_t next_ = 0;
