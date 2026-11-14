@@ -105,7 +105,8 @@ struct LoadedModel {
     int triangles = 0;
     std::vector<cr::Mat4> world;
     std::vector<float> skinned;
-    std::vector<cr::Action> packageActions; // effects: every action, as materials' refGid number them
+    std::vector<cr::Action> packageActions; // effects: every action, as materials' refGid name them (by gid)
+    int materialTable = 0;                  // the action table (package action file) bound to them: _mdl_set_act
     std::vector<float> uvScratch;          // effects: a mesh's scrolled texture coordinates
 };
 
@@ -1730,6 +1731,17 @@ void unloadModel(App& app) {
     unloadLoaded(app, app.model);
 }
 
+// The action table _mdl_set_act(0) binds to a package's figure: the first, past those whose longest
+// action is 3 frames or less (_mceActionTable_getMaxFrame <= 3.0); its Animatables take their actions
+// from it by gid (_mceFigure_bindAction / _mceActionTable_findAction)
+int boundActionTable(const std::vector<cr::Action>& actions) {
+    std::map<int, float> longest;
+    for (const cr::Action& a : actions) longest[a.table] = std::max(longest[a.table], a.duration);
+    for (const auto& [t, d] : longest)
+        if (d > 3.0f) return t;
+    return longest.empty() ? 0 : longest.begin()->first;
+}
+
 // Loads a model package (and its fitting animations) into `out`.
 // The package's actions a model keeps: those with one segment per node; a list's motion ("N.1") a few
 // segments short; and one with empty segments past the last node, segment i still on node i (c111's
@@ -1811,7 +1823,7 @@ void loadModelFile(App& app, const std::string& name, LoadedModel& out, bool cha
     // Appearances that name a package action (refGid: segment 1 colour, 6 / 8 texture motion) -
     // the scenes' effect props (ee*, fe*): keep every package action for them, as effects do
     for (const auto& mat : m.materials)
-        if (int32_t(mat.refGid) >= 0) { out.packageActions = m.actions; break; }
+        if (int32_t(mat.refGid) >= 0) { out.packageActions = m.actions, out.materialTable = boundActionTable(m.actions); break; }
     // Animations: those stored in the package plus standalone <name>e*.mca files,
     // keeping only actions that animate this skeleton (one segment per node)
     // (or, for each list's motion - its first action, "N.1" - one a few segments off)
@@ -13267,7 +13279,7 @@ void drawFx(App& app, const cr::Mat4& mvp) {
     beams.finish();
     app.renderer.updatePositions(app.puzzleBeams, beams.pos, beams.uv, beams.col);
     cr::Material m; // untextured, double-sided, depth tested, no depth write
-    m.culling = 0;
+    m.culling = 2; // (none)
     m.properties = 8;
     m.blendSrc = 4, m.blendDst = 5; // alpha
     if (beams.n) app.renderer.drawMesh(app.puzzleBeams, nullptr, mvp, m);
@@ -14096,7 +14108,7 @@ void drawShadowFans(App& app, cr::GpuMesh& mesh, const std::vector<float>& tris,
     for (size_t v = 0; v < verts && v < cap; ++v) col[v * 4 + 3] = alpha[v];
     app.renderer.updatePositions(mesh, pos, uv, col);
     cr::Material m; // (the battle's 9626: properties & ~0x10)
-    m.culling = 0;
+    m.culling = 2; // (none)
     m.properties = 8;
     m.blendSrc = 4, m.blendDst = 5;
     m.drawOrder = 990;
@@ -14959,6 +14971,7 @@ LoadedModel* effectModel(App& app, int id) {
     }
     for (const auto& mesh : m.meshes) out.meshes.push_back(app.renderer.upload(mesh));
     out.packageActions = m.actions;
+    out.materialTable = boundActionTable(m.actions);
     // Its motion: the action table's action for the transform tree - one segment a node, and not one
     // of its materials' (9 segments, only segment 1's colour and 6 / 8's texture offset and scale:
     // they can come first - 30 of Omega's effects - and with 9 nodes they'd fit) - else the first
@@ -15068,10 +15081,16 @@ void stepEffects(App& app, std::vector<Effect>& list) { // eff3d_prc: each ends 
 void stepEffects(App& app) { stepEffects(app, app.battle.effects); }
 
 // An effect material's action (its refGid): segment 1 the colour, 6 texture unit 0's transform, 8
-// unit 1's (keyType 1 the offset, 11 the scale; segment 8 only on two-unit materials)
+// unit 1's (keyType 1 the offset, 11 the scale; segment 8 only on two-unit materials). The refGid is
+// an action's gid in the bound table, not its place (_mceFigure_bindAction -> _mceActionTable_findAction:
+// action +0x28 == refGid); none there, the Appearance has no action and keeps its own colours
+// (effect 46's shards: gids 0, 15..19 and the tree's - refGids 1..14 name none)
 const cr::Action* effectMaterialAction(const LoadedModel& lm, const cr::Material* mt) {
-    const int g = mt ? int(int32_t(mt->refGid)) : -1;
-    return g >= 0 && g < int(lm.packageActions.size()) ? &lm.packageActions[size_t(g)] : nullptr;
+    const int64_t g = mt ? int64_t(int32_t(mt->refGid)) : -1;
+    if (g < 0) return nullptr;
+    for (const cr::Action& a : lm.packageActions)
+        if (a.table == lm.materialTable && int64_t(a.gid) == g) return &a;
+    return nullptr;
 }
 
 // A texture unit's motion at `time`: uv * scale + shift (false: it has none)
@@ -19094,7 +19113,7 @@ void drawFrame(App& app, bool present = true) {
             if (!hidden) drawEffects(app, app.fieldEffects, mvp, &eye, &tgt); // (the camera: for FrmPlayEff's camera-facing effects)
             if (app.showCollision && app.collision.vao) {
                 cr::Material colMat; // translucent so the painted floor shows through
-                colMat.culling = 0;
+                colMat.culling = 2; // (none)
                 colMat.properties = 8;
                 colMat.blendSrc = 4;
                 colMat.blendDst = 5;
@@ -19135,7 +19154,7 @@ void drawFrame(App& app, bool present = true) {
         r.begin3D();
         if (app.mode == Mode::Maps) {
             cr::Material occluder; // field props: shown as translucent grey in the 3D view
-            occluder.culling = 0;
+            occluder.culling = 2; // (none)
             occluder.properties = 8;
             occluder.blendSrc = 4;
             occluder.blendDst = 5;
@@ -19154,7 +19173,7 @@ void drawFrame(App& app, bool present = true) {
         if (app.mode == Mode::Maps) drawEffects(app, app.fieldEffects, mvp, &eye, &c);
         if (app.mode == Mode::Maps && app.collision.vao && app.showCollision) {
             cr::Material colMat;          // opaque, untextured, double-sided, depth test + write
-            colMat.culling = 0;
+            colMat.culling = 2; // (none)
             colMat.properties = 8 | 16;
             colMat.ambient[0] = colMat.ambient[1] = colMat.ambient[2] = 0;
             r.drawMesh(app.collision, nullptr, mvp, colMat);

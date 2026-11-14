@@ -158,7 +158,7 @@ void Renderer::drawMesh(const GpuMesh& mesh, const Texture* tex, const Mat4& mvp
     st.blend = mat.blended();
     st.blendSrc = mat.blendSrc;
     st.blendDst = mat.blendDst;
-    st.cull = mat.culling == 0 ? 0 : mat.culling == 1 ? 1 : 2;
+    st.cull = mat.culling == 0 ? 2 : mat.culling == 1 ? 1 : 0; // (the file's 0 back, 1 front, 2 none -> the device's 2, 1, 0)
     st.depthTest = mat.depthTest();
     st.depthWrite = mat.depthWrite();
     // An HD texture for a cut-out (the original's alpha 0 or 255, drawn nearest): drawn filtered its
