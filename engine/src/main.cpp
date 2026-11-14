@@ -26620,7 +26620,7 @@ int runSelfTest(App& app) {
         desc.naxes = 6, desc.nbuttons = 15;
         desc.axis_mask = (1u << 6) - 1, desc.button_mask = (1u << 15) - 1; // (the gamepad's own order)
         desc.name = "selftest pad";
-        const SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
+        SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
         SDL_Gamepad* pad = id ? SDL_OpenGamepad(id) : nullptr;
         SDL_Joystick* js = pad ? SDL_GetGamepadJoystick(pad) : nullptr;
         if (!pad) {
@@ -26915,9 +26915,30 @@ int runSelfTest(App& app) {
                         closed ? "yes" : "NO", moved ? "yes" : "NO", confirmed ? "yes" : "NO", backed ? "yes" : "NO",
                         fieldQuiet ? "yes" : "NO", swapped ? "yes" : "NO", problems);
             app.campOpen = false;
+            // hot-plug: the pad in use taken out while another is connected - that one goes on (not none
+            // until a new one comes); a pad that comes while the held one is gone (a wireless pad's
+            // receiver: a dead handle) taken
+            SDL_JoystickID second = SDL_AttachVirtualJoystick(&desc);
+            SDL_Event ev{};
+            ev.type = SDL_EVENT_GAMEPAD_REMOVED, ev.gdevice.which = id;
+            SDL_AppEvent(&app, &ev); // (app.pad: `pad`, the first)
+            pad = nullptr; // (closed by the event)
+            const bool handedOver = app.pad && SDL_GetGamepadID(app.pad) == second;
+            SDL_Gamepad* stale = SDL_OpenGamepad(id); // (the first again, held as the second goes quiet)
+            if (app.pad) SDL_CloseGamepad(app.pad);
+            app.pad = stale;
+            SDL_DetachVirtualJoystick(id), id = 0; // (the held handle dead now, no REMOVED seen)
+            ev.type = SDL_EVENT_GAMEPAD_ADDED, ev.gdevice.which = second;
+            SDL_AppEvent(&app, &ev);
+            const bool takenOver = app.pad && SDL_GetGamepadID(app.pad) == second;
+            problems += !handedOver + !takenOver;
+            std::printf("controller: the pad in use taken out - another connected goes on %s; one come while the held one is dead taken %s\n",
+                        handedOver ? "yes" : "NO", takenOver ? "yes" : "NO");
+            if (app.pad) SDL_CloseGamepad(app.pad);
+            if (second) SDL_DetachVirtualJoystick(second);
             app.pad = keepPad;
             app.game = keepGame;
-            SDL_CloseGamepad(pad);
+            if (pad) SDL_CloseGamepad(pad);
         }
         if (id) SDL_DetachVirtualJoystick(id);
         mapErrors += problems;
@@ -30458,16 +30479,25 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
     switch (event->type) {
     case SDL_EVENT_QUIT:
         return SDL_APP_SUCCESS;
-    case SDL_EVENT_GAMEPAD_ADDED:
-        if (!app.pad) {
-            app.pad = SDL_OpenGamepad(event->gdevice.which);
-            if (app.pad) SDL_Log("controller: %s", SDL_GetGamepadName(app.pad));
-        }
+    case SDL_EVENT_GAMEPAD_ADDED: // (taken while none is in use - or the one held went quiet: a wireless pad's receiver keeps a dead handle)
+        if (!app.pad || !SDL_GamepadConnected(app.pad))
+            if (SDL_Gamepad* pad = SDL_OpenGamepad(event->gdevice.which)) {
+                if (app.pad) holdSkip(app, kSkipPad, false), SDL_CloseGamepad(app.pad);
+                app.pad = pad;
+                SDL_Log("controller: %s", SDL_GetGamepadName(app.pad));
+            }
         break;
     case SDL_EVENT_GAMEPAD_REMOVED:
         if (app.pad && SDL_GetGamepadID(app.pad) == event->gdevice.which) {
             holdSkip(app, kSkipPad, false);
             SDL_CloseGamepad(app.pad), app.pad = nullptr;
+            int count = 0; // (another still connected: that one, not none until a new one comes)
+            if (SDL_JoystickID* ids = SDL_GetGamepads(&count)) {
+                for (int k = 0; k < count && !app.pad; ++k)
+                    if (ids[k] != event->gdevice.which) app.pad = SDL_OpenGamepad(ids[k]);
+                SDL_free(ids);
+            }
+            if (app.pad) SDL_Log("controller: %s", SDL_GetGamepadName(app.pad));
         }
         break;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
