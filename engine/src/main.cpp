@@ -771,6 +771,8 @@ struct App {
         bool ending = false;     // btl_main 9000 -> 0x238b: the black mask over 10 frames, the music fading, 12 frames, then the way out
         int endFrames = 0, pendingExit = 0;
         int idleSince = -1;      // the action's frame its actors came to rest (btlact 1999: ten frames more, then the next)
+        int tutorialDue = 0;     // the action's tutorial (0xff3..0xff5) for btl_main 700's frame
+        bool nullHitDue = false; // group 0x2b5's scene for 799's
         int handover = 0;        // frames before the next action's turn (btl_main 700's 9999 frame and 799's first, see Acting)
         bool breakDue = false;   // a Break lost by the last action: its effect when 799 passes
         cr::Texture gameOver;    // btl_main 0x4b0: gameover.mct faded in over 20 frames for a lost event battle
@@ -15428,7 +15430,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     b.viewState = 0, b.slide = battleSlideDistance(app), b.slideHold = 0, b.menuGone = 100, b.roundWait = false, b.hudSlide = 0;
     b.analyze = {};
     b.turnOn = false, b.pairHeld = false;
-    b.handover = 0, b.breakDue = false;
+    b.handover = 0, b.breakDue = false, b.tutorialDue = 0, b.nullHitDue = false;
     for (App::Battle::Popup& p : b.popups) p = App::Battle::Popup();
     b.banner.clear();
     b.bannerFrames = 0;
@@ -17812,6 +17814,13 @@ void stepBattle(App& app) {
             // 43 images). The waits below read the frame before (the banner's count runs one behind
             // menub's), so they stand for 799 and their pass for 600's frame
             if (b.handover > 0) {
+                if (b.handover == 2 && b.tutorialDue) battletalk::tutorial(app, b.tutorialDue); // (700)
+                if (b.handover == 1 && b.nullHitDue) { // (799: 0x2b5's blows don't land - the script's scene,
+                    app.game.setFlag(0xfaa, true);      // its story battle's, after Battle: flag 4010)
+                    battletalk::open(app);
+                }
+                if (b.handover == 2) b.tutorialDue = 0;
+                if (b.handover == 1) b.nullHitDue = false;
                 --b.handover;
                 break;
             }
@@ -17954,14 +17963,10 @@ void stepBattle(App& app) {
                 b.handover = b.turn.kind == cr::kCmdEscape && b.turn.escaped ? 0 : 2; // (an escape's 99 goes to 9000 from 700)
                 // btlord_chk: a side lost the Break - its effect first (btl_main 0x5dc), from 799
                 b.breakDue = b.rules.breakChanging();
-                // btl_main 700: the action's tutorials - an element taken, a status, a gene learned
-                if (b.rules.elementTaken) battletalk::tutorial(app, 0xff3);
-                else if (b.rules.statusTaken) battletalk::tutorial(app, 0xff4);
-                else if (b.rules.learnedNew) battletalk::tutorial(app, 0xff5);
-                else if (b.start.group == 693 && b.rules.nullHit && !app.game.flag(0xfaa) && b.eventBattle) {
-                    app.game.setFlag(0xfaa, true); // btl_main 799: 0x2b5's blows don't land - the script's scene
-                    battletalk::open(app);         // (its story battle's, after Battle: flag 4010)
-                }
+                // btl_main 700 (the next frame, as it sees btlact's 1): the action's tutorials - an element taken,
+                // a status, a gene learned; 799 (the frame after): 0x2b5's scene - both from the hand-over below
+                b.tutorialDue = b.rules.elementTaken ? 0xff3 : b.rules.statusTaken ? 0xff4 : b.rules.learnedNew ? 0xff5 : 0;
+                b.nullHitDue = !b.tutorialDue && b.start.group == 693 && b.rules.nullHit && !app.game.flag(0xfaa) && b.eventBattle;
                 // (btlact_attack 1999's end: each attacker's wanted yaw home (0 / 0.5), turned over 3
                 // frames - a size-3 monster's 7; the other actions don't turn their actors)
                 for (int k = 0; k < 2; ++k)
