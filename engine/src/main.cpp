@@ -269,6 +269,7 @@ struct App {
     struct Video {
         int width = 1024, height = 768;    // window size (windowed) or display mode (fullscreen)
         int display = 0;                   // 0 windowed, 1 fullscreen (that mode), 2 borderless (the desktop's)
+        int fullscreenKind = 2;            // F11 / Alt+Enter's fullscreen: the last one chosen (1 or 2)
 #if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
         bool widescreen = true;            // the screen widens to the window (up to 21:9); else 4:3 (a phone's: wide, filling it)
 #else
@@ -4363,7 +4364,7 @@ void saveMix(const App& app) {
     for (int e : app.voiceEntries) list += (list.empty() ? "" : ",") + std::to_string(e);
     const App::Video& v = app.video;
     const std::string video = "width=" + std::to_string(v.width) + "\nheight=" + std::to_string(v.height) +
-                              "\ndisplay=" + std::to_string(v.display) + "\nwidescreen=" + std::to_string(int(v.widescreen)) +
+                              "\ndisplay=" + std::to_string(v.display) + "\nfullscreen_kind=" + std::to_string(v.fullscreenKind) + "\nwidescreen=" + std::to_string(int(v.widescreen)) +
                               "\npainted_fill=" + std::to_string(v.paintings) + "\nrender_scale=" +
                               std::to_string(v.renderScale) + "\nmsaa=" + std::to_string(v.msaa) +
                               "\nvsync=" + std::to_string(int(v.vsync)) + "\nframe_limit=" + std::to_string(v.frameLimit) + "\nupscaler=" + std::to_string(v.upscaler) +
@@ -4492,6 +4493,7 @@ void loadVideo(App& app, const char* text) {
     v.width = std::clamp(keyValue(text, "\nwidth=", v.width), 320, 3840);
     v.height = std::clamp(keyValue(text, "\nheight=", v.height), 240, 2160);
     v.display = std::clamp(keyValue(text, "\ndisplay=", v.display), 0, 2);
+    v.fullscreenKind = std::clamp(keyValue(text, "\nfullscreen_kind=", v.display ? v.display : v.fullscreenKind), 1, 2);
     v.widescreen = keyValue(text, "\nwidescreen=", v.widescreen) != 0;
     // painted_fill= 0 / 1 (Original / Fill); the old painted_rooms= (0 Original, 1 Whole, 2 Fill Width) and
     // zoom_paintings=: their Fill Width becomes Fill, Whole the original
@@ -4669,7 +4671,10 @@ void adjustVideo(App& app, int row, int dir) {
         v.height = kResolutions[i][1];
         break;
     }
-    case 1: v.display = (v.display + dir + 3) % 3; break;
+    case 1:
+        v.display = (v.display + dir + 3) % 3;
+        if (v.display) v.fullscreenKind = v.display; // (F11's from now on)
+        break;
     case 2: v.widescreen = !v.widescreen; break;
     case 3: v.paintings = (v.paintings + dir + 2) % 2; break;
     case 4: stepChoice(v.renderScale, kRenderScales, int(sizeof kRenderScales / sizeof kRenderScales[0]), dir); break;
@@ -4746,6 +4751,21 @@ void adjustVideo(App& app, int row, int dir) {
     }
     applyVideo(app);
     saveMix(app);
+}
+
+// F11 / Alt+Enter (a desktop's): windowed <-> fullscreen - the kind last chosen, borderless at first -,
+// the Options' Display setting itself (shown there, saved)
+void toggleFullscreen(App& app) {
+#if !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_IOS)
+    App::Video& v = app.video;
+    if (v.display) v.fullscreenKind = v.display;
+    v.display = v.display ? 0 : std::clamp(v.fullscreenKind, 1, 2);
+    SDL_Log("display: %s (F11 / Alt+Enter)", v.display == 0 ? "windowed" : v.display == 1 ? "fullscreen" : "borderless");
+    applyVideo(app);
+    saveMix(app);
+#else
+    (void)app;
+#endif
 }
 
 
@@ -26943,6 +26963,38 @@ int runSelfTest(App& app) {
         if (id) SDL_DetachVirtualJoystick(id);
         mapErrors += problems;
     }
+#if !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_IOS)
+    { // F11 / Alt+Enter: windowed <-> fullscreen, the kind last chosen (borderless at first; exclusive once
+      // Options chose it), as Options' Display setting; a held key's repeats ignored
+        const App::Video keepVideo = app.video;
+        const bool keepPersist = app.persist;
+        app.persist = false; // (settings.ini left as it was)
+        auto press = [&app](SDL_Keycode key, SDL_Keymod mod, bool repeat = false) {
+            SDL_Event ev{};
+            ev.type = SDL_EVENT_KEY_DOWN, ev.key.key = key, ev.key.mod = mod, ev.key.down = true, ev.key.repeat = repeat;
+            SDL_AppEvent(&app, &ev);
+        };
+        app.video.display = 0, app.video.fullscreenKind = 2;
+        press(SDLK_F11, SDL_KMOD_NONE);
+        const bool borderless = app.video.display == 2;
+        press(SDLK_F11, SDL_KMOD_NONE, true);
+        const bool repeatIgnored = app.video.display == 2;
+        press(SDLK_RETURN, SDL_KMOD_LALT);
+        const bool windowed = app.video.display == 0;
+        adjustVideo(app, 1, 1); // (Options: Fullscreen)
+        const bool chosen = app.video.display == 1;
+        press(SDLK_F11, SDL_KMOD_NONE);
+        press(SDLK_F11, SDL_KMOD_NONE);
+        const bool exclusive = app.video.display == 1;
+        const int problems = !borderless + !repeatIgnored + !windowed + !chosen + !exclusive;
+        std::printf("fullscreen key: F11 borderless %s (a repeat ignored %s), Alt+Enter windowed %s, Options' Fullscreen %s then F11 back to it %s; %d problems\n",
+                    borderless ? "yes" : "NO", repeatIgnored ? "yes" : "NO", windowed ? "yes" : "NO", chosen ? "yes" : "NO", exclusive ? "yes" : "NO", problems);
+        app.video = keepVideo;
+        applyVideo(app);
+        app.persist = keepPersist;
+        mapErrors += problems;
+    }
+#endif
     { // btl_lose: an ordinary battle lost goes back to the pair's Ark, a fifth of the Oz gone
         int problems = 0;
         const cr::GameState keepGame = app.game;
@@ -30521,6 +30573,10 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         // X holds the skip corner wherever a scene runs - a battle's talk too, whose key handler
         // takes every key before the switch below (seen in metastigma's fork, 8a3aa5d)
         if (event->key.key == SDLK_X && app.mode == Mode::Maps && app.runner.running()) holdSkip(app, kSkipKey, true);
+        if (event->key.key == SDLK_F11 || ((event->key.key == SDLK_RETURN || event->key.key == SDLK_KP_ENTER) && (event->key.mod & SDL_KMOD_ALT))) {
+            if (!event->key.repeat) toggleFullscreen(app); // (windowed <-> fullscreen: Options' Display)
+            break; // (anywhere: the logos too)
+        }
         if (app.vitaLogo.phase) { // the Vita's logos: confirm cuts the hold short
             const SDL_Keycode k = event->key.key;
             if (app.vitaLogo.phase == 2 && (k == SDLK_RETURN || k == SDLK_KP_ENTER || k == SDLK_SPACE || k == SDLK_E || k == SDLK_ESCAPE))
