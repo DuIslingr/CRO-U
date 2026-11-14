@@ -401,7 +401,8 @@ multiple of 16 bytes); every vertex index is in range. `tools/cmp.py`.
         s16    attr2  always 7
         4 bytes padding (0xAFAFAFFF)
      nNodes × node (KD 32 bytes, QUAD 40): +0 index-list pointer slot,
-        +4..+10 four s16 counts (+4 floors, +6 walls; +8 / +10 0 in the data)
+        +4..+10 four s16 counts (+4 floors, +6 walls; +8 0 in the data, +10 1 only in the scene stages'
+        one node - their square)
         KD: +12 f32 split, +16 s32 depth, +20 s32 axis (0 = x, else z),
             +24 s16 child taken when split - p >= 0 (< 0: a leaf), +26 s16 child when < 0, +28 unused
      per node, in node order: sum(counts) × s16 polygon index - its floors first, then its walls
@@ -416,7 +417,8 @@ split is close to the point (`|(int)(split - p)| + 3.0 < r`; the field asks with
 What is ground and what is a wall comes from these lists (`Cmp::CmpBasic::getFloor` /
 `checkHitWallToSphere` never read the normal): seven ramps with normal.y 0.66..0.68 (d0207 49/50,
 d0309 16, d0311 29/30, d0408 97/98) are floors, eight maps' 10 × 10 squares at the origin (polygon
-0) are in neither list, and d0406's one downward polygon sits in a floor list (at y 0, level with
+0) are in neither list - the scene stages d0150..d0650_10, d0799_10 and t0150_10 list theirs at +10,
+so a scene's _get_floor finds no floor there and a placed actor keeps its record's y - and d0406's one downward polygon sits in a floor list (at y 0, level with
 the floor round it: the walker, reading the lists, takes it as getFloor does; the port's placement
 helpers leave it out). Data: 2,716 floor polygons (normal.y > 0.7), 3,860 walls, 1 ceiling.
 
