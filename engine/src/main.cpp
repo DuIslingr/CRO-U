@@ -14806,10 +14806,11 @@ void cameraForTarget(App& app, int target, bool group, bool cursor = false) {
 void castCamera(App& app, int kind, int user, bool userPair);
 bool attackSpot(const App& app, int user, int k, int target, cr::Vec3& out);
 
+int firstTarget(const cr::BattleTurn& t);
 void cameraForTurn(App& app, const cr::BattleTurn& t) {
     App::Battle& b = app.battle;
     b.attackVariant = -1, b.attackCam2At = -1;
-    const int user = t.actors[0], target = t.hits.empty() ? -1 : t.hits[0].target;
+    const int user = t.actors[0], target = firstTarget(t);
     const bool userPair = t.actors[1] >= 0;
     if (t.kind == cr::kCmdAttack && target >= 0 && (user < 2) != (target < 2)) {
         // _btlact_attack_init: a variant drawn for every attack (groups 0x22d / 0x292: random(2) -> 0 / 2);
@@ -14994,6 +14995,14 @@ int startEffect(App& app, std::vector<Effect>& list, int id, cr::Vec3 at, bool l
     return e.handle;
 }
 
+// eff3d_set_btl, then +0xfc7 cleared: the effect keeps its own angles instead of facing the camera (the
+// bosses' 0xe - btlact_434_init -, 0x1e / 0x1f - 441 -, 0x20 - 442 -, 0x19 / 0x1a - 509: Part 14 824.5 s, the
+// fist's charge glow toward the pair)
+void spawnEffectFixed(App& app, int id, int fighter) {
+    const size_t before = app.battle.effects.size();
+    spawnEffect(app, id, fighter);
+    if (app.battle.effects.size() > before) app.battle.effects.back().keepAngles = true;
+}
 void spawnEffectAt(App& app, int id, cr::Vec3 at) { startEffect(app, app.battle.effects, id, at, false, 1.0f, 0.0f); }
 
 void stopEffect(std::vector<Effect>& list, int handle) { // eff3d_delete
@@ -15346,6 +15355,8 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     b.frames = 0;
     b.clock = 0;
     b.formation = std::max(0, app.battleData.formation(ids));
+    if (SDL_getenv("CR_BATTLE_DEBUG"))
+        std::printf("battle %d: monsters %d %d %d, formation %d\n", start.group, ids[0], ids[1], ids[2], b.formation);
     b.actors.clear();
     b.phase = App::Battle::Intro;
     b.phaseFrames = 0;
@@ -15457,7 +15468,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     for (int i = 0; i < 5; ++i) {
         b.shownHp[i] = rules.f[size_t(i)].hp;
         b.shownMp[i] = rules.f[size_t(i)].mp;
-        if (i < 2) b.rollHp[i] = b.shownHp[i], b.rollMp[i] = b.shownMp[i];
+        if (i < 2) b.rollHp[i] = 0, b.rollMp[i] = 0; // (btlpcparam_prty_init: shown +0x60 / +0x68 from 0 - the rows count up under the white, Part 3 1202.8 s)
     }
     setBattleCamera(app, std::max(0, b.formation - 2), -1); // (under the white; btl_main 200 sets it again)
     // btl_main 0: _btl_in_eff(group) - the battle's opening sound
@@ -16007,10 +16018,17 @@ bool cameraDone(const App& app) { // btlcamera_prc clears +0xa88 when its frames
 }
 
 std::vector<int> turnTargets(const cr::BattleTurn& t) { // the action's targets (+0x7a), each once
-    std::vector<int> out;
+    std::vector<int> out; // (not the users' own silent losses - Risk Breaker's quarter, 0412's give-up)
     for (const cr::BattleHit& h : t.hits)
-        if (std::find(out.begin(), out.end(), h.target) == out.end()) out.push_back(h.target);
+        if (!h.silent && std::find(out.begin(), out.end(), h.target) == out.end()) out.push_back(h.target);
     return out;
+}
+// que +0x8e: the action's first target - _btlact_attack_init's camera, approach and facing key on it,
+// not on a user's own loss pushed first (Risk Breaker: Part 12 311.92 s, the pair runs in at the boss)
+int firstTarget(const cr::BattleTurn& t) {
+    for (const cr::BattleHit& h : t.hits)
+        if (!h.silent) return h.target;
+    return t.hits.empty() ? -1 : t.hits[0].target;
 }
 
 void startStaged(App& app, const cr::BattleActionDef* a) {
@@ -16025,7 +16043,7 @@ void startStaged(App& app, const cr::BattleActionDef* a) {
     b.stageWait = 40;
     b.stageEnd = 0;
     b.stageChain = 0;
-    if (u && !t.hits.empty()) faceFighter(app, *u, t.hits[0].target);
+    if (u && !t.hits.empty()) faceFighter(app, *u, firstTarget(t));
     // The later ones: the slot played once (mdl_set_act_motion_nextanm), its length the motion's
     // (btlanm_get_max_frm), the cameras chained from `base` while the next exists
     auto played = [&](int base, int after) {
@@ -16073,7 +16091,7 @@ void startStaged(App& app, const cr::BattleActionDef* a) {
         if (u) playSlot(app, *u, cls, btlui::kSlotIdle);
         b.hitFrame = 130;
         b.stageWait = 65;
-        spawnEffect(app, 0xe, user);
+        spawnEffectFixed(app, 0xe, user);
         app.sound.play(0x45);
         setBattleCamera(app, 0x20c);
         break;
@@ -16098,7 +16116,7 @@ void startStaged(App& app, const cr::BattleActionDef* a) {
         if (App::Battle::Actor* prop = battleActor(app, kPropFighter)) playSlot(app, *prop, 14, -2); // (gac+0x429c: model slot 4)
         break;
     case 441: // its motion phase is 120 frames, whatever the slot's length
-        spawnEffect(app, 0x1e, user);
+        spawnEffectFixed(app, 0x1e, user);
         played(0x247, 40);
         b.stageMotionEnd = 120, b.stageEnd = 120 + 40;
         b.hitFrame = 0x52;
@@ -16116,7 +16134,7 @@ void startStaged(App& app, const cr::BattleActionDef* a) {
     }
     case 509:
         if (t.action == 509) { // 511: the cameras and the motion, the hit as it ends
-            spawnEffect(app, 0x19, user);
+            spawnEffectFixed(app, 0x19, user);
             played(0x25b, 40);
             b.hitFrame = 0x87;
             b.fov = 50;
@@ -16225,14 +16243,14 @@ void stepStaged(App& app) {
         if (f == 0x1f) startQuake(app, 2, 0, 100, 0x20, true), app.sound.play(0x8b);
         if (f == 0x24) app.sound.play(0x10d);
         if (f == 0x45) {
-            spawnEffect(app, 0x1f, user);
+            spawnEffectFixed(app, 0x1f, user);
             app.sound.play(0x8c), app.sound.play(0xd4);
             endQuake(app, 5, 100, 0, 0x33);
         }
         break;
     case 442:
         if (f == 10) app.sound.play(0x89);
-        if (f == 0x46) spawnEffect(app, 0x20, user);
+        if (f == 0x46) spawnEffectFixed(app, 0x20, user);
         if (f == 0x47) startQuake(app, 2, 0, 100, 0x2c, true);
         if (f == 0x6e) app.sound.play(0x8a);
         if (f == 0x74) startQuake(app, 3, 100, 100, 2, true);
@@ -16248,7 +16266,7 @@ void stepStaged(App& app) {
         if (f == 0x10) startQuake(app, 2, 0, 100, 0x31, true);
         if (f == 0x4a) endQuake(app, 4, 100, 0, 0x2e);
         if (f == 0x87) endQuake(app, 5, 100, 0, 10);
-        if (f == 0x88) spawnEffect(app, 0x1a, user);
+        if (f == 0x88) spawnEffectFixed(app, 0x1a, user);
         if (f == 0xa3) setFlash(app, 0, 255, 250);
         if (b.stageMotionEnd && f == b.stageMotionEnd + 5) setFlash(app, 255, 0, 150);
         break;
@@ -16676,7 +16694,7 @@ void startTurn(App& app) {
         auto it = app.game.items.find(t.item);
         if (it != app.game.items.end() && --it->second <= 0) app.game.items.erase(it);
     }
-    const int target = !t.barriers.empty() ? t.barriers[0] : t.hits.empty() ? -1 : t.hits[0].target; // (reflected: at the barrier)
+    const int target = !t.barriers.empty() ? t.barriers[0] : firstTarget(t); // (reflected: at the barrier)
     const bool opposingTarget = target >= 0 && (target < 2) != (t.actors[0] < 2);
     for (int k = 0; k < 2; ++k) {
         App::Battle::Actor* u = t.actors[k] >= 0 ? battleActor(app, t.actors[k]) : nullptr;
@@ -16701,6 +16719,9 @@ void startTurn(App& app) {
             // decomp 42014-42019 - whichever clip mdl_set_act_motion_loop then moves on to)
             playSlot(app, *u, slot, -1);
             if (an.loopEnd > an.loopStart) u->loopFrom = an.loopStart, u->loopTo = an.loopEnd;
+            if (SDL_getenv("CR_BATTLE_DEBUG"))
+                std::printf("cast: fighter %d (model %d %s) class slot %d -> slot %d, loop %d..%d, clip %.2f\n", t.actors[k], u->modelId,
+                            u->model.c_str(), slot, u->slot, an.loopStart, an.loopEnd, actorDuration(app, *u));
         } else
             playSlot(app, *u, slot, approach ? btlui::kSlotReturn : btlui::kSlotIdle);
         // (_btlact_gene_init / _btlact_item_init: the hit at the cast slot's loop start + 30)
@@ -17023,6 +17044,7 @@ void showHits(App& app) {
             case 26: id = kBuff; break;
             case 27: case 28: case 29: case 30: case 32: case 33: case 34: id = kStatus; break;
             case 31: id = kDrain; break;
+            case 38: id = kDrain; break; // (_btlcalc_0430: eff3d 0x2a on the target, immune or not - Part 8 3059.5 s)
             default: break;
             }
             if (id >= 0) spawnEffect(app, id, t);
@@ -17308,6 +17330,13 @@ void stepSetPiece(App& app) {
 
 void endRound(App& app) {
     App::Battle& b = app.battle;
+    if (b.rules.outcome() == 1) { // _btlact_escape returns 99: btl_main goes to 9000 at once - no round's end
+        b.phase = App::Battle::Fled; // (statuses, poison) and no wait before the black (3.1.0 48771-48900)
+        b.phaseFrames = 0;
+        settleBattle(app);
+        b.exit = 1;
+        return;
+    }
     battletalk::rules(app); // (status_prc's boss rules as the round ends)
     b.rules.endRound();
     for (int k = 0; k < 2; ++k) // the guard pose ends with the round
@@ -17345,10 +17374,6 @@ void endRound(App& app) {
         b.phaseFrames = 0;
         b.lostTap = false;
         playBgm(app, 1u << 26); // btl_main 0x4b0: the battle's music out over 10 frames; 0x4b1 then plays the defeat's (0x1a) with its text
-        btlvoice::playSide(app, 99, 0x1f, 0x20, 0x21); // btl_main 0x4b0 (as for a pair)
-        setBattleCamera(app, 0x48);
-        for (App::Battle::Actor& a : b.actors) // the monsters still standing out of sight (+0xfb4)
-            if (a.fighter >= 2 && b.rules.f[size_t(a.fighter)].alive()) a.hidden = true;
         break;
     }
     case 1:
@@ -17438,7 +17463,10 @@ void stepMenuView(App& app) {
     App::Battle& b = app.battle;
     App::Battle::MenuView& v = b.view;
     const bool talk = battletalk::on(app);
-    b.hudSlide = talk ? std::min(480, b.hudSlide + 120) : std::max(0, b.hudSlide - 120);
+    // (and as the results open: btl_main 1099's end - FUN_0001dd08 sends the two windows to x -480 over 4 frames,
+    // Part 3 979.44-979.56 s)
+    const bool hudOut = talk || b.phase == App::Battle::Results;
+    b.hudSlide = hudOut ? std::min(480, b.hudSlide + 120) : std::max(0, b.hudSlide - 120);
     const int want = b.phase == App::Battle::Command && !talk && !app.optionsOpen ? b.page : -1;
     auto live = [&]() { // the page as the logic has it
         v.menu = b.menu, v.cursor = b.cursor, v.member = b.member, v.pick = b.pick, v.pickTop = b.pickTop;
@@ -17718,8 +17746,6 @@ void stepBattle(App& app) {
             const int slot = enemyCameraSlot(app, b.turn.hits[0].target);
             setBattleCamera(app, slot * 4 + (b.rules.pair ? 0x14b : b.turn.actors[0] == 0 ? 0x7b : 0xe3), 0);
         }
-        if (!b.turn.barriers.empty() && b.bounceAt >= 0 && b.turnFrame == b.bounceAt) // 0x100e: back from the barrier
-            for (int k : b.turn.barriers) spawnEffect(app, effects::kCast, k);
         if (!b.hitsShown && b.turnFrame >= b.hitFrame) {
             if (!b.turn.barriers.empty() && b.bounceAt < 0) {
                 // btlact_gene / btlact_item 0x1004: the barriers light up, the users stop; 40 frames
@@ -17729,7 +17755,8 @@ void stepBattle(App& app) {
                 for (int k : b.turn.actors)
                     if (App::Battle::Actor* u = k >= 0 ? battleActor(app, k) : nullptr) playSlot(app, *u, btlui::kSlotIdle, btlui::kSlotIdle);
                 b.bounceAt = b.turnFrame + 40;
-                b.hitFrame = b.bounceAt + 30;
+                b.hitFrame = b.bounceAt + 1; // (0x1004 counts 40, swaps the targets; 0x100e the next frame sets the camera
+                                             // and calculates - no glow, no wait: Part 8 2677.44 s, the hit at the box + 40.8)
                 hitCamera(app, b.turn, b.turn.barriers[0], false); // (state 1000's camera, on the target, before the barrier check)
             } else {
                 const bool genelike = (b.turn.kind == cr::kCmdGene || b.turn.kind == cr::kCmdItem) && !b.stageAction && !b.turn.cancelled;
@@ -17816,6 +17843,12 @@ void stepBattle(App& app) {
                 b.gameOver = app.renderer.upload(img);
         }
         if (b.phaseFrames == 10) {
+            // 0x4b0 -> 0x4b1: the defeat voice only for a battle a script started (+0xaf6, G+0x364 bit 0 - as
+            // for a pair); then the camera 0x48 and the monsters still standing out of sight (+0xfb4)
+            if (b.eventBattle) btlvoice::playSide(app, 99, 0x1f, 0x20, 0x21);
+            setBattleCamera(app, 0x48);
+            for (App::Battle::Actor& a : b.actors)
+                if (a.fighter >= 2 && b.rules.f[size_t(a.fighter)].alive()) a.hidden = true;
             playBgm(app, 0x1a);
             const App::Battle::Actor* lead = battleActor(app, 0);
             setBanner(app, sysText(app, 57016, lead ? lead->name : std::string()), 60);
@@ -18220,10 +18253,16 @@ void drawBattleResults(App& app, cr::MenuPainter& m, float a) {
     app.game.oz = keepOz;
     r.setOrigin(r.uiX());
     const float by = 160 * away;
+    // __menuu_MbResultPut -> ComUty_MsgBoardDraw(.., 3, .., 0, 0xdc): picture 12, the mark (picture 13 out and
+    // back) at (458, y + 78), the lines only while the window stands still (Part 3 979.59-979.70 s: the board
+    // comes up empty; the line and the mark together)
     m.picture(12, 0, 220 + by, a);
+    const short* mk = cr::kMenuPicture[13];
+    m.piece(458, 298 + by, float(mk[0] + 20 * pictAnimFrame(rs.frames, 1, 4)), mk[1], mk[2], mk[3], a);
     std::vector<std::vector<std::string>> pages;
     const int value = rs.value;
-    if (app.systemText.message(rs.message, app.language, [&](int) { return value; }, pages, nullptr,
+    if (away <= 0.0f &&
+        app.systemText.message(rs.message, app.language, [&](int) { return value; }, pages, nullptr,
                                [&](int) { return rs.name; }) &&
         !pages.empty())
         for (size_t i = 0; i < pages[0].size() && i < 4; ++i) m.text(pages[0][i], 24, 234 + by + 16.0f * float(i), false, a, 14);
@@ -18247,7 +18286,7 @@ void drawBattleHud(App& app, float W, float H) {
     if (b.phase == App::Battle::Results && !talk) {
         drawBattleResults(app, m, std::min(1.0f, float(b.phaseFrames + 1) / 8.0f));
         r.setOrigin(r.uiX());
-        return;
+        if (b.hudSlide >= 480) return; // (the badge and the rows still on their way out)
     }
     if (b.phase == App::Battle::Lost && b.eventBattle && b.gameOver.id) { // the game over picture: tex2d (112, 32), 20 frames in
         r.setOrigin(r.uiX());
@@ -18274,7 +18313,7 @@ void drawBattleHud(App& app, float W, float H) {
     const int shown = int(std::count_if(std::begin(b.popups), std::end(b.popups), [](const App::Battle::Popup& p) { return p.on; }));
     for (int slot = 0; slot < 5; ++slot) {
         App::Battle::Popup& p = b.popups[slot];
-        if (talk) break;
+        if (talk || b.phase == App::Battle::Results) break;
         if (!p.on) continue;
         const float* v = b.vp.m;
         const float cx = v[0] * p.at.x + v[4] * p.at.y + v[8] * p.at.z + v[12];
@@ -19124,7 +19163,7 @@ void drawFrame(App& app, bool present = true) {
             }
         r.setLayer(0);
         if (app.itemWindowOpen) drawItemWindow(app);
-        if (!messageNow) drawFrontFade(app);
+        if (!messageNow && !(app.mode == Mode::Maps && app.battle.active)) drawFrontFade(app);
     }
     trackFieldMenus(app);
     if (fieldMenuWanted(app)) { // the corner button and its bar
@@ -19144,7 +19183,12 @@ void drawFrame(App& app, bool present = true) {
     if (app.mode == Mode::Maps && app.tutoTex.on) drawTutoTex(app);
     if (app.mode == Mode::Maps && app.exclamation) drawExclamation(app);
     if (app.mode == Mode::Maps && app.padArt) drawPadArt(app);
-    if (app.mode == Mode::Maps && app.battle.active) drawBattleHud(app, W, H);
+    if (app.mode == Mode::Maps && app.battle.active) {
+        drawBattleHud(app, W, H);
+        // (the mask is over the battle's 2D too: the opening white washes the badge, the rows and the
+        // banner band with the scene - Part 3 1203.14 / 1203.44 s)
+        if (!messageNow) drawFrontFade(app);
+    }
     if (app.mode == Mode::Maps && app.titleOpen && !app.optionsOpen && !app.saveScreen.open && // (the offer's windows over it)
         !app.charSelectOpen && !app.scc.open && !app.collection.open && !app.manualOpen && !app.ach.listOpen)
         drawTitleMenu(app);
