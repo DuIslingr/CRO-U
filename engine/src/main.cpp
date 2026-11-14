@@ -14912,6 +14912,36 @@ LoadedModel* effectModel(App& app, int id) {
     if (!cr::loadModelPackage(part, m)) return nullptr;
     // eff3d_set_with_pos[_and_ang] (read_mdl_mem): property bits 0 and 1 cleared - glColor colour 1 -
     // and no alpha test (threshold 0); the depth writes: drawEffects
+    if (const char* dump = SDL_getenv("CR_EFFECT_DUMP"); dump && SDL_atoi(dump) == id) { // (debugging: an effect's materials)
+        std::printf("effect %d: %zu meshes, %zu textures, %zu materials\n", id, m.meshes.size(), m.textures.size(), m.materials.size());
+        for (const cr::Material& mt : m.materials)
+            std::printf("  mat %d: diffuse %.2f %.2f %.2f %.2f emission %.2f %.2f %.2f blend %d/%d props %#x tex %d (%d) tex2 %d (%d) "
+                        "shading %d cull %d order %d unit %#x %#x\n", mt.id, mt.diffuse[0], mt.diffuse[1], mt.diffuse[2], mt.diffuse[3],
+                        mt.emission[0], mt.emission[1], mt.emission[2], mt.blendSrc, mt.blendDst, mt.properties, mt.textureRef,
+                        mt.texBlend, mt.textureRef2, mt.texBlend2, mt.shading, mt.culling, mt.drawOrder, mt.unitWord[0], mt.unitWord[1]);
+        for (const cr::Material& mt : m.materials) {
+            std::printf("  mat %d uv:", mt.id);
+            for (float v : mt.uvTransform) std::printf(" %.3g", v);
+            std::printf("\n");
+        }
+        for (size_t k = 0; k < m.meshes.size(); ++k) {
+            const auto& uv = m.meshes[k].uvs;
+            float lo[2] = {1e9f, 1e9f}, hi[2] = {-1e9f, -1e9f};
+            for (size_t j = 0; j + 1 < uv.size(); j += 2)
+                for (int c = 0; c < 2; ++c) lo[c] = std::min(lo[c], uv[j + c]), hi[c] = std::max(hi[c], uv[j + c]);
+            std::printf("  mesh %zu: app %d tex %d, %zu uvs u %.3f..%.3f v %.3f..%.3f, %zu colours\n", k, m.meshes[k].appearance,
+                        m.meshes[k].texture, uv.size() / 2, lo[0], hi[0], lo[1], hi[1], m.meshes[k].colors.size());
+
+        }
+        for (size_t k = 0; k < m.textures.size(); ++k) {
+            const cr::Image& ti = m.textures[k];
+            std::printf("  tex %zu: %dx%d alphaOnly %d noAlpha %d\n", k, ti.width, ti.height, int(ti.alphaOnly), int(ti.noAlpha));
+            if (const char* dir = SDL_getenv("CR_EFFECT_DUMP_DIR")) { // raw RGBA, for magick -size WxH -depth 8 rgba:
+                const std::string f = std::string(dir) + "/eff" + std::to_string(id) + "_" + std::to_string(k) + ".rgba";
+                if (FILE* fp = std::fopen(f.c_str(), "wb")) std::fwrite(ti.rgba.data(), 1, ti.rgba.size(), fp), std::fclose(fp);
+            }
+        }
+    }
     for (cr::Material& mt : m.materials) mt.unlit = 1, mt.alphaThreshold = 0;
     for (const auto& img : m.textures) {
         cr::Image t = img;
