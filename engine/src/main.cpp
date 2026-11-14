@@ -4940,7 +4940,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
         gauge("Master Volume", &app.mix.master, int(se::kVolume));
         gauge(sysLabel(app, 58085, "BGM"), &app.mix.music, -1);
         gauge(sysLabel(app, 58086, "Sound Effects"), &app.mix.effects, int(se::kVolume));
-        gauge("Voice Volume", &app.mix.voice, -1);
+        gauge("Voice Volume", &app.mix.voice, -2); // (-2: __MuOptionSetInfo plays battle clip 0x2b1 at the new level)
         char test[32];
         SDL_snprintf(test, sizeof test, "%03d", app.soundTestEntry);
         value("Sound Test", test, [&app](int dir) {
@@ -5358,7 +5358,7 @@ void resetAnswer(App& app, bool yes) {
     }
     app.resetAsk = 0;
     if (!yes) { menuSound(app, se::kChoose); return; }
-    menuSound(app, 13); // (0x9e on Omega's numbering)
+    menuSound(app, se::kMenuBase + 13); // (__menuu_OptionPrc 10: 0x9e - Omega's numbering; 13 was CR1's)
     for (int pair = 1; pair <= 4; ++pair) SDL_RemovePath(slotPath(app, pair).c_str());
     SDL_RemovePath(dataPath(app).c_str());
     SDL_RemovePath(savePath(app, "resume.dat").c_str());
@@ -5500,6 +5500,7 @@ void optionsClick(App& app, float px, float py) {
             applyMix(app);
             saveMix(app);
             if (r.sound >= 0) menuSound(app, uint32_t(r.sound));
+            else if (r.sound == -2) app.sound.playBattleLine(0x2b1, -77); // (FUN_0000ab64(0x2002b1, 0); its own tag: a battle's lines go on)
             return;
         }
         case OptControl::Value:
@@ -5511,6 +5512,7 @@ void optionsClick(App& app, float px, float py) {
         if (dir == 2) { menuSound(app, se::kCursor); return; }
         r.act(dir);
         if (r.sound >= 0 && !(dir == 0 && r.enterSounds)) menuSound(app, uint32_t(r.sound));
+        else if (r.sound == -2 && dir != 0) app.sound.playBattleLine(0x2b1, -77); // (the Voice gauge's sample line)
         return;
     }
 }
