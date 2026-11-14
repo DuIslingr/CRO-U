@@ -872,6 +872,12 @@ struct App {
         int attackCam2At = -1;             // que +0x10: the approach's last frame (a variant-2 member blow's second camera then)
         int attackBackAt = -1;             // _btlact_attack 1000's que +8: the blow's max frame (its slot's frames - 1), then 0x406
         int attackEndAt = -1;              // 0x406's way back (the return slot's max frame) and 1999's ten done: 9999
+        int attackFxAt[2] = {-1, -1};      // que +0xb2 / +0xb4: _btlcalc_prc_0404_effect's frames (the hit's look, no calc)
+        bool partnerStands = false;        // que +0x14: a pair's second stands in place (party model 7 / monsters 0xa0..0xa2)
+        struct Shot {                      // _btlact_attack 0x6a4 / 0x708: slot 10's shot (eff3d 2 / 3) user -> target
+            int effect = 0, at = -1, steps = 0, from = 0, handle = 0, target = -1, k = 0;
+        } shot;
+        int nodeFx = 0;                    // 0x76c: m103's effect 0x3f (its handle), kept on node 1204
         cr::Vec3 camWantEye{488, 12, 555}, camWantTarget{500, 4, 498}; // +0xa8 / +0xb4
         cr::Vec3 camEye{488, 12, 555}, camTarget{500, 4, 498};         // +0xcc / +0xd8: shown
         std::vector<Effect> effects;       // eff3d: playing effects (32 at most)
@@ -16689,6 +16695,73 @@ int attackSlot(App& app, const cr::BattleTurn& t, int k, int cls, bool& inPlace)
     return model >= 0x9d && model <= 0x9f && pair ? 13 : 8;
 }
 
+// _btlact_attack_init's counts for _btlact_attack (3.1.0 decomp 12375-12702; the states 12862-13241): when
+// the calc comes (que +0xb0), the frames _btlcalc_prc_0404_effect shows the blow's look without it (+0xb2,
+// +0xb4: a target's flinch if it is hurt, the hit effect and its sound), how long the blow lasts (+8):
+// - slot 9 in place (0x76c): the calc at the slot's hit, the look at its second hit; 0x406 after the slot's
+//   max frame, waiting 10 (no way back), then 1999's 10;
+// - slot 10 in place (0x6a4 for a party member / monsters 0xa0..0xa2: SE 0x2d at frame 13, at the hit - 2
+//   effect 2 from the user with SE 0x2e, two frames to the target, the calc as it lands; 0x708 for monsters
+//   0x4c..0x4f: at the hit - 5 effect 3, five frames to the target): 0x406 after the slot's max frame,
+//   one frame, then 1999's 10;
+// - else 1000 (the approach): the calc at the user's hit, the look at its second hit and, in a pair, at the
+//   second's hit (+0xb4; the variant-2 camera at the second's move end, +0x10). A pair's second of party
+//   model 1 / monsters 0x8e..0x90 times the blow: the calc at its hit, the look at the first's, +8 its max
+//   frame; one standing (party model 7 / monsters 0xa0..0xa2, slot 13: que +0x14) the calc and +8 at its
+//   slot-13 hit, the look at the first's slot-13 hits, SE 0x2d at frame 13. (Omega's members are models
+//   6 and 8..11: their pairs never take the model 1 / 7 forms)
+void attackCounts(App& app, const cr::BattleTurn& t) {
+    App::Battle& b = app.battle;
+    b.attackFxAt[0] = b.attackFxAt[1] = -1;
+    b.partnerStands = false;
+    b.shot = {};
+    const int user = t.actors[0];
+    const App::Battle::Actor* u = battleActor(app, user);
+    if (!u) return;
+    const cr::BattleActionDef* a = app.battleActions.get(t.action);
+    bool inPlace = false;
+    const int slot = attackSlot(app, t, 0, a ? a->cls : 0, inPlace), model = u->modelId;
+    const cr::BattleAnim an = app.battleData.anim(model, slot);
+    if (an.hit > 0) b.hitFrame = an.hit;
+    if (slot == 9 && inPlace) { // 0x76c (12375-12405; 13164-13241)
+        b.attackFxAt[0] = an.hit2;
+        b.attackEndAt = battleMaxFrame(app, user, 9) + 10 + 10;
+        return;
+    }
+    if (slot == 10 && inPlace) { // 0x6a4 / 0x708 (12413-12447, 12687-12702; 13018-13162)
+        const bool ball = user >= 2 && model >= 0x4c && model <= 0x4f;
+        b.shot.effect = ball ? 3 : 2;
+        b.shot.steps = ball ? 5 : 2;
+        b.shot.at = an.hit - b.shot.steps;
+        b.shot.from = ball ? 1210 : 1204;
+        b.shot.target = firstTarget(t);
+        b.attackEndAt = battleMaxFrame(app, user, 10) + 1 + 10;
+        return;
+    }
+    b.attackFxAt[0] = an.hit2; // (12465-12471)
+    b.attackBackAt = battleMaxFrame(app, user, slot);
+    const App::Battle::Actor* v = t.actors[1] >= 0 ? battleActor(app, t.actors[1]) : nullptr;
+    const bool members = user < 2;
+    if (!v || !(members ? b.rules.pair : b.rules.enemyPair)) return;
+    const int vm = v->modelId;
+    if (members ? vm == 7 : vm >= 0xa0 && vm <= 0xa2) { // (12551-12570 / 12617-12636)
+        const cr::BattleAnim first = app.battleData.anim(model, 13);
+        const int hit = app.battleData.anim(vm, 13).hit;
+        if (hit > 0) b.attackBackAt = b.hitFrame = hit;
+        b.attackFxAt[0] = first.hit, b.attackFxAt[1] = first.hit2;
+        b.partnerStands = true;
+        return;
+    }
+    const cr::BattleAnim second = app.battleData.anim(vm, 8);
+    b.attackFxAt[1] = second.hit; // (12581 / 12644)
+    if (members) b.attackCam2At = second.moveEnd; // (12572: que +0x10, the second's)
+    if (members ? vm == 1 : vm >= 0x8e && vm <= 0x90) { // (12597-12606 / 12669-12682)
+        b.attackBackAt = battleMaxFrame(app, t.actors[1], 8);
+        if (second.hit > 0) b.hitFrame = second.hit;
+        b.attackFxAt[0] = app.battleData.anim(model, 8).hit;
+    }
+}
+
 void startTurn(App& app) {
     App::Battle& b = app.battle;
     const cr::BattleTurn& t = b.turn;
@@ -16740,6 +16813,10 @@ void startTurn(App& app) {
     }
     b.turnFrame = 0;
     b.attackBackAt = b.attackEndAt = -1;
+    b.attackFxAt[0] = b.attackFxAt[1] = -1;
+    b.partnerStands = false;
+    b.shot = {};
+    b.nodeFx = 0;
     b.hitsShown = false;
     b.hitFrame = 20;
     b.bounceAt = -1;
@@ -16792,22 +16869,6 @@ void startTurn(App& app) {
         int slot = a && a->cls >= 8 && a->cls < cr::kBattleAnimSlots ? a->cls : 8;
         bool inPlace = false;
         if (t.kind == cr::kCmdAttack) slot = attackSlot(app, t, k, a ? a->cls : 0, inPlace);
-        if (t.kind == cr::kCmdAttack && k == 0 && !inPlace) {
-            // _btlact_attack_init's state 1000 (3.1.0 decomp 12465-12468): que +8 the blow's max frame - the
-            // user's; a pair's second member's when that is model 1 (12601) or, standing in place (model 7's
-            // slot 13), its hit frame (12552); an enemy pair's second's for models 0x8e..0x90 (12673) or its
-            // slot-13 hit frame for 0xa0..0xa2 (12618). (Slots 9 / 10 go other ways - their clips time them)
-            b.attackBackAt = battleMaxFrame(app, t.actors[0], slot);
-            const App::Battle::Actor* v = t.actors[1] >= 0 ? battleActor(app, t.actors[1]) : nullptr;
-            const int vm = v ? v->modelId : -1;
-            if (v && t.actors[0] < 2 && b.rules.pair) {
-                if (vm == 7) b.attackBackAt = app.battleData.anim(vm, 13).hit;
-                else if (vm == 1) b.attackBackAt = battleMaxFrame(app, t.actors[1], 8);
-            } else if (v && t.actors[0] >= 2 && b.rules.enemyPair) {
-                if (vm >= 0xa0 && vm <= 0xa2) b.attackBackAt = app.battleData.anim(vm, 13).hit;
-                else if (vm >= 0x8e && vm <= 0x90) b.attackBackAt = battleMaxFrame(app, t.actors[1], 8);
-            }
-        }
         if (t.kind == cr::kCmdAttack && SDL_getenv("CR_BATTLE_DEBUG"))
             std::printf("attack: fighter %d (model %d %s) slot %d%s, cls %d\n", t.actors[k], u->modelId, u->model.c_str(), slot,
                         inPlace ? " in place" : "", a ? a->cls : -1);
@@ -16861,6 +16922,7 @@ void startTurn(App& app) {
             }
         }
     }
+    if (t.kind == cr::kCmdAttack) attackCounts(app, t);
 }
 
 // _btlact_attack_init (12480-12538, 12575-12650): where an attacker steps to - the formation table
@@ -16947,6 +17009,25 @@ void analyzeTap(App& app) {
 void releasePair(App::Battle& b) { // the calc's pair flags, as its hit comes (see pairHeld)
     if (b.pairHeld) b.rules.pair = b.pairAfterHit, b.rules.enemyPair = b.enemyPairAfterHit;
     b.pairHeld = false;
+}
+
+// _btlcalc_prc_0404_effect (3.1.0 decomp 26526-26600): a blow's look without its calc - on each target a
+// hurt one (que +0x44 > 0) not guarding flinches (slot 5, then the idle), and but for one fended off (type
+// 6) the hit's effect and sound: a critical's 5 and 0x32, the user's element's 0x2a + 3e and 0x57 + e, else
+// 4 and 0x2f + random(3)
+void attackLook(App& app) {
+    App::Battle& b = app.battle;
+    const int user = b.turn.actors[0];
+    const int ue = user >= 0 && user < 5 ? b.rules.f[size_t(user)].element : 0;
+    for (const cr::BattleHit& h : b.turn.hits) {
+        App::Battle::Actor* a = battleActor(app, h.target);
+        if (!a || h.mp || h.type == cr::kHitQuiet) continue;
+        if (h.amount > 0 && a->slot != btlui::kSlotGuard) playSlot(app, *a, btlui::kSlotHit, btlui::kSlotIdle);
+        if (h.type == cr::kHitGuard) continue;
+        if (h.type == cr::kHitCritical) spawnEffect(app, effects::kCritical, h.target), app.sound.play(0x32);
+        else if (ue > 0) spawnEffect(app, 0x2a + 3 * ue, h.target), app.sound.play(uint32_t(0x57 + ue));
+        else spawnEffect(app, effects::kHit, h.target), app.sound.play(0x2f + uint32_t(b.rules.random(3)));
+    }
 }
 
 // The hits land: the numbers, the targets' reactions, the HP the HUD shows
@@ -17864,6 +17945,16 @@ void stepBattle(App& app) {
             if (m == 0xc && f == 22) app.sound.play(0x62);
             if ((m == 0xd || m == 0xe) && f == 7) app.sound.play(0x63);
             if ((m == 0xf || m == 0x10) && f == 30) app.sound.play(0xc7);
+            // (13185-13208: m103a / b's frame 0x12 sets effect 0x3f at its node 1204 - eff3d_set_with_pos(.., 50),
+            // its own angles - and keeps it on that node while it plays)
+            Effect* fx = nullptr;
+            for (Effect& e : b.effects)
+                if (b.nodeFx && e.handle == b.nodeFx && e.id == 0x3f) fx = &e;
+            if (u && (m == 0xf || m == 0x10) && f == 0x12) {
+                b.nodeFx = startEffect(app, b.effects, 0x3f, actorPoint(app, *u, 1204), false, 0.5f, 0.0f);
+                if (b.nodeFx && !b.effects.empty()) b.effects.back().keepAngles = true;
+            } else if (u && (m == 0xf || m == 0x10) && f > 0x12 && fx)
+                fx->pos = actorPoint(app, *u, 1204);
         } else if (b.turn.kind == cr::kCmdGene && !b.hitsShown) { // btlact_gene 1000: the bosses' casting sounds
             const App::Battle::Actor* u = battleActor(app, b.turn.actors[0]);
             const int m = u ? u->modelId : -1, f = b.turnFrame;
@@ -17878,6 +17969,32 @@ void stepBattle(App& app) {
             b.attackCam2At > 0 && b.turnFrame == b.attackCam2At && !b.turn.hits.empty()) {
             const int slot = enemyCameraSlot(app, b.turn.hits[0].target);
             setBattleCamera(app, slot * 4 + (b.rules.pair ? 0x14b : b.turn.actors[0] == 0 ? 0x7b : 0xe3), 0);
+        }
+        if (!b.stageAction && b.turn.kind == cr::kCmdAttack) {
+            // _btlact_attack 1000 with a standing second (que +0x14) and 0x6a4: SE 0x2d at frame 13 (12886, 13140)
+            if (b.turnFrame == 13 && (b.partnerStands || b.shot.effect == 2)) app.sound.play(0x2d);
+            // 0x6a4 / 0x708 at the hit - 2 / - 5 (13134-13158 / 13061-13077): effect 2 / 3 on the user (eff3d_set_btl:
+            // at its table node), 0x6a4's SE 0x2e; then 0x6ae / 0x712 move it each frame from the user's node 1204
+            // / 1210 toward the first target's 1102 - k / 2, k / 5 of the way -, the calc as it gets there
+            App::Battle::Shot& sh = b.shot;
+            if (sh.effect && b.turnFrame == sh.at) {
+                const size_t before = b.effects.size();
+                spawnEffect(app, sh.effect, b.turn.actors[0]);
+                if (b.effects.size() > before) b.effects.back().handle = sh.handle = ++app.effectHandles;
+                if (sh.effect == 2) app.sound.play(0x2e);
+            } else if (sh.effect && b.turnFrame > sh.at && ++sh.k <= sh.steps) {
+                const App::Battle::Actor* u = battleActor(app, b.turn.actors[0]);
+                const App::Battle::Actor* v = sh.target >= 0 ? battleActor(app, sh.target) : nullptr;
+                for (Effect& e : b.effects)
+                    if (u && v && sh.handle && e.handle == sh.handle) {
+                        const cr::Vec3 p = actorPoint(app, *u, sh.from), q = actorPoint(app, *v, 1102);
+                        const float w = float(sh.k) / float(sh.steps);
+                        e.pos = p + (q - p) * w;
+                    }
+            }
+            // _btlcalc_prc_0404_effect at que +0xb2 / +0xb4 when they aren't the calc's frame (12891-12902, 13230-13235)
+            for (int k = 0; k < 2; ++k)
+                if (b.attackFxAt[k] > 0 && b.attackFxAt[k] != b.hitFrame && b.turnFrame == b.attackFxAt[k]) attackLook(app);
         }
         if (b.attackBackAt > 0 && b.turnFrame == b.attackBackAt && b.attackBackAt >= b.hitFrame && !b.stageAction) { // (a count that ends before the hit: the clips time it)
             // _btlact_attack 1000 -> 0x406 (3.1.0 decomp 12862-12911) once its count reaches que +8, whatever the
@@ -17951,6 +18068,7 @@ void stepBattle(App& app) {
                               : b.stageAction ? b.turnFrame >= b.hitFrame + b.stageWait // the staged ones' wait
                               : b.turn.cancelled ? b.turnFrame >= 60
                               : attackLike && b.attackEndAt >= 0 ? b.turnFrame >= b.attackEndAt // (_btlact_attack's count)
+                              : attackLike && b.attackBackAt > 0 && b.attackBackAt >= b.hitFrame && b.turnFrame <= b.attackBackAt ? false // (... still to come)
                               : attackLike ? (b.idleSince >= 0 && b.turnFrame >= b.idleSince + 10) || b.turnFrame > 400
                                            : (!busy && b.turnFrame >= b.hitFrame + 40) || b.turnFrame > 400;
             if (over) {
