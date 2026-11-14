@@ -770,6 +770,8 @@ struct App {
         bool ending = false;     // btl_main 9000 -> 0x238b: the black mask over 10 frames, the music fading, 12 frames, then the way out
         int endFrames = 0, pendingExit = 0;
         int idleSince = -1;      // the action's frame its actors came to rest (btlact 1999: ten frames more, then the next)
+        int handover = 0;        // frames before the next action's turn (btl_main 700's 9999 frame and 799's first, see Acting)
+        bool breakDue = false;   // a Break lost by the last action: its effect when 799 passes
         cr::Texture gameOver;    // btl_main 0x4b0: gameover.mct faded in over 20 frames for a lost event battle
         enum Menu { Top, Commands, Targets, Items, EscapeAsk, Genes } menu = Top;
         int cursor = 0;
@@ -15405,6 +15407,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     b.viewState = 0, b.slide = battleSlideDistance(app), b.slideHold = 0, b.menuGone = 100, b.roundWait = false, b.hudSlide = 0;
     b.analyze = {};
     b.turnOn = false, b.pairHeld = false;
+    b.handover = 0, b.breakDue = false;
     for (App::Battle::Popup& p : b.popups) p = App::Battle::Popup();
     b.banner.clear();
     b.bannerFrames = 0;
@@ -17749,9 +17752,27 @@ void stepBattle(App& app) {
             break;
         }
         if (!b.turnOn) {
+            // btl_main after an action's last state (its 9999, set the frame the port's turn ends): 700
+            // sees btlact_main's 1 the next frame and goes to 799; 799's checks run the frame after
+            // (3.1.0 decomp 7117-7124, 7406-7440) and 600 / 800 / 1000 act on the third - so the next
+            // action's camera comes 43 frames after a gene's hit, not 41 (Part 12 756.16 -> 758.36 s:
+            // 43 images). The waits below read the frame before (the banner's count runs one behind
+            // menub's), so they stand for 799 and their pass for 600's frame
+            if (b.handover > 0) {
+                --b.handover;
+                break;
+            }
             // btl_main 799: no next action while a message is up or waiting (the round's first comes
             // from 500 / 600 straight)
             if (!b.roundWait && (!b.notices.empty() || (b.bannerFrames > 0 && b.bannerFrames <= btlui::kMessageFrames))) break;
+            // btlord_chk in 799: a side lost the Break - its effect (0x5dc: init in 799, the effect's
+            // frames from the next), then 600 / 800
+            if (b.breakDue) {
+                b.breakDue = false;
+                startBreakFx(app);
+                if (stepBreakFx(app)) b.breakFx.on = false, battletalk::tutorial(app, 0xff2);
+                break;
+            }
             // the menu goes first (0x270e, then two frames: __menub_mainPrc runs before btl_prc in the
             // original's frame, the port's view after the logic - so the logic sees the view a frame on)
             if (b.roundWait && (b.viewState != 0 || b.menuGone < 1)) break;
@@ -17862,8 +17883,9 @@ void stepBattle(App& app) {
                 b.fov = 28.5f;
                 b.turnOn = false;
                 releasePair(b); // (a turn without a hit shown)
-                // btlord_chk: a side lost the Break - its effect first (btl_main 0x5dc)
-                if (b.rules.breakChanging()) startBreakFx(app);
+                b.handover = b.turn.kind == cr::kCmdEscape && b.turn.escaped ? 0 : 2; // (an escape's 99 goes to 9000 from 700)
+                // btlord_chk: a side lost the Break - its effect first (btl_main 0x5dc), from 799
+                b.breakDue = b.rules.breakChanging();
                 // btl_main 700: the action's tutorials - an element taken, a status, a gene learned
                 if (b.rules.elementTaken) battletalk::tutorial(app, 0xff3);
                 else if (b.rules.statusTaken) battletalk::tutorial(app, 0xff4);
@@ -28027,7 +28049,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
     }
     if (app.captureBattle[0] > 0) { // --battle group stage: that battle, a second in
         cr::ensureStartingGenes(app.game);
-        if (app.captureBattleView == "genes" || app.captureBattleView == "genehit" || app.captureBattleView.rfind("reflect", 0) == 0) { // a plate with known genes
+        if (app.captureBattleView == "genes" || app.captureBattleView.rfind("genehit", 0) == 0 || app.captureBattleView.rfind("reflect", 0) == 0) { // a plate with known genes (genehit@n too)
             app.game.items[481] = 1, app.game.items[108] = 1, app.game.items[94] = 1;
             app.game.party[0].genes[1] = 481;
         }
