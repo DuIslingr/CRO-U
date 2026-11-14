@@ -55,6 +55,13 @@ First-start notes per system:
 - **Windows:** SmartScreen may warn about an unsigned program: choose *More info*, *Run anyway*.
 - **macOS:** right-click `chaosrings.app` and choose *Open* (it isn't signed).
 - **Linux:** `chmod +x` the AppImage, then run it.
+- **iPhone / iPad (iOS 15+):** the download's `.ipa` is unsigned: sideload it with AltStore, Sideloadly or
+  the like (they sign it with your Apple ID). Put your copy into the app's folder in the Files app (*On My
+  iPhone / iPad > Chaos Rings Omega*, or Finder's Files tab with the device connected): `ios/` (the
+  `.app`, or the `.ipa` itself - unpacked when the game starts), `android/` or `vita/`, then *Look again*.
+  It runs at the display's rate (120 Hz on ProMotion screens), keeps the menus clear of the camera's notch
+  or punch hole, and with Layout on *Auto* takes the iPhone layout on a small screen and the iPad layout on
+  a large one - on a foldable (iPhone Duo) it changes as you fold or open it.
 - **Android:** install the APK. The setup can pick files on the phone (an `.ipa`, the APK and OBB,
   a Vita dump archive). Folders have to be copied over USB into
   `Android/data/local.preservation.chaosringsomega/files/`, in an `ios/`, `android/` or `vita/`
@@ -272,6 +279,7 @@ Put your copy in `engine/build/` (or the folder you start it from) as described 
 | Windows 10+ (x64) | MSVC and Ninja from a Developer prompt, plus the [Vulkan SDK](https://vulkan.lunarg.com/) for Vulkan; or from Linux with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw): `-DCMAKE_TOOLCHAIN_FILE=engine/cmake/llvm-mingw-x86_64.cmake`. CMake builds SDL3 and zlib | Vulkan, OpenGL 3.3; FSR 3.1, FSR 4, DLSS (MSVC, with the SDK) |
 | macOS 11+ (Apple silicon and Intel) | Xcode's command-line tools, Ninja and the [Vulkan SDK](https://vulkan.lunarg.com/) (MoltenVK is copied into the `.app`); add `"-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"` for both | Vulkan (MoltenVK), OpenGL 3.3; FSR 3.1, MetalFX (macOS 13+) |
 | Android 7+ (arm64, x86-64) | the Android SDK and NDK: `git clone -b release-3.4.20 https://github.com/libsdl-org/SDL android/SDL`, then `gradle assembleRelease` in `android/` | OpenGL ES 3.0 |
+| iOS 15+ (iPhone, iPad; arm64) | macOS with Xcode and the [Vulkan SDK](https://vulkan.lunarg.com/) (for glslc), plus a [MoltenVK release](https://github.com/KhronosGroup/MoltenVK/releases)'s `MoltenVK-ios.tar`: `cmake -S engine -B build-ios -G Xcode -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 -DCR_MOLTENVK=<its MoltenVK folder>`, then build `chaosrings` (unsigned: `CODE_SIGNING_ALLOWED=NO`). The CI's `.ipa` is unsigned - sideload it with AltStore, Sideloadly or the like, which sign it with your Apple ID | Vulkan (MoltenVK, linked in), OpenGL ES 3.0; FSR 3.1, MetalFX (iOS 16+) |
 
 - `-DCR_GLES=ON` builds the desktop game on OpenGL ES 3.0, as Android runs it (Mesa has it), to test
   that path without a device.

@@ -281,7 +281,11 @@ struct App {
         int renderScale = 100;             // % of the window's pixels (Vulkan)
         int msaa = 1;                      // 1, 2, 4, 8 (Vulkan)
         bool vsync = true;
+#ifdef SDL_PLATFORM_IOS
+        int frameLimit = 0;                // (an iPhone's ProMotion: 120 - Info.plist's CADisableMinimumFrameDurationOnPhone)
+#else
         int frameLimit = 60;               // frames drawn a second at most (0: as many as the display takes); the
+#endif
                                            // game itself runs at 20 (core/timing.hpp), the frames between show
                                            // it moving
         int upscaler = 0;                  // 0 off, 1 FSR 3.1, 2 DLSS (Vulkan; MSAA is off meanwhile)
@@ -4576,6 +4580,21 @@ void applyOrientation(App& app, bool captureDirection = false) {
 #endif
 }
 
+// Auto's layout on an iPhone or iPad: the screen in use - its short side under 540 points (an iPhone's
+// 375..440, the iPhone Duo's cover screen 466) the iPhone layout, else (an iPad's 744 on, the Duo
+// unfolded 626) the iPad's - the original's two releases' screens; a foldable changes it as it folds
+// (SDL_AppEvent: the window resized)
+bool smallScreen(const App& app) {
+#ifdef SDL_PLATFORM_IOS
+    int w = 0, h = 0;
+    return app.window && SDL_GetWindowSize(app.window, &w, &h) && w > 0 && h > 0 && std::min(w, h) < 540;
+#else
+    (void)app;
+    return false;
+#endif
+}
+bool autoPhoneLayout(const App& app) { return app.phoneData || app.vitaOnly || smallScreen(app); }
+
 // Window size / fullscreen mode and the renderer's options from app.video
 void applyVideo(App& app) {
     App::Video& v = app.video;
@@ -4583,7 +4602,7 @@ void applyVideo(App& app) {
     r.setWidescreen(v.widescreen);
     // 2.2.0's / Omega's iPhone screens (3:2): the iPhone's data, or the Vita's alone - its art is the
     // iPhone's Retina sheets (the Vita ran the iPhone code path) - unless the iPad layout is asked for
-    const bool phone = v.layout >= 2 || (v.layout == 0 && (app.phoneData || app.vitaOnly));
+    const bool phone = v.layout >= 2 || (v.layout == 0 && autoPhoneLayout(app));
     r.setVitaScreen(v.layout == 3 || (v.layout == 0 && app.vitaOnly)); // (its 960 x 544: the Vita alone's own)
     r.setAndroidScreen(v.layout == 4); // (the Android release's: docs/ANDROID.md)
     const bool changed = phone != r.phoneLayout();
@@ -29782,11 +29801,9 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
             if (SDL_strcmp(argv[i], "--data") == 0) dataGiven = true;
             if (SDL_strcmp(argv[i], "--android") == 0) androidGiven = true;
         }
-#if !defined(SDL_PLATFORM_IOS)
-        if (!dataGiven)
+        if (!dataGiven) // (an iPhone's too: the .ipa copied into the Files app's ios/)
             for (const std::string& place : cr::gameFolders())
                 if (cr::installDroppedIpa(crSetupGame(), place, quiet)) break;
-#endif
         if (!androidGiven)
             for (const std::string& place : cr::gameFolders())
                 if (cr::installDroppedAndroid(crSetupGame(), place, quiet)) break;
@@ -29960,8 +29977,13 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         for (int i = 1; i < argc; ++i)
             for (const char* f : {"--capture", "--selftest", "--explore", "--export-textures", "--export-models"})
                 if (SDL_strcmp(argv[i], f) == 0) plainStart = false;
-        std::string msg = "Could not find your copy of the game.\n\nPut any one of these in the folder here, then Look again:\n" +
-                          (g.empty() ? std::string("(no folder)") : g.front()) +
+#ifdef SDL_PLATFORM_IOS
+        const std::string here = "the app's folder in the Files app (On My iPhone / iPad > Chaos Rings Omega), or in Finder with "
+                                 "the device connected (Files)"; // (its Documents: UIFileSharingEnabled)
+#else
+        const std::string here = g.empty() ? std::string("(no folder)") : g.front();
+#endif
+        std::string msg = "Could not find your copy of the game.\n\nPut any one of these in the folder here, then Look again:\n" + here +
                           "\n\n  ios/      the iPad's ChaosRingsOmegaHDeng.app, or its .ipa (unpacked there)"
                           "\n  android/  the Android release's main.110.com.square_enix.chaosringsomega.googleplay.obb and its APK,"
                           "\n            or its .xapk / .apks (unpacked there)"
@@ -30768,6 +30790,9 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
     switch (event->type) {
     case SDL_EVENT_QUIT:
         return SDL_APP_SUCCESS;
+    case SDL_EVENT_WINDOW_RESIZED: // (a foldable folded or opened: Auto's layout for the screen now in use)
+        if (app.video.layout == 0 && autoPhoneLayout(app) != app.renderer.phoneLayout()) applyVideo(app);
+        break;
     case SDL_EVENT_GAMEPAD_ADDED: // (taken while none is in use - or the one held went quiet: a wireless pad's receiver keeps a dead handle)
         if (!app.pad || !SDL_GamepadConnected(app.pad))
             if (SDL_Gamepad* pad = SDL_OpenGamepad(event->gdevice.which)) {
