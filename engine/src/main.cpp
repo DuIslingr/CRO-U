@@ -3815,7 +3815,7 @@ struct ViewerHost : cr::EventHost {
         return v;
     }
     void npcShadow(int npc, bool on) override {
-        if (cr::FieldNpc* n = findNpc(app, npc)) n->treasure = uint16_t(on ? n->treasure | 0x8000 : n->treasure & 0x7fff); // (+0x12 bit 15; the port draws no NPC shadows)
+        if (cr::FieldNpc* n = findNpc(app, npc)) n->treasure = uint16_t(on ? n->treasure | 0x8000 : n->treasure & 0x7fff); // (+0x12 bit 15: npc_shodow's switch)
     }
     void puzzleTeleportCount(int n) override { app.padLock = n; } // Util 2046 (FUN_0002b41c): var 9 into gac + 0x1e2006, the pad lock
     void fireWall(int npc) override { // Uty_FireWall_Init: walls 454 / 453 burn (effect 0x98 / 0x99, looping)
@@ -4026,6 +4026,7 @@ struct ViewerHost : cr::EventHost {
         n.model = row.model;
         n.kind = row.kind;
         n.treasure = row.box;
+        std::memcpy(n.shadow, row.shadow, sizeof n.shadow); // (npc_shodow reads the row the slot points at: +30..+36)
         n.puzzle = row.puzzle;
         n.scale = row.scale;
         n.mdlRead = n.model >= 0;
@@ -7586,6 +7587,12 @@ void campChoose(App& app) {
             c.listCursor = c.listTop = 0;
             campRefreshList(app);
             if (c.list.empty()) { menuSound(app, se::kBuzzer); return; } // nothing to wear
+            // __MuCampScrListComInit: with the slot worn, MuScrList_SetListPosFromItemNo(worn) - the list
+            // opens settled with what is worn on the focus line (3.1.0 0x6ec40; Part 3 398.3 s and Part 10 201 s: Gene
+            // Plate 1's list comes in with the worn "Deer Genes" on the line, the Jewel list with "Pebbles")
+            if (const int worn = c.slot < 3 ? pm.equip[c.slot] : pm.genes[c.slot - 3]; worn > 0)
+                if (const auto at = std::find(c.list.begin(), c.list.end(), worn); at != c.list.end())
+                    c.listCursor = c.listTop = int(at - c.list.begin());
             menuSound(app, se::kChoose);
             c.phase = App::Camp::List;
         } else if (c.phase == App::Camp::List && !c.list.empty() && c.slot >= 3) { // a gene plate
@@ -10119,7 +10126,9 @@ void drawCamp(App& app) {
             helpBoard(item, ease);
             left();
         } else if (c.slot >= 3) { // a gene plate for the slot: its board (the cursor's known entries) beside the list
-            drawGeneBoard(app, m, 14, 92, cr::isPlate(item) ? item : pm.genes[c.slot - 3], ease, 1);
+            // (CampMainPut: the board for the focus row's plate only - none on Remove, 200 - 0x1da being out of
+            // range; Part 3 401 s: "Remove equipment" with the left side empty)
+            drawGeneBoard(app, m, 14, 92, item, ease, 1);
             rightV();
             // (MuScrList_Draw type 6: yellow for a plate this member wears - MuScrList_IsNowEquip(.., the member) -
             // grey while none of it is known; Part 3 403 s: "Deer Genes" yellow, the others white)
@@ -10128,7 +10137,7 @@ void drawCamp(App& app) {
                 if (cr::isPlate(it)) drawGeneRow(app, m, x, y, it, lit, campWears(app, ch, it), ease);
                 else drawCampRow(app, m, x, y, it, 0, lit, ease);
             });
-            helpBoard(cr::isPlate(item) ? item : 0, ease);
+            helpBoard(item, ease); // (Remove's own: "Remove equipment" - Part 3 401 s)
         } else {
             drawShopBoard(app, 12, 92, ch, item > 0 ? item : 0, ease);
             rightV();
@@ -21422,6 +21431,21 @@ int fieldRenderSelfTest(App& app) {
     std::printf("field render: alpha models t0110 %s, t0131 %s, d0301 %s; shadows: %d flagged NPCs in %s, the leader's alpha "
                 "%d, the NPC's %d (want %d), the leader at half %d\n", t0110.c_str(), t0131.c_str(), d0301.empty() ? "none" : d0301.c_str(),
                 flagged, app.maps[size_t(app.mapIndex)].c_str(), playerA, npcA, npcWant, fadedA);
+    { // __EvtNpcMdlRead points a new slot at the NPC's row, so npc_shodow finds its +30..+36 there: j001_d06's d0650
+      // lists 999 alone, its scene reads 409 (row: +18 bit 15, 3 / 3 / 80) - drawn with that shadow
+        int sx = -1, sz = -1, sp = -1, drawnNpc = -1;
+        if (room("d0650_10.cmp", 91, 7) && !findNpc(app, 409)) {
+            ViewerHost host(app);
+            host.loadNpc(409);
+            host.showNpc(409, true);
+            if (const cr::FieldNpc* n = findNpc(app, 409)) sx = n->shadow[1], sz = n->shadow[2], sp = n->shadow[3];
+            const int before = app.shadowsDrawn;
+            frame();
+            drawnNpc = app.shadowsDrawn - before;
+        }
+        check(sx == 3 && sz == 3 && sp == 80 && drawnNpc == 2, "a script-read NPC's shadow (d0650's 409: 3, 3, 80)");
+        std::printf("field render: d0650's script-read 409 shadow %d / %d / %d, shadows drawn %d (the leader's and its)\n", sx, sz, sp, drawnNpc);
+    }
     // The colours: read_mdl's models white and opaque, glColor alone; effects their own diffuse, no alpha test
     {
         int notWhite = 0, effMats = 0, effBad = 0, depthEffect = -1;
@@ -24716,6 +24740,9 @@ int runSelfTest(App& app) {
         key(SDLK_ESCAPE);
         c.listCursor = 2, key(SDLK_RETURN);                    // Remove: off at once
         chk(app.game.party[0].genes[1] != 0 || c.phase != App::Camp::Slot, "app.game.party[0].genes[1] != 0 || c.phase != App::Camp::Slot");
+        app.game.party[0].genes[1] = commonPlate, key(SDLK_RETURN); // a worn slot's list opens on what it wears (SetListPosFromItemNo)
+        chk(c.phase != App::Camp::List || c.listCursor != 1 || campScrollPx(app) != campui::kRowH, "the worn plate on the focus line, settled");
+        key(SDLK_ESCAPE), app.game.party[0].genes[1] = 0;
         app.game.party[0].genes[0] = 477;                      // another Human Genes: the slot opens on 474.., Remove last
         c.slot = 3, key(SDLK_RETURN);
         chk(c.phase != App::Camp::List || c.list != std::vector<int>{474, 475, campui::kRemove}, "c.phase != App::Camp::List || c.list != std::vector<int>{474, 475, campui::kRemove}");
@@ -28468,6 +28495,16 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         captureVars(app);
         for (const auto& [from, to] : app.captureItems)
             for (int i = from; i <= to; ++i) app.game.items[i] = std::max(1, ownedCount(app, i));
+        if (const char* w = SDL_getenv("CR_CAPTURE_WEAR")) { // "slot:item[,slot:item]": the leader's slots 0-2 gear, 3-6 genes
+            for (const char* q = w; *q;) {
+                const int slot = SDL_atoi(q), item = std::strchr(q, ':') ? SDL_atoi(std::strchr(q, ':') + 1) : 0;
+                cr::PartyMember& pm = app.game.party[size_t(campCharacter(app, 0))];
+                if (slot >= 0 && slot < 3) pm.equip[size_t(slot)] = item;
+                else if (slot >= 3 && slot < 7) pm.genes[size_t(slot - 3)] = item;
+                const char* comma = std::strchr(q, ',');
+                q = comma ? comma + 1 : q + std::strlen(q);
+            }
+        }
         const std::vector<int> numbers = cr::mapNumbersFor(mapName);
         if (app.captureArea >= 0 && !numbers.empty()) { // (the map number of that area's, when it has one)
             int pick = numbers[0];
@@ -29130,6 +29167,8 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
                 key(SDLK_RETURN);
             }
             if (v == "entries") key(SDLK_RETURN); // (the first plate's known entries, Back / OK under them)
+            if (const char* d = SDL_getenv("CR_CAPTURE_CAMP_DOWN")) // (tests: the list's focus that many rows down)
+                for (int k = SDL_atoi(d); k > 0; --k) { key(SDLK_DOWN); for (int f = 0; f < 8; ++f) stepCamp(app); }
             app.camp.anim = 100;
             campTrackPhase(app.camp);
             app.camp.phaseT = 100;
