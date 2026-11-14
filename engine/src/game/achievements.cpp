@@ -18,17 +18,6 @@ int ownedKinds(const GameState& gs, int first, int last) {
     return n;
 }
 
-// Add_Omu(0xdb): Ohm's childcare items 521..540 owned, each its step (3.1.0's table at 0xd1370,
-// Android's at 0xb07fc: the same), and var 0x28
-int ohmGrowth(const GameState& gs) {
-    static const int kStep[20] = {5, 5, 5, 5, 5, 15, 15, 15, 15, 15, 30, 30, 30, 30, 30, 40, 40, 40, 40, 40};
-    int v = 0;
-    for (int i = 0; i < 20; ++i)
-        if (owned(gs, 0x209 + i) != 0) v += kStep[i];
-    auto it = gs.vars.find(0x28);
-    return v + (it == gs.vars.end() ? 0 : it->second);
-}
-
 // GetSkillNumFromPlate(7..30): the entries known on the monsters' 24 plates (481..504; 144 in all)
 int platesLearned(const GameState& gs) {
     int n = 0;

@@ -72,6 +72,8 @@ void ensureStartingGenes(GameState& gs);
 // record), which can't be sold (MuScrList_GetSellNum), and a save from before the port did the same
 // brought in line
 int wornCount(const GameState& gs, int item);
+// Add_Omu(0xdb): Ohm's growth (items 521..540 owned, var 0x28) - item 219's Attack over its 50
+int ohmGrowth(const GameState& gs);
 void putWornInBag(GameState& gs, const ItemTable& items);
 
 } // namespace cr

@@ -75,9 +75,27 @@ bool hasSkill(const GameState& gs, int character, int skill) {
     return false;
 }
 
+// Add_Omu(0xdb): Ohm's childcare items 521..540 owned, each its step (3.1.0's table at 0xd1370,
+// Android's at 0xb07fc: the same), and var 0x28
+int ohmGrowth(const GameState& gs) {
+    static const int kStep[20] = {5, 5, 5, 5, 5, 15, 15, 15, 15, 15, 30, 30, 30, 30, 30, 40, 40, 40, 40, 40};
+    int v = 0;
+    for (int i = 0; i < 20; ++i) {
+        auto it = gs.items.find(0x209 + i);
+        if (it != gs.items.end() && it->second != 0) v += kStep[i];
+    }
+    auto it = gs.vars.find(0x28);
+    return v + (it == gs.vars.end() ? 0 : it->second);
+}
+
 int memberStat(const GameState& gs, int character, int stat, const ItemTable& items, int swap) {
     character = std::clamp(character, 0, kCharacters - 1);
     int v = maxStat(gs.party[size_t(character)], character, Stat(std::clamp(stat, 0, 5)), items, swap);
+    if (stat == kAttack) { // _GetItmPara(0xdb) rewrites Ohm's Attack (+8) on each read: Add_Omu + 50 over the
+        int weapon = gs.party[size_t(character)].equip[kWeapon]; // table's 50 (_param_equip_calc reads gear through it)
+        if (const ItemParam* p = items.item(swap); p && p->kind == kKindWeapon) weapon = swap;
+        if (weapon == 219) v += int16_t(ohmGrowth(gs));
+    }
     // pcparam_atk / grd / spd / lck: each reads its own three Gates' own column (175..177 Attack,
     // 178..180 Defense, 181..183 Speed, 184..186 Luck); pcparam_max_hp / mp consult no skill - the
     // Defense Gates' HP / MP columns in the item table go unread

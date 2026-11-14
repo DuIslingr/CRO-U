@@ -83,6 +83,7 @@ class EventHost {
 public:
     virtual ~EventHost() = default;
     virtual void showMessage(int /*id*/) {}
+    virtual int random(int /*n*/) { return -1; }       // expression op 18 (rand): _get_random(n); -1 none
     // Open (__EvtOpen): the message window's style byte (2 the parchment, 8 a tutorial's band,
     // 0x10 none, 0x20 the black band, 0x40 the grey panel) and its lines (1 picks the rect's
     // one-line place)

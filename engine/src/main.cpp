@@ -3673,6 +3673,7 @@ struct ViewerHost : cr::EventHost {
         app.soundLog.push_back(id);
     }
     void playMusic(uint32_t v) override { playBgm(app, v); app.soundLog.push_back(0x40000000u | v); }
+    int random(int n) override { return app.rng.get(n); } // (the scripts' rand(): _get_random, the one stream)
     void recoverPair() override { // pcparam_hpmp_recovery: the scenario's pair
         for (int c : app.game.pairs[size_t(std::clamp(app.game.scenario, 0, cr::kScenarios - 1))])
             if (c >= 0 && c < cr::kCharacters) { // (the most MP as it is now, a number - gear changed later
@@ -19594,6 +19595,17 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                     bad += !s0 || !s1;
                     std::printf("worn copies kept from selling: scenario 0 %s, scenario 1 %s\n", s0 ? "ok" : "WRONG", s1 ? "ok" : "WRONG");
                 }
+                { // _GetItmPara(0xdb): Ohm's Attack is Add_Omu + 50 - items 521.. owned (5 each at first) and var 0x28
+                    cr::GameState og;
+                    cr::giveStartingItems(og, app.itemTable);
+                    og.party[0].equip[cr::kWeapon] = 219;
+                    const int bare = cr::memberStat(og, 0, cr::kAttack, app.itemTable);
+                    og.items[521] = 1, og.items[522] = 1, og.vars[0x28] = 100;
+                    const int grown = cr::memberStat(og, 0, cr::kAttack, app.itemTable);
+                    const bool ok = grown - bare == 110;
+                    bad += !ok;
+                    std::printf("Ohm's Attack follows its growth: +%d %s\n", grown - bare, ok ? "ok" : "WRONG");
+                }
             }
             { // decompile checks: levels from 20 add 10 HP and 1 to the others (Omega's pcparam_change_lv),
               // seeds add 10 into that bonus, to 9999 (use_item, MuCom_GetUsedItemLimitNum), guests' Speed / Luck are their Defense, a monster
@@ -27594,6 +27606,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
     }
     app.showBackground = true;
     app.hideHud = SDL_getenv("CR_CAPTURE_HUD") == nullptr; // (CR_CAPTURE_HUD=1: as the build shows it)
+    if (const char* oz = SDL_getenv("CR_CAPTURE_OZ")) app.game.oz = SDL_atoi(oz); // (the purse the scripts' gold() reads)
     if (app.captureEvent >= 0) { // --event n: as if something in the room had started it
         app.pendingEntry = App::Entry::None;
         app.runner.stop();
@@ -27683,6 +27696,9 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             if (app.itemWindowOpen) app.game.setFlag(0, true);
         }
     }
+    if (SDL_getenv("CR_CAPTURE_OZ")) // (what a script's purchase left: Ohm's milk - the purse, var 40, var 41, flag 1644)
+        std::printf("after the run: %d oz, var 40 = %d, var 41 = %d, flag 1644 %s\n", app.game.oz, app.game.vars[40], app.game.vars[41],
+                    app.game.flag(1644) ? "set" : "clear");
     if (const char* sr = SDL_getenv("CR_CAPTURE_STAFF")) { // "mode:frames[:fast]": the staff roll, frames in
         int mode = 0, frames = 100, fast = 0;
         std::sscanf(sr, "%d:%d:%d", &mode, &frames, &fast);

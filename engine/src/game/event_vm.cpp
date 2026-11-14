@@ -28,6 +28,7 @@ struct EventRunner::Vm {
     const std::vector<uint8_t>& d;
     GameState& gs;
     int eventNo, area, map;
+    EventHost* host = nullptr; // (step's: rand() draws the game's stream through it)
     enum class Wait { None, Frames, Fade, Message, Npc, Choice, Logo, Window } wait = Wait::None;
     int waitFrames = 0, waitNpc = -1;
     bool waitBackFade = false; // Wait 0xFFFC: the back fade's end (op 58's channel)
@@ -90,20 +91,27 @@ struct EventRunner::Vm {
         case 14: { int32_t a = sub(), b = sub(); return a ? b % a : 0; }
         case 16: return int32_t(u32());
         case 17: return result;
-        case 18: { int32_t n = sub(); return n > 0 ? int32_t(eventNo * 7 % n) : 0; } // rand: deterministic here
+        case 18: { // rand (FUN_00022bdc): _get_random(n) on the game's one stream - Ohm's milk tier
+            const int32_t n = sub(); // (c101_t01 0x45ba), a puzzle's first-clear item (j001_p01 0x4acc);
+            if (n <= 0) return 0;    // without a host (dry runs) a fixed pick
+            const int r = host ? host->random(n) : -1;
+            return r >= 0 ? r : int32_t(eventNo * 7 % n);
+        }
         case 19: {
             const int n = sub();
             if (gVarTrace) gVarTrace(n, var(n));
             return var(n);
         }
-        case 20: {
-            const int n = flagIndex(sub());
+        case 20: { // (FUN_00022c74: 0..0x13ff only, unsigned - -1 / -2 read 0; only the setter names the NPC's flags)
+            const int n = sub();
+            if (n < 0 || n >= 0x1400) return 0;
             if (gFlagTrace) gFlagTrace(n, gs.flag(n));
             return gs.flag(n);
         }
         case 21: return int32_t(u32()); // label: a script address
         case 22: return arg(u8());
-        case 33: case 34: case 42: return 0; // __GOLD / __NAME / __GDS: stubs returning 0 in the binary too
+        case 33: return gs.oz; // __GOLD (FUN_00022d64): the scenario's purse - Ohm's milk (c101_t01 0x45ba)
+        case 34: case 42: return 0; // __NAME / __GDS: stubs returning 0 in the binary too
         case 38: { const int n = sub(); auto it = gs.items.find(n); return it != gs.items.end() && it->second > 0; } // __ITEM: owned?
         default:
             if (error.empty()) error = "bad expression op " + std::to_string(op);
@@ -120,7 +128,10 @@ struct EventRunner::Vm {
         case 19: { int n = eval(); if (n < -198) n += 317; gs.vars[n] = v; break; }
         case 20: gs.setFlag(flagIndex(eval()), v != 0); break;
         case 22: arg(u8()) = v; break;
-        case 33: case 34: case 42: break;
+        case 33: // __GOLD's setter (FUN_00023020): stored, then over 9,999,999 unsigned - a negative too - 9,999,999
+            gs.oz = uint32_t(v) > 9999999u ? 9999999 : v;
+            break;
+        case 34: case 42: break;
         case 38: { // ___ITEM: `item[-1] = n` gives item n, `item[-2] = n` takes one away
             const int n = eval();
             if (n == -1) { if (gs.items[v] < 99) ++gs.items[v]; } // (_add_item's 99)
@@ -270,6 +281,7 @@ bool EventRunner::startAt(const EventFile& file, uint32_t entry, int tag, GameSt
 bool EventRunner::step(EventHost* host) {
     if (!vm_) return false;
     Vm& vm = *vm_;
+    vm.host = host;
     EventResult& res = result_;
     GameState& state = vm.gs;
     const EventFile& file = vm.file;
