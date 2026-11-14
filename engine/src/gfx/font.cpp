@@ -96,6 +96,11 @@ bool Font::rasterise(const std::vector<std::string>& lines, float em, float line
     const float scale = stbtt_ScaleForMappingEmToPixels(&info, em);
     int ascent = 0, descent = 0, gap = 0;
     stbtt_GetFontVMetrics(&info, &ascent, &descent, &gap);
+    if (boxAscent_ != 0 || boxDescent_ != 0) { // (setLineBox: in the face's units)
+        const float upm = stbtt_ScaleForMappingEmToPixels(&info, 1) > 0 ? 1 / stbtt_ScaleForMappingEmToPixels(&info, 1) : 1000;
+        ascent = int(std::lround(boxAscent_ * upm)), descent = int(std::lround(boxDescent_ * upm));
+    }
+
     const float base0 = float(pad) + float(ascent) * scale;
 
     // Glyph indices per line ('?' for characters the face lacks), then the widest line

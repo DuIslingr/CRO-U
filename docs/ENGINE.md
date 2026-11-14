@@ -353,7 +353,8 @@ c101/c102/c104/m207a, 2026-10-12).
       `CR_CAPTURE_VARS=k:v,...` sets script variables (before the map's entry and before `--event`'s
       script); `CR_CAPTURE_AT=<address>` starts `--event`'s script at that address of the area's file instead;
       `CR_CAPTURE_OZ=n` fills the purse first and prints it, vars 40 / 41 and flag 1644 after the run (Ohm's milk: `--area 10 --event 422 CR_CAPTURE_AT=0x45ba`);
-      `CR_CAPTURE_STAFF=mode:n[:fast]` the staff roll n frames in; `CR_PUZZLE_POINTS=1` prints where taps find each puzzle object - its top, in the frame's pixels; `CR_CAPTURE_PRESS=fx,fy` holds a touch there - fractions of the frame - for the held looks)
+      `CR_CAPTURE_STAFF=mode:n[:fast]` the staff roll n frames in; `CR_CAPTURE_TITLE_TAP=1` (with `--title --frames n`) taps the title once its menu is up - the plates slid in;
+ `CR_PUZZLE_POINTS=1` prints where taps find each puzzle object - its top, in the frame's pixels; `CR_CAPTURE_PRESS=fx,fy` holds a touch there - fractions of the frame - for the held looks)
 - [x] New game: the opening plays as the original's script stages it (a 3D room filmed by the
       script camera: cuts and moves between shots, framed as `setCamera3D` does - the stage view
       doubled and centred, so the screen shows its middle), then the hall's characters can be talked

@@ -1948,6 +1948,10 @@ int triggerAt(const App& app, const cr::Vec3& p);
 void showMessages(App& app, const std::vector<int>& ids);
 float androidEdgeX(const App& app);
 float androidEdgeY(const App& app);
+float vitaEdgeX(const App& app);
+float vitaEdge43(const App& app);
+float vitaLeft(const App& app);
+float vitaRight(const App& app);
 void drawItemWindow(App& app);
 bool checkTriggers(App& app, bool instant = false);
 bool interact(App& app, bool instant = false);
@@ -2581,7 +2585,30 @@ bool cjkLanguage(int language) { return language == 0 || language >= 5; }
 void applyLanguage(App& app) {
     if (!languageUsable(app, app.language)) app.language = 1;
     static const char* const kRegion[cr::kLanguages] = {"JP", "JP", "JP", "JP", "JP", "SC", "TC", "KR"};
+    // The Vita copy as the game: its own faces, as its scePvf draws them (resources/font: TB Gothic Pro B for
+    // Japanese and the Latin languages, DFHeiW9-GB for Simplified Chinese, DFLiHei-Md for Traditional,
+    // DFKMincho-Bd for Korean); the system's (Noto) when the copy has none or CR_FONT picks one
+    if (app.vitaOnly && !SDL_getenv("CR_FONT")) {
+        static const char* const kVitaFace[cr::kLanguages] = {"TBGoPro-Bold.otf", "TBGoPro-Bold.otf", "TBGoPro-Bold.otf",
+                                                              "TBGoPro-Bold.otf", "TBGoPro-Bold.otf", "DFGB_H9.TTC",
+                                                              "DFT_C5.ttc",       "DFMINBD.TTF"};
+        const std::string want = app.vitaRoot + "/resources/font/" + kVitaFace[std::clamp(app.language, 0, cr::kLanguages - 1)];
+        if (app.font.path() == want && app.font.loaded()) { app.menu.setMenuFont(multilingualData(app) && !cjkLanguage(app.language) ? 13.0f : 14.0f); return; }
+        if (app.font.load(want)) {
+            SDL_Log("font: %s", want.c_str());
+            // (in Noto Sans CJK's line box - hhea 1.16 / -0.288 em -, which the port's text places were set
+            // with: the glyphs' baselines where they were)
+            app.font.setLineBox(1.16f, -0.288f);
+
+            app.menu.setMenuFont(multilingualData(app) && !cjkLanguage(app.language) ? 13.0f : 14.0f);
+            return;
+        }
+        if (!app.font.loaded()) cr::loadSystemFont(app.font);
+        app.font.setLineBox(0, 0);
+    }
+
     app.font.selectRegion(kRegion[app.language]);
+
     app.menu.setMenuFont(multilingualData(app) && !cjkLanguage(app.language) ? 13.0f : 14.0f);
 }
 
@@ -5217,6 +5244,18 @@ float androidEdgeY(const App& app) {
     const cr::Renderer& r = app.renderer;
     return r.androidScreen() ? (64 - r.layoutTop()) / 2 : 0.0f; // (tex2d y 0 is layout y 64)
 }
+// The Vita layout's edge groups: the Vita draws the iPhone's 480 x 320 screen at 0.85 x 2 on its 960 x
+// 544 one - 564.7 tex2d units across - and moves the pieces meant for the screen's edges out by a fixed
+// 43.352966 tex2d (24 sites in its decomp: __menub_mainPut's badge and rows left, the command plates
+// right; __menuf_mainPut's corner, '!' and puzzle panel; _PutMsg's skip button and next mark; _PrcMsg's
+// skip tap) or by a whole 43 in its tables and constants (the choice plates 328 -> 371, Back 192 -> 235,
+// HELP 144 -> 187, the clock board, the scroll lists' table 0x8110d5fc) - the left-hand pieces left,
+// the right-hand ones right, so each group meets the screen's edge. 0 in the other layouts
+float vitaEdgeX(const App& app) { return app.renderer.vitaScreen() ? 43.352966f : 0.0f; }
+float vitaEdge43(const App& app) { return app.renderer.vitaScreen() ? 43.0f : 0.0f; }
+// The left / right groups' origins with the Vita's whole-number shift (layout units: 2 a tex2d unit)
+float vitaLeft(const App& app) { return wideLeft(app) - 2 * vitaEdge43(app); }
+float vitaRight(const App& app) { return wideRight(app) + 2 * vitaEdge43(app); }
 // A logical point in menu units of the group drawn from `origin`
 void menuPointAt(const App& app, float lx, float ly, float origin, float& mx, float& my) {
     mx = (lx - origin) / 2, my = ly / 2;
@@ -5960,14 +5999,18 @@ void drawSaveScreen(App& app) {
     r.setOrigin(wideRight(app));
     if (ss.load && ss.haveSave) drawSaveDate(app, m, ss.data, a, 0);
     if (ss.phase == 0) { // the plates at (328, 136 + 48 x which): the last battle, Load, New
+        // (the Vita's SaveLoadPut: the plates at 0x173 and Back at 0xeb = 235 - 43 to the right; vita decomp 79864-79870)
         const std::vector<int> plates = savePlates(app);
         static const int kWord[3] = {4, 7, 6};
+        r.setOrigin(vitaRight(app));
         for (size_t i = 0; i < plates.size(); ++i)
             m.plate(328, 136 + 48.0f * float(plates[i]), plateIcon(kWord[plates[i]]), kWord[plates[i]],
-                    (ss.cursor == int(i) && !app.pointerLast) || pressIn(app, kPressSave, wideRight(app), 328, 136 + 48.0f * float(plates[i]), 136, 40),
+                    (ss.cursor == int(i) && !app.pointerLast) || pressIn(app, kPressSave, vitaRight(app), 328, 136 + 48.0f * float(plates[i]), 136, 40),
                     a, false); // (window 3; the icon is the word's: ComUty_ChoicePlateDraw; lit while held: DAT_000ecca0)
+        const float bo = app.renderer.uiX() + 2 * vitaEdge43(app);
+        r.setOrigin(bo);
+        m.backBar(192, 288, pressIn(app, kPressSave, bo, 192, 288, 232, 24), a); // (Omega's ComUty_BackButtonDraw mode 1: CmdBack at (192, 288), no arrows; lit while held)
         r.setOrigin(r.uiX());
-        m.backBar(192, 288, pressIn(app, kPressSave, app.renderer.uiX(), 192, 288, 232, 24), a); // (Omega's ComUty_BackButtonDraw mode 1: CmdBack at (192, 288), no arrows; lit while held)
     } else { // SaveLoadPut, in every layout (Omega's iPad screen is the iPhone's doubled): the message
         // board (ComUty_MsgBoardDraw, picture 12) at (0, 220), lines from (24, 234); Yes / No the
         // plates at window 6 + (336, 104) / (336, 160) (ComUty_YesNoChoiceDraw)
@@ -6051,6 +6094,7 @@ void saveScreenClick(App& app, float px, float py) {
     float mx, my, rx;
     menuPoint(app, lx, ly, mx, my);
     menuPointAt(app, lx, ly, wideRight(app), rx, my); // (widescreen: the plates on the right)
+    const float v43 = vitaEdge43(app); // (the Vita's plates and Back 43 to the right, its Yes / No not)
     if (ss.phase == 2) { ss.timer = 1000; return; }
     if (ss.phase == 1) {
         // the plates (0x88 x 0x28) where drawSaveScreen puts them in every layout: (336, 104) / (336, 160)
@@ -6060,8 +6104,10 @@ void saveScreenClick(App& app, float px, float py) {
         return;
     }
     const std::vector<int> plates = savePlates(app);
+    rx -= v43, mx -= v43;
     for (size_t i = 0; i < plates.size(); ++i) { // _pad_chk_updw_box(328, 136 + 48k, 136, 40)
         const float py0 = 136 + 48.0f * float(plates[i]);
+
         if (rx >= 328 && rx < 464 && my >= py0 && my < py0 + 40) { saveScreenChoose(app, int(i)); return; }
     }
     const float backY = 288; // Omega's ComUty_BackButtonDraw: (192, 288)
@@ -6540,7 +6586,8 @@ void drawScrGauge(cr::MenuPainter& m, float x, float y, float len, int n, float 
 }
 
 // A touch held on the shop (shopClick's units: cx the centre group, rx the right-hand one) inside a box
-bool shopPressIn(const App& app, bool right, float x, float y, float w, float h) {
+// (shift: the Vita's - its plates, list and Back 43 further right, vitaEdge43; the count and Yes / No not)
+bool shopPressIn(const App& app, bool right, float x, float y, float w, float h, float shift = 0) {
     if (!app.press.down || app.press.screen != kPressShop) return false;
     float lx, ly;
     app.renderer.toLogical(app.press.px, app.press.py, lx, ly);
@@ -6548,7 +6595,7 @@ bool shopPressIn(const App& app, bool right, float x, float y, float w, float h)
     float cx = (lx - uiX) / 2, rx = (lx - rightX) / 2, my = ly / 2;
     phoneMenuPoint(app, cx, my);
     if (app.renderer.phoneLayout()) rx -= 16;
-    const float px = right ? rx : cx;
+    const float px = (right ? rx : cx) - shift;
     return px >= x && px < x + w && my >= y && my < y + h;
 }
 
@@ -6560,13 +6607,18 @@ void drawShop(App& app) {
     m.begin(r, app.windowTex, &app.font);
     const PhoneMenu phoneMenu(app, m); // the iPhone layout: its screen's menu coordinates
     if (s.phase == App::Shop::Talk) { // the shopkeeper's scene: ShopPrc 2 takes windows 1 - 5 off, "Shop" (window 0)
-        r.setOrigin(wideLeft(app));      // stays over it (Part 12 2142-2184 s: "Shop" over Piu-Piu's talk)
+        r.setOrigin(vitaLeft(app));      // stays over it (Part 12 2142-2184 s: "Shop" over Piu-Piu's talk)
         m.picture(97, 8, 4, 1);
         r.setOrigin(r.uiX());
         return;
     }
     const float a = std::min(1.0f, float(s.anim + 1) / 6.0f), slide = (1 - a) * (1 - a);
-    const float leftEdge = wideLeft(app), centre = r.uiX(), rightEdge = wideRight(app); // origins (the screen's edges inside the safe area)
+    const float centre = r.uiX(), rightEdge = wideRight(app); // origins (the screen's edges inside the safe area)
+    // The Vita's ShopPut (FUN_81069566): the left group - "Shop" (-35, 4), the labels at -31 / -3, pictures 15 / 16 at
+    // (-43, 56) / (-19, 72), the shopkeeper at (-43, 64), the state board at -31 - 43 to the left; the plates at
+    // 0x173, the list (its table: x 235, the gauge 499), HELP and Back 43 to the right; the Oz bar, the count and
+    // Yes / No where 3.1.0 has them
+    const float v = vitaEdge43(app), vitaL = vitaLeft(app), vitaR = vitaRight(app);
     const bool list = s.phase == App::Shop::List;
     const bool asking = s.phase == App::Shop::Count || s.phase == App::Shop::EquipAsk;
     const bool board = list && shopEquipment(app);
@@ -6576,7 +6628,7 @@ void drawShop(App& app) {
     constexpr float kFont = 13;
 
     // Left: the shopkeeper (or the character's board), the heading and the section labels
-    r.setOrigin(leftEdge);
+    r.setOrigin(vitaL);
     if (s.keeper.id && !list && !board) // window 3: tex 10's (1, 3), 256 x 256 at (0, 64) (Part 4 1173.5 s)
         r.drawQuad(s.keeper, (16 + 0 - 240 * slide) * 2, (32 + 64) * 2, 256 * 2, 256 * 2, 1, 1, 1, 1);
     if (board) drawShopBoard(app, 12 - 200 * slide, 92, shopCharacter(app), s.selling ? 0 : item, a);
@@ -6595,25 +6647,27 @@ void drawShop(App& app) {
     }
 
     // Right: Oz, the plates, the list, the count and Yes / No
-    r.setOrigin(rightEdge);
+    r.setOrigin(vitaR);
     if (list && !s.list.empty()) drawHelpWindow(app, m, item, a); // HELP: the cursor's item
+    r.setOrigin(rightEdge);
     m.picture(156, 316, 0, 1); // the Oz bar (ComUty_OzDraw: 0x9c)
     drawShopNumber(m, app.game.oz, 362, 0, 9, 12, 1);
+    r.setOrigin(vitaR);
     if (s.phase == App::Shop::Main)
         for (int i = 0; i < 3; ++i)
             m.plate(328 + 240 * slide, 144 + 48.0f * float(i), kMainIcons[i], kMainWords[i],
-                    (s.cursor == i && !app.pointerLast) || shopPressIn(app, true, 328, 144 + 48.0f * float(i), 136, 40), a, false);
+                    (s.cursor == i && !app.pointerLast) || shopPressIn(app, true, 328, 144 + 48.0f * float(i), 136, 40, v), a, false);
     if (s.phase == App::Shop::Category)
         for (int i = 0; i < categories(app); ++i) {
             const float cy = (categories(app) == 5 ? 48 : 96) + 48.0f * float(i);
             m.plate(328 + 240 * slide, cy, kCategoryIcons[i], kCategoryWords[i],
-                    (s.category == i && !app.pointerLast) || shopPressIn(app, true, 328, cy, 136, 40), a, false);
+                    (s.category == i && !app.pointerLast) || shopPressIn(app, true, 328, cy, 136, 40, v), a, false);
         }
     if (s.phase == App::Shop::Member) // __CharChoiceDraw: window 9, the pair at (328, 176 + 56k) (Part 8 3475 s)
         for (int k = 0; k < campMembers(app); ++k) {
             const int word = memberWord(app, campCharacter(app, k));
             m.plate(328 + 240 * slide, 176 + 56.0f * float(k), plateIcon(word), word,
-                    (s.member == k && !app.pointerLast) || shopPressIn(app, true, 328, 176 + 56.0f * float(k), 136, 40), a, false);
+                    (s.member == k && !app.pointerLast) || shopPressIn(app, true, 328, 176 + 56.0f * float(k), 136, 40, v), a, false);
         }
     if (list) {
         const int n = int(s.list.size());
@@ -6665,6 +6719,7 @@ void drawShop(App& app) {
         m.clearClip();
         drawScrGauge(m, kGaugeX, kGaugeY, kGaugeLen, n, scroll, kRowH, std::min(s.bob, 4), a);
     }
+    r.setOrigin(rightEdge);
     if (asking && item > 0) {
         if (s.phase == App::Shop::Count) {
             m.picture(98, 312, 40, 1); // PRICE and the total
@@ -6690,11 +6745,11 @@ void drawShop(App& app) {
             app.systemText.message(57046, app.language, [&](int) { return ownedCount(app, item); }, have) && !have.empty() &&
             !have[0].empty())
             m.text(have[0][0], 24, 250, false, 1, kFont);
-    } else if (list && shopEquipment(app)) {
-        m.backButton(kBackX, kBackY, shopPressIn(app, false, kBackX + 51, kBackY, 130, 24) ? 1 : shopPressIn(app, false, kBackX + 181, kBackY, 51, 24) ? 2
-                                     : shopPressIn(app, false, kBackX, kBackY, 51, 24) ? 3 : 0, s.bob, a); // ComUty_CmdBack 2: < Back >
+    } else if (list && shopEquipment(app)) { // (the Vita's at 235: 43 right)
+        m.backButton(kBackX + v, kBackY, shopPressIn(app, false, kBackX + 51, kBackY, 130, 24, v) ? 1 : shopPressIn(app, false, kBackX + 181, kBackY, 51, 24, v) ? 2
+                                     : shopPressIn(app, false, kBackX, kBackY, 51, 24, v) ? 3 : 0, s.bob, a); // ComUty_CmdBack 2: < Back >
     } else {
-        m.backBar(kBackX, kBackY, shopPressIn(app, false, kBackX, kBackY, 232, 24), a); // (lit while held: DAT_000ec80c)
+        m.backBar(kBackX + v, kBackY, shopPressIn(app, false, kBackX, kBackY, 232, 24, v), a); // (lit while held: DAT_000ec80c)
     }
     const char* help = s.phase == App::Shop::Count     ? "Left/Right: 1  Shift: 10  Up/Down: Yes / No  Enter  Esc"
                        : s.phase == App::Shop::EquipAsk ? "Up/Down  Enter  Esc: no"
@@ -6771,10 +6826,19 @@ void shopClick(App& app, float px, float py) {
     if (app.renderer.phoneLayout()) rx -= 16;
     using shopui::kBackX;
     using shopui::kBackY;
+    // (the Vita: the plates, the list and Back 43 to the right - FUN_81069566's 0x173, its list table's 235, Back 235;
+    // the count and Yes / No not: rxYes)
+    const float rxYes = rx;
+    cx -= vitaEdge43(app), rx -= vitaEdge43(app);
     const bool onBack = my >= kBackY && my < kBackY + 24 && cx >= kBackX && cx < kBackX + 232;
     auto plateAt = [&](float x0, float y0, float step, int n) {
         for (int i = 0; i < n; ++i)
             if (rx >= x0 && rx < x0 + 136 && my >= y0 + step * i && my < y0 + 40 + step * i) return i;
+        return -1;
+    };
+    auto yesNoAt = [&](float x0, float y0, float step, int n) {
+        for (int i = 0; i < n; ++i)
+            if (rxYes >= x0 && rxYes < x0 + 136 && my >= y0 + step * i && my < y0 + 40 + step * i) return i;
         return -1;
     };
     switch (s.phase) {
@@ -6824,12 +6888,13 @@ void shopClick(App& app, float px, float py) {
     }
     case App::Shop::Count:
         // (the count's < >: stepped while held - pressCountStep -, not on the lift)
-        if (my >= 60 && my < 91 && ((rx >= 336 && rx < 372) || (rx >= 436 && rx < 472))) {}
-        else if (const int i = plateAt(336, 104, 56, 2); i == 0) shopPay(app);
+        if (my >= 60 && my < 91 && ((rxYes >= 336 && rxYes < 372) || (rxYes >= 436 && rxYes < 472))) {}
+        else if (const int i = yesNoAt(336, 104, 56, 2); i == 0) shopPay(app);
         else if (i == 1) shopBack(app);
         break;
     case App::Shop::EquipAsk:
-        if (const int i = plateAt(336, 104, 56, 2); i == 0) shopEquip(app);
+        if (const int i = yesNoAt(336, 104, 56, 2); i == 0) shopEquip(app);
+
         else if (i == 1) shopBack(app);
         break;
     default: break;
@@ -6921,7 +6986,11 @@ int batteryPicture() {
 }
 
 void drawClockAndOz(App& app, cr::MenuPainter& m, float a) {
-    m.picture(batteryPicture(), 335, 9, a);
+    // The Vita's (vita decomp 75033): no battery; the clock at (0x196, 8), OZ (picture 0x48) at (0x171, 0x18),
+    // its digits at (0x195, 0x1a) and line (0x4a) at (0x195, 0x24) - 3.1.0's places 43 to the right
+    const float vx = vitaEdge43(app);
+    if (!app.renderer.vitaScreen()) m.picture(batteryPicture(), 335, 9, a);
+
     const time_t now = time(nullptr);
     struct tm tm {};
 #ifdef _WIN32
@@ -6929,18 +6998,18 @@ void drawClockAndOz(App& app, cr::MenuPainter& m, float a) {
 #else
     localtime_r(&now, &tm);
 #endif
-    m.picture(71, 363, 8, a);
+    m.picture(71, (363 + vx), 8, a);
     const int digit[4] = {tm.tm_hour / 10, tm.tm_hour % 10, tm.tm_min / 10, tm.tm_min % 10};
     static const float kAt[4] = {0, 12, 36, 48};
     for (int i = 0; i < 4; ++i)
-        if (i || digit[0]) drawShopNumber(m, digit[i], 363 + 47 + kAt[i], 6, 1, 12, a);
+        if (i || digit[0]) drawShopNumber(m, digit[i], (363 + vx) + 47 + kAt[i], 6, 1, 12, a);
     // (__ComUty_RealTimeDraw: the colon while its own count, one a frame, is under 20 of 40 - a second on,
     // a second off at 20 Hz; Part 5 207-215 s: on 208.46-209.42, off to 210.44, on to 211.52, ...)
-    if (SDL_GetTicks() / 1000 % 2 == 0) m.picture(75, 363 + 71, 6, a);
-    m.picture(74, 363 + 36, 16, a);
-    m.picture(72, 326, 24, a);
-    drawShopNumber(m, app.game.oz, 362, 26, 9, 12, a);
-    m.picture(74, 362, 36, a);
+    if (SDL_GetTicks() / 1000 % 2 == 0) m.picture(75, (363 + vx) + 71, 6, a);
+    m.picture(74, (363 + vx) + 36, 16, a);
+    m.picture(72, 326 + vx, 24, a);
+    drawShopNumber(m, app.game.oz, 362 + vx, 26, 9, 12, a);
+    m.picture(74, 362 + vx, 36, a);
 }
 
 // ComUty_FaceBoardDraw at (x, y): the face (29 + n), the board (28) and the name (37 + n and the
@@ -6949,6 +7018,9 @@ void drawClockAndOz(App& app, cr::MenuPainter& m, float a) {
 void drawFaceBoard(App& app, cr::MenuPainter& m, float x, float y, int c, int hp, int hpMax, int mp, int mpMax, float a,
                    const cr::GameState* gs) {
     c = std::clamp(c, 0, cr::kCharacters - 1);
+    // (the Vita's four callers - TitlePut, CampMainPut, SaveLoadPut, MbResultPut - put the boards at y 0x19 +
+    // 0x58k, 3.1.0's at 0x18 + 0x58k: vita decomp 89339, 68524, 79839, 63332)
+    if (app.renderer.vitaScreen()) y += 1;
     const cr::PartyMember& pm = (gs ? *gs : app.game).party[size_t(c)];
     m.picture(28, x + 8, y + 24, a);
     m.picture(37 + c, x + 136, y + 24, a);
@@ -7751,6 +7823,10 @@ void campClick(App& app, float px, float py) {
     menuPointAt(app, lx, ly, app.renderer.uiX(), cx, my);
     menuPointAt(app, lx, ly, wideLeft(app), lx0, my);
     menuPointAt(app, lx, ly, wideRight(app), rx, my);
+    // (the Vita's CampMainPut / Prc: the plates at 0x173, the list (its table's 235) and Back (235) 43 to the right;
+    // the count and Yes / No where 3.1.0 has them: rxYes)
+    const float rxYes = rx;
+    rx -= vitaEdge43(app), cx -= vitaEdge43(app);
     float mx = rx;
     auto in = [&](float x, float y, float w, float h) { return mx >= x && mx < x + w && my >= y && my < y + h; };
     auto inAt = [&](float at, float x, float y, float w, float h) { return at >= x && at < x + w && my >= y && my < y + h; };
@@ -7820,6 +7896,7 @@ void campClick(App& app, float px, float py) {
     }
     if (c.phase == App::Camp::Ask) {
         const int item = c.list.empty() ? 0 : c.list[size_t(c.listCursor)];
+        mx = rxYes;
         if ((in(336, 60, 36, 31) || in(436, 60, 36, 31)) && item >= 3 && item <= 6) {} // (stepped while held: pressCountStep)
         else if (in(336, 104, 136, 40)) { c.confirm = 0; campChoose(app); }
         else if (in(336, 160, 136, 40)) { c.confirm = 1; campChoose(app); }
@@ -7829,7 +7906,7 @@ void campClick(App& app, float px, float py) {
 void campPointerPoint(const App& app, float px, float py, float& mx, float& my) {
     float lx, ly;
     app.renderer.toLogical(px, py, lx, ly);
-    menuPointAt(app, lx, ly, wideRight(app), mx, my);
+    menuPointAt(app, lx, ly, vitaRight(app), mx, my); // (the Vita's lists 43 to the right)
 }
 // A touch held inside a Camp box (menu units of the group drawn from `origin`): 3.1.0 lights the control
 // while _pad_chk_updw_box finds the finger on it (not once it drags a list)
@@ -8015,8 +8092,14 @@ void drawGeneBoard(App& app, cr::MenuPainter& m, float x, float y, int plate, fl
     if (mode == 2) {
         if (art.id) { // the picture, within 128 x 128 (the iPhone sheet's size)
             const float w = float(art.width), h = float(art.height), k = std::min(1.0f, std::min(128 / std::max(w, 1.0f), 128 / std::max(h, 1.0f)));
+            // (the Vita: gene_nn read by _MuCom_MctTexRead - kind 3, full size: the pictures' layer)
+            cr::Renderer& rr = app.renderer;
+            const int keep = rr.layer();
+            if (rr.vitaScreen()) rr.setLayer(3);
             m.image(art, x + 12, y + 68, w * k, h * k, a);
+            rr.setLayer(keep);
         }
+
         return;
     }
     float ly = y + 75;
@@ -8047,7 +8130,9 @@ void drawPuzzleHud(App& app, float a) {
     };
     const float dark[4] = {0, 0, 0, float(0xb8) / 255.0f * a};
     app.renderer.setOrigin(wideLeft(app)); // (widescreen: the panel in the screen's corner)
-    m.setOffset(-androidEdgeX(app), -androidEdgeY(app)); // (Android's _menuf_mainPut: the phone's top left)
+    // (Android's _menuf_mainPut: the phone's top left; the Vita's, its panel at x - 43.352966: vita decomp 64384-64430)
+    m.setOffset(-androidEdgeX(app) - vitaEdgeX(app), -androidEdgeY(app));
+
     m.quad(16, 12 + 32, 80, 36, dark, dark);
     const int esp = pz.esp < 0 ? -1 : std::max(0, pz.esp - (pz.pkState == 2 && pz.pkMoved));
     if (esp < 0) piece(4, 16, 792, 58, 72, 28);
@@ -8159,7 +8244,9 @@ void openStaffRoll(App& app, int mode) {
     st.open = true;
     st.mode = std::clamp(mode, 0, 2);
     st.phone = app.renderer.phoneLayout();
-    st.edgeX = androidEdgeX(app), st.edgeY = androidEdgeY(app);
+    // (the Vita's fast button (picture 115) at (487, 0) and its hold box at 0x1e7 - the iPhone's 444 + 43:
+    // vita decomp 8110d828, 87245)
+    st.edgeX = androidEdgeX(app) + vitaEdge43(app), st.edgeY = androidEdgeY(app);
     staffFade(st, app.game.scenario == 0, 1, 1, 1); // SetFade(colour, 0, 255, 1): covered
     for (int i = 0; i < kShown; ++i)
         st.lines[i] = App::StaffRoll::Line{staffLine(app, i).size() >= 3, lineStart(st) + 20.0f * float(i), i};
@@ -8243,12 +8330,19 @@ void drawStaffRoll(App& app) {
     m.begin(r, app.windowTex, &app.font);
     {
         const PhoneMenu phoneMenu(app, m);
+        // (the Vita: EndBack read by _MuCom_MctTexRead - kind 3, full size: the pictures' layer)
+        const int keepLayer = r.layer();
+        if (r.vitaScreen()) r.setLayer(3);
         if (st.win[0] > 0) outPicture(m, st.tex, 12, -16, st.picY + (st.phone ? -st.edgeY : -32), st.win[0]);
+        r.setLayer(keepLayer);
         if (st.win[3] > 0)
             for (const auto& l : st.lines)
                 if (l.on) m.text(staffLine(app, l.entry), 16, float(int(l.y)), false, st.win[3], 13);
         if (st.win[2] > 0) m.picture(115, st.phone ? 444 + st.edgeX : 460, st.phone ? -st.edgeY : -32, st.win[2]); // the fast button (Android: + ex, - ey)
+        if (r.vitaScreen()) r.setLayer(3);
         if (st.mode == 0 && st.win[4] > 0 && st.endAlpha > 0) outPicture(m, st.endTex, 14, 176, 128, st.win[4] * float(st.endAlpha) / 255);
+        r.setLayer(keepLayer);
+
     }
     r.setOrigin(0);
     if (st.fade > 0) {
@@ -8394,7 +8488,12 @@ void drawLastBattle(App& app) {
     }
     if (lb.win[2] > 0 && lb.tex.id) { // sheet 1 picture 5: (0, 0, 256, 256) at (0, 64)
         const float dx = -240 * (1 - ease(lb.win[2]));
+        // (the Vita: hi / mizu / kaze / mu read by _MuCom_MctTexRead - kind 3, full size: the pictures' layer)
+        const int keep = r.layer();
+        if (r.vitaScreen()) r.setLayer(3);
         m.imagePiece(lb.tex, dx, 64, 0, 0, 256, 256, lb.win[2]);
+        r.setLayer(keep);
+
     }
     r.setOrigin(wideRight(app));
     if (lb.win[3] > 0)
@@ -8703,8 +8802,13 @@ void drawWorldSelect(App& app) {
     auto dx = [&](int w) { return ws.fromX[w] * (1 - ease(ws.win[w])); };
     auto dy = [&](int w) { return ws.fromY[w] * (1 - ease(ws.win[w])); };
     const int mapIx = std::clamp(ws.world - wldsel::firstWorld(ws.pair), 0, 6);
-    if (ws.win[1] > 0 && ws.maps[mapIx].id) // the world's picture
+    if (ws.win[1] > 0 && ws.maps[mapIx].id) { // the world's picture
+        // (the Vita: read by _MuCom_MctTexRead - kind 3, full size: the pictures' layer)
+        const int keep = r.layer();
+        if (r.vitaScreen()) r.setLayer(3);
         m.image(ws.maps[mapIx], dx(1) + ox, dy(1) + 64 + oy, 256, 256, ws.win[1]); // (the whole sheet: the _hd one is 512 square)
+        r.setLayer(keep);
+    }
     if (ws.win[0] > 0) m.picture(0, dx(0) + 8 + ox, dy(0) + 4 + oy, ws.win[0]);
     if (ws.win[2] > 0) { // (the labels as the camp's: FontDisp's y the line box's top)
         m.picture(15, dx(2) + ox, dy(2) + 56 + oy, ws.win[2]);
@@ -8743,9 +8847,9 @@ void drawWorldSelect(App& app) {
         ownPlace(false);
         const bool ph = app.renderer.phoneLayout(); // (lit while held: the box worldSelectClick tests)
         m.backBar(wldsel::kBackX + dx(w), wldsel::kBackY,
-                  pressIn(app, kPressWorld, wideRight(app), wldsel::kBackX - (ph ? 16 : 0), wldsel::kBackY - (ph ? 32 : 0), 232, 24), a);
+                  pressIn(app, kPressWorld, vitaRight(app), wldsel::kBackX - (ph ? 16 : 0), wldsel::kBackY - (ph ? 32 : 0), 232, 24), a);
     };
-    r.setOrigin(wideRight(app));
+    r.setOrigin(vitaRight(app)); // (the Vita: its list table's x 235 and Back 235 - 43 to the right; Yes / No not)
     if (ws.win[6] > 0) // the gates
         list(6, int(ws.worlds.size()), [&](int i) { return sysText(app, 58002 + ws.worlds[size_t(i)]); });
     if (ws.win[7] > 0) // the level bands
@@ -8808,6 +8912,8 @@ void worldSelectClick(App& app, float px, float py) {
     menuPointAt(app, lx, ly, wideRight(app), mx, my); // (widescreen: the lists and Yes / No on the right)
     auto in = [&](float x, float y, float w, float h) { return mx >= x && mx < x + w && my >= y && my < y + h; };
     if (ws.state == 1 || ws.state == 6) {
+        mx -= vitaEdge43(app); // (the Vita's list and Back 43 to the right)
+
         const bool phone = phoneMenus(app); // (Back: tex2d + (16, 32) already, see drawWorldSelect)
         if (in(kBackX - (phone ? 16 : 0), kBackY - (phone ? 32 : 0), 232, 24)) {
             if (ws.state == 1) worldSelectChoose(app, -1);
@@ -9024,7 +9130,9 @@ int fieldRoute(const App& app) { return std::clamp(app.game.scenario, 0, cr::kSc
 // Prc and kganMfMainButtonPosTbl)
 // The corner button and the bar's offset from the iPad's places: the iPhone's (444, 4) corner; on
 // Android (SetFldMenu, _menuf_mainPut / Prc) + ex, - ey - the phone's top right, taps with them
-float fieldDx(const App& app) { return app.renderer.phoneLayout() ? -16.0f + androidEdgeX(app) : 0.0f; }
+// The Vita's (its __menuf_mainPrc's table 0x8110b114): the corner (487, 4) and the bar's places, Camp (459, 64),
+// Save (411, 8), Map (339, 8), encounters (267, 8) - the iPhone's 43 to the right; the corner's box at 0x1e3
+float fieldDx(const App& app) { return app.renderer.phoneLayout() ? -16.0f + androidEdgeX(app) + vitaEdge43(app) : 0.0f; }
 float fieldDy(const App& app) { return app.renderer.phoneLayout() ? 32.0f - androidEdgeY(app) : 0.0f; }
 
 bool fieldMenuWanted(const App& app) { // the field, the player free to walk
@@ -9140,7 +9248,8 @@ void drawFieldMenu(App& app) {
     m.begin(r, app.windowTex, &app.font);
     const bool phone = app.renderer.phoneLayout();
     const float ex = androidEdgeX(app), ey = androidEdgeY(app); // (Android: the phone's corners)
-    if (const int u = fieldLowBattery(); u >= 0) { // (Android: - ex, - ey)
+    // (the Vita's __menuf_mainPut draws no low battery)
+    if (const int u = app.renderer.vitaScreen() ? -1 : fieldLowBattery(); u >= 0) { // (Android: - ex, - ey)
         r.setOrigin(wideLeft(app));
         m.piece(phone ? 16.0f - ex : 0.0f, phone ? 32.0f - ey : 0.0f, float(u), 206, 21, 11, 1);
     }
@@ -9148,12 +9257,14 @@ void drawFieldMenu(App& app) {
     const float a = 1;
     if (fieldBattleButton(app)) { // __menuf_mainPut: window piece (656, 400) at tex2d (-8, -20) / (8, 12) (Android - ex, - ey)
         r.setOrigin(wideLeft(app));
-        m.piece(-8 + 16 + (phone ? 16.0f - ex : 0.0f), -20 + 32 + (phone ? 32.0f - ey : 0.0f), 656, 400, 48, 32, a);
+        // (the Vita: at (8 - 43.352966, 12) - vita decomp 64277)
+        m.piece(-8 + 16 + (phone ? 16.0f - ex - vitaEdgeX(app) : 0.0f), -20 + 32 + (phone ? 32.0f - ey : 0.0f), 656, 400, 48, 32, a);
     }
     drawTouchPad(app, a);
     r.setOrigin(wideRight(app)); // (widescreen: in the screen's corner)
     const bool bar = f.open || f.anim > 0; // the corner at tex2d (460, -28), the iPhone's (444, 4) (0x3ba6c / 0x3ba74)
-    m.piece(460 + 16 + fieldDx(app), -28 + 32 + fieldDy(app), kCornerPiece[bar][0], kCornerPiece[bar][1], 32, 32, a);
+    // (the Vita's: 445 + 43.352966 - its 30 x 30 inset of the piece - vita decomp 64314 / 64318)
+    m.piece(460 + 16 + fieldDx(app) + vitaEdgeX(app) - vitaEdge43(app), -28 + 32 + fieldDy(app), kCornerPiece[bar][0], kCornerPiece[bar][1], 32, 32, a);
     for (int k = 0; bar && k < 4; ++k) {
         if (!fieldButtonShown(app, k)) continue;
         float x, y;
@@ -9261,7 +9372,8 @@ bool fieldMenuClick(App& app, float px, float py) {
     const float tx = (lx - wideRight(app)) / 2 - 16 - fieldDx(app), ty = ly / 2 - 32 - fieldDy(app); // tex2d
     if (fieldBattleButton(app)) { // __menuf_mainPrc: the battle button's box, then fldencount_encount_debug
         const bool phone = app.renderer.phoneLayout();
-        const float x0 = phone ? 8.0f - androidEdgeX(app) : -8.0f, y0 = phone ? 12.0f - androidEdgeY(app) : -20.0f;
+        // (the Vita's box at (-35, 12): 8 - 43)
+        const float x0 = phone ? 8.0f - androidEdgeX(app) - vitaEdge43(app) : -8.0f, y0 = phone ? 12.0f - androidEdgeY(app) : -20.0f;
         const float bx = (lx - wideLeft(app)) / 2 - 16, by = ly / 2 - 32;
         if (bx >= x0 && bx < x0 + 48 && by >= y0 && by < y0 + 32) {
             app.encounters.force();
@@ -9317,7 +9429,8 @@ const touchpad::Art& padArt(const App& app) { return app.bigPad ? touchpad::kBig
 // The "!" button's centre (tex2d, from wideRight): the iPad display's, or the iPhone's in its layout
 // (Android's _menuf_mainPut: + ex, + ey - the phone's bottom right; the tap follows it here)
 void easyButtonCentre(const App& app, float& x, float& y) {
-    x = app.renderer.phoneLayout() ? 444.0f + androidEdgeX(app) : 460.0f, y = app.renderer.phoneLayout() ? 284.0f + androidEdgeY(app) : 316.0f;
+    // (the Vita's: (420 + 43.352966, 260) 48 x 48 - vita decomp 64544)
+    x = app.renderer.phoneLayout() ? 444.0f + androidEdgeX(app) + vitaEdgeX(app) : 460.0f, y = app.renderer.phoneLayout() ? 284.0f + androidEdgeY(app) : 316.0f;
 }
 
 bool easyButtonShown(const App& app) {
@@ -9808,6 +9921,10 @@ void drawCamp(App& app) {
     // lists, Yes / No, the clock and Oz to its right (as the shop); Back and the message centred
     const auto left = [&] { r.setOrigin(wideLeft(app)); };
     const auto right = [&] { r.setOrigin(wideRight(app)); };
+    // (the Vita's CampMainPut: the plates at 0x173, the lists - its table's x 235 -, HELP (187) and Back (235) 43 to
+    // the right; Yes / No, the count, the boards and the labels where 3.1.0 has them)
+    const auto rightV = [&] { r.setOrigin(vitaRight(app)); };
+    const float v43 = vitaEdge43(app);
     const auto centre = [&] { r.setOrigin(r.uiX()); };
     left();
     campTrackPhase(c);
@@ -9837,11 +9954,11 @@ void drawCamp(App& app) {
         memberHpMp(app, ch, hp, hpMax, mp, mpMax);
         drawFaceBoard(app, m, -240 * faceOut, 24 + 88.0f * float(k), ch, hp, hpMax, mp, mpMax, 1 - (faceOut == out ? outA : faceOut));
     }
-    right();
+    rightV();
     for (int i = 0; i < campEntries(app); ++i) {
         const bool save = i == 5;
         // (lit: the keys' cursor - touch play none -, or a touch holding it: FUN_0006c548's DAT_000ec590)
-        const bool held = main && campPressIn(app, wideRight(app), kPlateX, kPlateY + kPlateStep * float(i), 136, 40);
+        const bool held = main && campPressIn(app, vitaRight(app), kPlateX, kPlateY + kPlateStep * float(i), 136, 40);
         m.plate(kPlateX + 360 * out, kPlateY + kPlateStep * float(i), save ? 6 : plateIcon(kWords[i]), save ? -1 : kWords[i],
                 (main && c.cursor == i && c.btnRow < 0 && !app.pointerLast) || held, 1 - outA, !save && !kReady[i], save ? "Save" : "");
     }
@@ -9859,12 +9976,12 @@ void drawCamp(App& app) {
     const int ch = campCharacter(app, c.member);
     const int item = c.list.empty() ? 0 : c.list[size_t(c.listCursor)];
     auto memberPlates = [&](bool lit, float e) {
-        right();
+        rightV();
         for (int k = 0; k < campMembers(app); ++k) {
             const int word = memberWord(app, campCharacter(app, k));
             // (window 8: WinDispOn(8, 0x168) - in from 360 to the right, as the main plates go out)
             // (__MuCommon_CharChoiceProc: the plate - or the member's face board - held lights it)
-            const bool held = lit && (campPressIn(app, wideRight(app), kPlateX, kMemberY + kMemberStep * float(k), 136, 40) ||
+            const bool held = lit && (campPressIn(app, vitaRight(app), kPlateX, kMemberY + kMemberStep * float(k), 136, 40) ||
                                       campPressIn(app, wideLeft(app), 8, 0x30 + 0x58 * float(k), 0xfc, 0x50));
             m.plate(kPlateX + 360 * (1 - e), kMemberY + kMemberStep * float(k), plateIcon(word), word,
                     (lit && c.member == k && !app.pointerLast) || held, e, false);
@@ -9873,7 +9990,7 @@ void drawCamp(App& app) {
     };
     auto helpBoard = [&](int it, float e) { // HELP: the item's text across the top (as the shop's)
         if (it <= 0) return;
-        right();
+        rightV();
         drawHelpWindow(app, m, it, e, 480 * (1 - e)); // (MuScrList's: in from 480 to the right with the list)
         left();
     };
@@ -9906,7 +10023,8 @@ void drawCamp(App& app) {
             if (ph == App::Camp::List) {
                 // (MuScrList's HELP: gone at once when the list goes - Part 13 2945.52 s, 1182.04 s)
                 if (current && !c.pageOut) helpBoard(item, e);
-                right();
+                rightV();
+
                 // (MuScrList_Start / DispActive: WinDispOn / Off(.., 0x1e0) - in from 480 to the right and out to it)
                 const float lx = kRowX + 480 * (1 - e);
                 if (c.list.empty()) m.text("Nothing here.", lx + 56, kFocusY + 16, false, e, 15);
@@ -9959,7 +10077,7 @@ void drawCamp(App& app) {
         if (c.phase == App::Camp::Member) memberPlates(true, ease); // (the face boards; the state board comes with the slots)
         else if (c.phase == App::Camp::Slot) {
             drawShopBoard(app, 12, 92, ch, 0, ease);
-            right();
+            rightV();
             // __MuCampScrListEquipInit: a scrolling list of the seven - weapon, armor, jewel (else item
             // 0x1c6, "Jewel"), the Human Genes and three plates (else 0x1c7.., their names). Their text
             // (__MuScrList_ScrListEquip_Main): yellow for what is worn, white for an empty slot that can be
@@ -9974,7 +10092,7 @@ void drawCamp(App& app) {
         } else if (c.slot >= 3 && c.phase == App::Camp::Entries) { // CampMainPrc 0x1c: the chosen plate's picture, its known
             // entries listed, the Equip plate (the list's -5 row) unless the member wears it
             drawGeneBoard(app, m, 14, 92, c.plate, ease, 2);
-            right();
+            rightV();
             scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
                 drawGeneAbilityRow(app, m, x, y, c.list[size_t(k)], ch, lit, ease);
             });
@@ -9982,7 +10100,7 @@ void drawCamp(App& app) {
             left();
         } else if (c.slot >= 3) { // a gene plate for the slot: its board (the cursor's known entries) beside the list
             drawGeneBoard(app, m, 14, 92, cr::isPlate(item) ? item : pm.genes[c.slot - 3], ease, 1);
-            right();
+            rightV();
             // (MuScrList_Draw type 6: yellow for a plate this member wears - MuScrList_IsNowEquip(.., the member) -
             // grey while none of it is known; Part 3 403 s: "Deer Genes" yellow, the others white)
             scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
@@ -9993,7 +10111,7 @@ void drawCamp(App& app) {
             helpBoard(cr::isPlate(item) ? item : 0, ease);
         } else {
             drawShopBoard(app, 12, 92, ch, item > 0 ? item : 0, ease);
-            right();
+            rightV();
             // (MuScrList_Draw type 5: yellow for what the member wears - MuScrList_IsNowEquip -, no count)
             scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
                 const int it = c.list[size_t(k)];
@@ -10007,7 +10125,7 @@ void drawCamp(App& app) {
     case App::Camp::Genes:
         if (c.phase == App::Camp::Entries) { // Genes 4-5: the chosen plate's picture and its known entries
             drawGeneBoard(app, m, 14, 92, c.plate, ease, 2);
-            right();
+            rightV();
             scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
                 drawGeneAbilityRow(app, m, x, y, c.list[size_t(k)], ch, lit, ease);
             });
@@ -10016,7 +10134,7 @@ void drawCamp(App& app) {
             break;
         }
         drawGeneBoard(app, m, 14, 92, item, ease, 1); // (browsing: the cursor's known entries by name)
-        right();
+        rightV();
         if (c.list.empty()) m.text("No gene plates.", kRowX + 56, kFocusY + 16, false, ease, 15);
         // (MuScrList_Draw type 0xb: yellow for a plate either member wears; its HELP the plate's own text -
         // SetIdInfo(0xb, 0xe, .., 1, ..) - Part 5 1132 s "Gene Plate used to record / Dragon abilities")
@@ -10042,10 +10160,16 @@ void drawCamp(App& app) {
                 if (loadImage(app, kFaceImage[std::clamp(ch, 0, 10)], img)) art = app.renderer.upload(img);
             }
             left();
-            outPicture(m, art, 4, 0 - 140 * (1 - ease), 64, ease);
-            right();
+            { // (the Vita: j0nn_L01 read by _MuCom_MctTexRead - kind 3, full size: the pictures' layer)
+                const int keep = r.layer();
+                if (r.vitaScreen()) r.setLayer(3);
+                outPicture(m, art, 4, 0 - 140 * (1 - ease), 64, ease);
+                r.setLayer(keep);
+            }
+            right(); // (the Vita's board at 0x134 as 3.1.0's; its lists - the table's - 43 to the right)
             if (c.statusView == 0) drawShopBoard(app, 308 + 200 * (1 - ease), 68, ch, 0, ease, false); // (StateBoardDraw param_11 = 0)
             else { // (MuScrList mode 0 as the others - code reading only: no video shows the Status page)
+                rightV();
                 scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
                     const int it = c.list[size_t(k)];
                     if (c.statusView == 2) drawGeneAbilityRow(app, m, x, y, it, ch, lit, ease);
@@ -10065,8 +10189,9 @@ void drawCamp(App& app) {
     // (window 4: CampMain 6 takes it off for Items - the list brings its own and takes it with it, Part 13
     // 1171.9-1172.1 s, 1182.1-1182.5 s -; Equip, Genes and Status keep the main page's)
     const float barA = main ? std::min(1 - leave, c.barIn ? ease : 1.0f) : items ? std::min(ease, campPhaseEase(app, App::Camp::List)) : 1.0f;
+    r.setOrigin(r.uiX() + 2 * v43); // (the Vita's Back at 0xeb = 235: 43 to the right)
     if (campBackShown(app)) { // (lit while a touch holds it - the boxes campClick tests)
-        const float ux = app.renderer.uiX(), by = campBackY(app);
+        const float ux = app.renderer.uiX() + 2 * v43, by = campBackY(app);
         if (campOkBar(app))
             m.backOkBar(kBackX, by, campPressIn(app, ux, 0xc0, by, 0x72, 34) ? 1 : campPressIn(app, ux, 0x137, by, 0x72, 34) ? 5 : 0, barA);
         else if (campArrows(app))
@@ -10075,6 +10200,8 @@ void drawCamp(App& app) {
         else m.backBar(kBackX, by, campPressIn(app, ux, kBackX, by, 256, 34), barA);
     }
     if (items && !c.pageOut && ease <= 0) m.backBar(kBackX, campBackY(app), false, 1 - outA); // (the main page's going)
+    centre();
+
     // The title and section lines over everything else of the page: the section's line runs over the HELP
     // window's foot and its ">" over the state board's face (Part 13 1174 s, Part 10 202 s), both in the
     // menu font (MuComFontDisp of slots 0 / 2: "Equip", ">Jewel" a size under the port's old 15)
@@ -10832,7 +10959,10 @@ void drawScenarios(App& app) {
                 }
             }
         }
-        m.backBar(192, 288, pressIn(app, kPressScenarios, app.renderer.uiX(), 192, 286, 256, 34), a); // (lit while held: DAT_000ed27c)
+        { // (the Vita's at 0xeb = 235)
+            const float v = vitaEdge43(app);
+            m.backBar(192 + v, 288, pressIn(app, kPressScenarios, app.renderer.uiX(), 192 + v, 286, 256, 34), a); // (lit while held: DAT_000ed27c)
+        }
         sideMasks();
         return;
     }
@@ -10891,9 +11021,9 @@ void drawScenarios(App& app) {
         r.setOrigin(r.uiX());
     }
     { // window 10: < Back > - the part held lit (DAT_000ed5e4: 1 Back, 2 right, 3 left)
-        const float ux = app.renderer.uiX();
-        m.backButton(192, 288, pressIn(app, kPressScenarios, ux, 248, 286, 120, 34) ? 1 : pressIn(app, kPressScenarios, ux, 373, 286, 51, 34) ? 2
-                               : pressIn(app, kPressScenarios, ux, 192, 286, 51, 34) ? 3 : 0, s.bob, a);
+        const float ux = app.renderer.uiX(), v = vitaEdge43(app); // (the Vita's at 0xeb = 235)
+        m.backButton(192 + v, 288, pressIn(app, kPressScenarios, ux, 248 + v, 286, 120, 34) ? 1 : pressIn(app, kPressScenarios, ux, 373 + v, 286, 51, 34) ? 2
+                               : pressIn(app, kPressScenarios, ux, 192 + v, 286, 51, 34) ? 3 : 0, s.bob, a);
     }
     drawShopNumber(m, presentsUsed(app), 0, 296, 2, 12, a); // window 11: presents used / all
     m.picture(66, 24, 296, a);
@@ -10981,16 +11111,17 @@ void scenariosClick(App& app, float mx, float my) {
     App::Scenarios& s = app.scc;
     if (s.complete || s.phase) return;
     auto in = [&](float x, float y, float w, float h) { return mx >= x && mx < x + w && my >= y && my < y + h; };
+    const float v = vitaEdge43(app); // (the Vita's Back - both kinds - at 0xeb = 235: 43 to the right)
     if (s.card < 0) {
         if (shown(app))
             for (int i = 0; i < cards(app); ++i)
                 if (in(8 + 94.0f * float(i), 177, 90, 62)) { s.cursor = i; scenariosChoose(app); return; }
-        if (in(192, 286, 256, 34)) scenariosBack(app); // BackButtonProc(1)
+        if (in(192 + v, 286, 256, 34)) scenariosBack(app); // BackButtonProc(1)
         return;
     }
-    if (in(248, 286, 120, 34)) { scenariosBack(app); return; } // BackButtonProc(2)
-    if (in(192, 286, 51, 34)) { scenariosCard(app, -1); return; }
-    if (in(373, 286, 51, 34)) { scenariosCard(app, 1); return; }
+    if (in(248 + v, 286, 120, 34)) { scenariosBack(app); return; } // BackButtonProc(2)
+    if (in(192 + v, 286, 51, 34)) { scenariosCard(app, -1); return; }
+    if (in(373 + v, 286, 51, 34)) { scenariosCard(app, 1); return; }
     if (done(app, s.card)) {
         if (in(0, 48, 480, 236)) scenariosChoose(app);
         return;
@@ -11138,7 +11269,8 @@ void drawCollection(App& app) {
         digits(13, pct, 3, 396 + dx, 232, 16, t);
         pict(14, 444 + dx, 240, t);
     }
-    m.backBar(192, 288, pressIn(app, kPressCollection, app.renderer.uiX(), 192, 286, 256, 34), t); // (lit while held: DAT_000ed638)
+    const float v = vitaEdge43(app); // (the Vita's Back at 0xeb = 235)
+    m.backBar(192 + v, 288, pressIn(app, kPressCollection, app.renderer.uiX(), 192 + v, 286, 256, 34), t); // (lit while held: DAT_000ed638)
 }
 
 void collectionKey(App& app, SDL_Keycode key) {
@@ -11150,8 +11282,10 @@ void collectionKey(App& app, SDL_Keycode key) {
 }
 
 void collectionClick(App& app, float mx, float my) { // BackButtonProc(1)
-    if (mx >= 192 && mx < 448 && my >= 286 && my < 320) collectionKey(app, SDLK_ESCAPE);
+    const float v = vitaEdge43(app); // (the Vita's Back at 0xeb = 235)
+    if (mx >= 192 + v && mx < 448 + v && my >= 286 && my < 320) collectionKey(app, SDLK_ESCAPE);
 }
+
 
 // ---- The Instruction Manual (Options; MuScrList + MsgUty: the topics, then the page) ----
 // OptionPrc 0xf..0x16: the topics are the manual items the bag holds (make_item_list kind 9,
@@ -11730,7 +11864,18 @@ void drawTitleMenu(App& app) {
     // (the pieces by the sheet loaded - the iPad's 9 / 10 only from title1_ipad: with data that has
     // none, the Vita's, the iPad layout gets title1_hd, cut as the iPhone's 7 / 8 - the places by layout)
     const int name = app.titleArtIpad ? 9 : 7, strip = app.titleArtIpad ? 10 : 8;
-    if (app.renderer.phoneLayout()) {
+    const bool vita = app.renderer.vitaScreen();
+    if (vita) {
+        // The Vita's __menuu_TitlePut (its table at 0x81123108): the name 7 at (184, 220), the chaos logo 6 at
+        // (0, 24), the strip 8 at (0, 264) - title1 / chaos read by _MuCom_MctTexRead, its pictures kind 3
+        // (FUN_81015be8: full size, the pictures' layer)
+        const int keep = app.renderer.layer();
+        app.renderer.setLayer(3);
+        outPicture(m, app.titleArt[0], name, 184, 220, logo);
+        outPicture(m, app.titleArt[1], 6, 0, 24, logo);
+        outPicture(m, app.titleArt[0], strip, 0, 264, plates || board ? 1.0f : t);
+        app.renderer.setLayer(keep);
+    } else if (app.renderer.phoneLayout()) {
         outPicture(m, app.titleArt[0], name, 184, 220, logo);
         outPicture(m, app.titleArt[1], 6, 0, 0, logo);
         outPicture(m, app.titleArt[0], strip, 0, 280, plates || board ? 1.0f : t);
@@ -11747,15 +11892,18 @@ void drawTitleMenu(App& app) {
         // Start with a resume point (TitlePrc 8 -> 0x16): window 3 goes back out to +240, the strip
         // (window 1) stays under the Progress Tracker's windows
         const float q = std::min(1.0f, float(app.titleOut) / 4.0f), dx = 240 * (1 - ease) + 240 * q * q, pa = t * (1 - q);
-        app.renderer.setOrigin(wideRight(app)); // (widescreen: the plates to the screen's right)
+        // (the Vita: the plates at 0x173 = 371 - vitaRight)
+        app.renderer.setOrigin(vitaRight(app)); // (widescreen: the plates to the screen's right)
         for (int i = 0; i < 3; ++i)
             m.plate(328 + dx, 114 + 56.0f * float(i), kTitleIcons[i], kTitleWords[i],
-                    (app.titleCursor == i && !app.pointerLast) || pressIn(app, kPressTitle, wideRight(app), 328, 114 + 56.0f * float(i), 136, 40),
+                    (app.titleCursor == i && !app.pointerLast) || pressIn(app, kPressTitle, vitaRight(app), 328, 114 + 56.0f * float(i), 136, 40),
                     pa, !titleChoiceReady(i)); // (lit: the keys' cursor, or a touch holding it - TitlePrc's DAT_000ecb60)
         app.renderer.setOrigin(wideLeft(app)); // (... and the pictures down the left to its left)
-        m.picture(125, 8 + dx, 16, pa);
-        m.picture(126, 8 + dx, 96, pa);
-        m.picture(127, 8 + dx, 176, pa); // (3.1.0: with Game Center - its achievements; Android: always - its list; ours: the list)
+        if (!vita) { // (the Vita's TitlePut draws none of them)
+            m.picture(125, 8 + dx, 16, pa);
+            m.picture(126, 8 + dx, 96, pa);
+            m.picture(127, 8 + dx, 176, pa); // (3.1.0: with Game Center - its achievements; Android: always - its list; ours: the list)
+        }
     }
     if (keyHints(app) && !app.resumeNotice && !app.resumePrompt) // (our key hints)
         m.text("Up/Down  Enter  V: Options  A: Achievements  Esc: quit", 20, 360, false, t * 0.8f, 9);
@@ -11858,7 +12006,10 @@ void titleTap(App& app) {
     if (app.titleStage != 0) return;
     app.sound.play(0x91);
     app.titleAnim = 0;
-    app.titleStage = titleAnnounce(app) ? 2 : 1;
+    // (the Vita's TitlePrc 3 marks what is new - its flags as 3.1.0's - and turns window 8 on, but goes on to
+    // the plates (state 7) at once, and its TitlePut never draws window 8: no version-up board)
+    const bool board = titleAnnounce(app);
+    app.titleStage = board && !app.renderer.vitaScreen() ? 2 : 1;
 }
 
 void titleChoose(App& app, int i) {
@@ -11902,9 +12053,10 @@ void titleClick(App& app, float px, float py) {
     if (app.titleStage == 0) { titleTap(app); return; } // (a tap anywhere)
     if (app.titleStage == 2) { titleBoardTap(app); return; } // (a tap anywhere)
     float mx, my;
-    menuPointAt(app, lx, ly, wideRight(app), mx, my); // (widescreen: the plates on the right)
+    menuPointAt(app, lx, ly, vitaRight(app), mx, my); // (widescreen: the plates on the right; the Vita's at 371)
     for (int i = 0; i < 3; ++i)
         if (mx >= 328 && mx < 464 && my >= 114 + 56 * i && my < 154 + 56 * i) titleChoose(app, i);
+    if (app.renderer.vitaScreen()) return; // (no pictures down the left on the Vita: its TitlePrc 8 has no boxes there)
     float sx, sy;
     menuPointAt(app, lx, ly, wideLeft(app), sx, sy); // the store's pictures (8, 16) / (8, 96) 80 x 72: their sound, no store here
     if (sx >= 8 && sx < 88 && ((sy >= 16 && sy < 88) || (sy >= 96 && sy < 168))) menuSound(app, se::kChoose);
@@ -13211,7 +13363,9 @@ bool click(App& app, float px, float py) {
     float tx, ty;
     logicalToTex2d(app, lx, ly, tx, ty);
     // (widescreen: the pad in the corner; Android's PuzzleManager::update: the phone's top left)
-    const float bx = tx + (app.renderer.uiX() - wideLeft(app)) / 2 + androidEdgeX(app), by = ty + androidEdgeY(app);
+    // (the Vita's boxes from x 116.647 / -35.353 / 40.647 - 3.1.0's less 43.352966: FUN_810735b8 / 8107351e / 8107345c)
+    const float bx = tx + (app.renderer.uiX() - wideLeft(app)) / 2 + androidEdgeX(app) + vitaEdgeX(app), by = ty + androidEdgeY(app);
+
     if (bx >= 160 && bx < 204 && by >= 14 && by < 46 && ask(app, 2)) return true;
     if (bx >= 8 && bx < 52 && by >= 56 && by < 84 && ask(app, 0)) return true;
     if (bx >= 84 && bx < 124 && by >= 14 && by < 46 && ask(app, 1)) return true;
@@ -14427,7 +14581,7 @@ bool drawAndroidMessagePanel(App& app, float x, float y, float w, float h, float
 // the safe area's edges in logical units; `rectY` the style's rect y (tex2d)
 void drawMessageMark(App& app, int style, int rectY, float right, float bottom) {
     const cr::Renderer& r = app.renderer;
-    const float ex = 2 * androidEdgeX(app), ey = 2 * androidEdgeY(app);
+    const float ex = 2 * androidEdgeX(app) + 2 * vitaEdgeX(app), ey = 2 * androidEdgeY(app); // (the Vita: x 495.35)
     const float x = right - (r.phoneLayout() ? 56.0f : 88.0f) + ex;
     float y;
     if (style & 2) y = bottom - 48 + ey;
@@ -14455,6 +14609,12 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
     // Android 1.1.6's PutMsg: the "next" mark (+ ex, + ey: the phone's bottom right; beside a
     // tutorial's band + ex only) and the skip button (+ ex, - ey: its top right), 1024 units
     const float ex = 2 * androidEdgeX(app), ey = 2 * androidEdgeY(app);
+    // The Vita's _PutMsg: the skip button at (487.35, 0) and the "next" mark at x 495.35 - 3.1.0's + 43.352966
+    // (vita decomp 51608, 51590); its bands (draw_abeblack, draw_vista) from x - 43.35 across its whole screen;
+    // the lines at x -7 when a name shows (36 without) and the name at (-12, 205) - 3.1.0's (24, 206) - or,
+    // over the 0x20 band, at (-27, 236) beside the streak at x - 43.35 (vita decomp 51502-51535, 90345)
+    const float vx2 = 2 * vitaEdgeX(app);
+    const bool vitaNamed = r.vitaScreen() && !speaker.empty();
     bool portraits = false;
     for (const App::Portrait& p : app.portraits) portraits = portraits || (p.tex.id && p.alpha > 0.5f);
     // PrcWin / PutWin: the window fades in and out (its alpha); PutMsg draws the text, the name and
@@ -14485,21 +14645,21 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
     const float right = left + width;
     if (base != 0 || style & 0x80 || style & 0x200) {
         const float wy = 2.0f * rect[0] + 64, ty = 2.0f * (rect[0] + rect[1]) + 64;
-        float tx = 2.0f * 36 + 32;
+        float tx = 2.0f * (vitaNamed ? -7 : 36) + 32;
         bool outline = false;
         if (style & 0x80 || style & 0x210) { // no window: the text alone (0x10: outlined in black -
             // _CmdFont_waku outlines white text only: after 0x16 1 it is plain black, j001_d06 6818)
             outline = (style & 0x10) != 0 && app.msgColour != 1;
         } else if (style & 0x20) { // a black band across the bottom (tex2d y 252..352), the name on its edge
             // (draw_vista; Android: x - ox .. 480 + ox, the phone's whole width)
-            r.fillRect(left - ex, 2.0f * 252 + 64, width + 2 * ex, 768 - (2.0f * 252 + 64), 0, 0, 0, wa);
+            r.fillRect(left - ex - vx2, 2.0f * 252 + 64, width + 2 * (ex + vx2), 768 - (2.0f * 252 + 64), 0, 0, 0, wa);
             if (!speaker.empty() && textOn) { // PutMsg: drawfont_l at tex2d (16, 236), just above the band
                 // draw_vista2: the grey streak under the name - window (612, 14) 140 x 22 at tex2d
                 // (0, 238), the iPad's (-16, 238); Android's at (0, 238) too (Part 1 815 s: x 160 ..)
                 static const float kWinNameStreak[4] = {1224, 28, 280, 44};
-                drawWinPiece(app, kWinNameStreak, 2.0f * (phone ? 0 : -16) + 32, 2.0f * 238 + 64, 280, 44, wa);
+                drawWinPiece(app, kWinNameStreak, 2.0f * (phone ? 0 : -16) + 32 - vx2, 2.0f * 238 + 64, 280, 44, wa);
                 drawFrontFade(app); // (the name: text, over the front fade)
-                const float nx = 2.0f * 16 + 32, ny = 2.0f * 236 + 64 - 11; // (the larger box's offset)
+                const float nx = 2.0f * (r.vitaScreen() ? -27 : 16) + 32, ny = 2.0f * 236 + 64 - 11; // (the larger box's offset)
                 app.nameHud.setTint(0, 0, 0); // (an outline, so it reads over a bright scene too)
                 for (int k = 0; k < 4; ++k) app.nameHud.drawAt(r, {speaker}, nx - namePad + (k & 1 ? 2 : -2), ny + (k & 2 ? 2 : -2), kNameScale, 0, 0, 0.0f);
                 app.nameHud.setTint(1, 1, 1);
@@ -14508,7 +14668,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         } else if (style & 8) { // a tutorial's band: dark, its edges soft (8 / 88 / 8 tex2d), the text further left
             // (draw_abeblack: 0xc0 at the window's alpha; Android: x - ox .. 480 + ox, the phone's whole
             // width - Part 3 352.0 s, Part 9 653.0 s)
-            const float a = 0.75f * wa, y1 = wy + 16, y2 = wy + 192, bl = left - ex, bw = width + 2 * ex;
+            const float a = 0.75f * wa, y1 = wy + 16, y2 = wy + 192, bl = left - ex - vx2, bw = width + 2 * (ex + vx2);
             for (int k = 0; k < 8; ++k) { // the 2D path has no per-vertex colour: the edges in strips
                 const float t = (float(k) + 0.5f) / 8.0f;
                 r.fillRect(bl, wy + 2.0f * float(k), bw, 2.0f, 0, 0, 0, a * t);
@@ -14542,7 +14702,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         if (textOn) drawMessageLines(app, page, tx, ty, kMsgScale, centreAll);
         (void)pageNo; // (PutMsg draws no page count)
         if (next && textOn) drawMessageMark(app, style, rect[0], right, H);
-        if (app.runner.running() && !app.messageSkip) drawWinPiece(app, kWinSkip, right - 72 + ex, top - ey, 64, 64);
+        if (app.runner.running() && !app.messageSkip) drawWinPiece(app, kWinSkip, right - 72 + ex + vx2, top - ey, 64, 64);
         return;
     }
     (void)portraits;
@@ -14572,7 +14732,9 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
             if (K > 1.001f && splitParchment(app)) { // (the paper scaled, the streak where the iPhone has it - Android's way)
                 const float top = app.parchTop * (K - 1); // (scaled about its top edge: the edge stays where the streak expects it)
                 app.renderer.drawQuadUV(app.parchPaperTex, x0, parchY - top, 960 * K, 256 * K, 0, 0, 960, 256, 1, 1, 1, wa);
-                app.renderer.drawQuadUV(app.parchStreakTex, 32, parchY, 392, 80, 0, 0, 392, 80, 1, 1, 1, wa);
+                // (the Vita's streak - part of its stretched piece - starts at the screen's edge, x - 43.35)
+                parchX = 32 - vx2;
+                app.renderer.drawQuadUV(app.parchStreakTex, parchX, parchY, 392, 80, 0, 0, 392, 80, 1, 1, 1, wa);
             } else {
                 parchK = K, parchX = x0;
                 drawWinPiece(app, kWinParchmentPhone, x0, parchY, 960 * parchK, 256 * parchK, wa);
@@ -14581,14 +14743,17 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         if (!speaker.empty() && textOn) {
             drawFrontFade(app); // (the name: text, over the front fade)
             app.nameHud.setTint(1, 1, 1);
-            const float nx = parchX + (2.0f * 24 + 32 - 32) * parchK, ny = parchY + (2.0f * 206 + 64 - parchY) * parchK;
+            // (the Vita's at (-12, 205): from the streak's left edge, x - 43.35)
+            const float nameX = r.vitaScreen() ? -12.0f + vx2 / 2 : 24.0f, nameY = r.vitaScreen() ? 205.0f : 206.0f;
+            const float nx = parchX + 2.0f * nameX * parchK, ny = parchY + (2.0f * nameY + 64 - parchY) * parchK;
             // (5 units lower than PutMsg's (24, 206): the port's font sits higher in the streak than
             // Android's - Part 1 66 s, the name's top 20 px under the streak's, the port's 13)
             app.nameHud.drawAt(r, {speaker}, nx - namePad, ny - 25 + 5, kNameScale, 0, 0, 0.0f);
         }
         app.dialogueHud.setTint(0.12f, 0.10f, 0.08f);
-        textX = 2.0f * 36 + 32;
+        textX = 2.0f * (vitaNamed ? -7 : 36) + 32;
         textY = 2.0f * (pr[0] + pr[1]) + 64;
+
     } else if (app.cutinTex.id) { // Omega's iPad (PutWin): window_cutin's (0, 112, 512, 144) at tex2d (x - 16,
         // y + 32) - the screen's bottom 288; PutMsg: the name at tex2d (24, 222), the lines at x 36
         // from y + text y + 18, the "next" mark at y 328
@@ -14626,7 +14791,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
     if (next && textOn) drawMessageMark(app, style, 0, right, H); // (steady: PutMsg doesn't blink it)
     // a scene is playing: PutMsg's skip button at tex2d (444, 0) on the iPhone, (460, -32) on the
     // iPad - 36 in from the safe area's right, at its top (Android: + ox, - oy)
-    if (app.runner.running() && !app.messageSkip) drawWinPiece(app, kWinSkip, right - 72 + ex, top - ey, 64, 64);
+    if (app.runner.running() && !app.messageSkip) drawWinPiece(app, kWinSkip, right - 72 + ex + vx2, top - ey, 64, 64);
 }
 
 void drawWinPiece(App& app, const float* piece, float x, float y, float w, float h, float alpha) {
@@ -17773,7 +17938,7 @@ bool battlePressIn(const App& app, float x, float y, float w, float h) {
     if (!app.press.down || app.press.screen != kPressBattle) return false;
     float lx, ly;
     app.renderer.toLogical(app.press.px, app.press.py, lx, ly);
-    const float uiX = app.renderer.uiX(), rightX = app.renderer.phoneLayout() ? uiX : 2 * uiX;
+    const float uiX = app.renderer.uiX(), rightX = (app.renderer.phoneLayout() ? uiX : 2 * uiX) + 2 * vitaEdge43(app); // (the Vita's menus 43 right)
     const float rx = (lx - rightX) / 2, my = ly / 2;
     return rx >= x && rx < x + w && my >= y && my < y + h;
 }
@@ -18640,7 +18805,9 @@ void drawBattleHud(App& app, float W, float H) {
     // the rows (- ex, + ey) (bottom left), the banner - ey (top); the menus stay centred
     const bool phone = r.phoneLayout();
     const float edge = wideLeft(app); // the left-hand pieces' origin (the screen's edge inside the safe area)
-    const float ex = androidEdgeX(app), ey = androidEdgeY(app);
+    // (the Vita's __menub_mainPut: the badge and the rows at (int)(x - 43.352966), the command plates, targets and
+    // Back at (int)(x + 43.352966) - vita decomp 62034 / 62163 / 62263: 43 whole units)
+    const float ex = androidEdgeX(app) + vitaEdge43(app), ey = androidEdgeY(app);
 
     // Damage numbers (__dmg_prc): over their targets, projected from the 3D across the screen, put in
     // the 480 x 320 layout's units (tex2d's: the 1024 layout's (32, 64) + 2x): y 32..272, x 64 and over
@@ -18735,16 +18902,20 @@ void drawBattleHud(App& app, float W, float H) {
     if (!b.bannerShown.empty()) {
         const float clear[4] = {0, 0, 0, 0}, dark[4] = {0, 0, 0, 0x98 / 255.f};
         const float by = phone ? 32.0f - ey : 0.0f;
-        m.quad(88, 4 + by, 24, 24, clear, dark);
-        m.quad(112, 4 + by, 351, 24, dark, dark);
-        m.quad(463, 4 + by, 24, 24, dark, clear);
+        // (the Vita's: 28.647..514.353 tex2d - 3.1.0's 72..471 widened 43.353 each side, vita decomp 62463-62468)
+        const float vx = vitaEdgeX(app);
+        m.quad(88 - vx, 4 + by, 24, 24, clear, dark);
+        m.quad(112 - vx, 4 + by, 351 + 2 * vx, 24, dark, dark);
+        m.quad(463 + vx, 4 + by, 24, 24, dark, clear);
         m.setOutline(false); // (drawfont_btl: the banner's text plain)
         m.textCentred(b.bannerShown, 287 - m.textWidth(b.bannerShown, 14) / 2, 16 + by, false, 1, 14);
         m.setOutline(true);
     }
 
     // Right: the menus - the page as shown (b.view), slid right by b.slide (menub_mainPut: x + +0x38)
-    r.setOrigin(wideRight(app));
+    // (the Vita: 43 further right - its plates, targets, Back and lists; Escape's Yes / No stay, an action tree
+    // drawn at the window's own x - vita decomp 62405)
+    r.setOrigin(vitaRight(app));
     const App::Battle::MenuView& v = b.view;
     if (v.page >= 0 && b.slide < battleSlideDistance(app)) {
         const int keepMember = b.member; // (the lists' helpers read the member choosing)
@@ -18816,9 +18987,10 @@ void drawBattleHud(App& app, float W, float H) {
             // plates in window 6 (its x the page's slide): Yes at (336, 104), No at (336, 160)
         { // (__ComUty_YesNoChoiceProc: a held plate takes the cursor - the lit one follows the finger)
             const bool live = v.menu == b.menu;
-            const bool hy = live && battlePressIn(app, kYesNoX, kYesY, 136, 40), hn = live && battlePressIn(app, kYesNoX, kNoY, 136, 40);
-            drawBattleButton(m, kYesNoX, kYesY, 0, 0, hy || (!hn && v.confirm == 0), false, a);
-            drawBattleButton(m, kYesNoX, kNoY, 1, 1, hn || (!hy && v.confirm == 1), false, a);
+            const float yx = kYesNoX - vitaEdge43(app); // (the Vita: not moved with the menus)
+            const bool hy = live && battlePressIn(app, yx, kYesY, 136, 40), hn = live && battlePressIn(app, yx, kNoY, 136, 40);
+            drawBattleButton(m, yx, kYesY, 0, 0, hy || (!hn && v.confirm == 0), false, a);
+            drawBattleButton(m, yx, kNoY, 1, 1, hn || (!hy && v.confirm == 1), false, a);
         }
             break;
         }
@@ -18915,7 +19087,8 @@ void battleClick(App& app, float px, float py) {
     App::Battle& b = app.battle;
     float lx, ly;
     app.renderer.toLogical(px, py, lx, ly);
-    const float uiX = app.renderer.uiX(), rightX = app.renderer.phoneLayout() ? uiX : 2 * uiX;
+    // (the Vita: the menus 43 right - __menub_mainPrc's boxes at (int)(x + 43.352966) + 0x148 / 0xb0 / 0xc0)
+    const float uiX = app.renderer.uiX(), rightX = (app.renderer.phoneLayout() ? uiX : 2 * uiX) + 2 * vitaEdge43(app);
     const float rx = (lx - rightX) / 2, my = ly / 2;
     if (battletalk::on(app)) { // a talk: the skip corner, else the next page
         if (skipCorner(app, lx, ly)) holdSkip(app, kSkipPointer, true);
@@ -18979,10 +19152,12 @@ void battleClick(App& app, float px, float py) {
         } else if (onBack)
             battleBack(app);
         break;
-    case App::Battle::EscapeAsk: // ComUty_YesNoChoiceProc: Yes (336, 104), No (336, 160), 136 x 40
-        if (rx >= kYesNoX && rx < kYesNoX + 136 && my >= kYesY && my < kYesY + 40) battleEscapeAnswer(app, true, false);
-        else if (rx >= kYesNoX && rx < kYesNoX + 136 && my >= kNoY && my < kNoY + 40) battleEscapeAnswer(app, false, false);
+    case App::Battle::EscapeAsk: { // ComUty_YesNoChoiceProc: Yes (336, 104), No (336, 160), 136 x 40 (the Vita's not moved)
+        const float yx = kYesNoX - vitaEdge43(app);
+        if (rx >= yx && rx < yx + 136 && my >= kYesY && my < kYesY + 40) battleEscapeAnswer(app, true, false);
+        else if (rx >= yx && rx < yx + 136 && my >= kNoY && my < kNoY + 40) battleEscapeAnswer(app, false, false);
         break;
+    }
     }
 }
 
@@ -21455,11 +21630,21 @@ int fieldPresentationSelfTest(App& app) {
             const bool ok = std::fabs(ex - wx) < 0.01f && std::fabs(ey - wy) < 0.01f;
             edgeProblems += !ok;
             if (!ok) std::printf("android edges: layout %d gives (%.2f, %.2f), wanted (%.0f, %.0f)\n", layout, ex, ey, wx, wy);
+            // The Vita layout's edge groups (vitaEdgeX): the Vita's 43.352966 tex2d (its __menub_mainPut / __menuf_mainPut /
+            // _PutMsg), the whole 43 of its tables (vitaEdge43, vitaLeft / vitaRight 86 layout units out), none elsewhere
+            const bool vita = layout == 3;
+            const float vx = vitaEdgeX(app), v43 = vitaEdge43(app), vl = wideLeft(app) - vitaLeft(app), vr = vitaRight(app) - wideRight(app);
+            const bool vok = std::fabs(vx - (vita ? 43.352966f : 0.0f)) < 0.0001f && v43 == (vita ? 43.0f : 0.0f) &&
+                             std::fabs(vl - 2 * v43) < 0.01f && std::fabs(vr - 2 * v43) < 0.01f;
+            edgeProblems += !vok;
+            if (!vok) std::printf("vita edges: layout %d gives %.4f / %.0f (left %.1f, right %.1f)\n", layout, vx, v43, vl, vr);
         }
         app.video = keepVideo;
         applyVideo(app);
-        std::printf("android edges: the phone's edges (80, 20) tex2d outside the centred screen in the Android layout, 0 in the others; %d problems\n",
+        std::printf("android edges: the phone's edges (80, 20) tex2d outside the centred screen in the Android layout, 0 in the others; "
+                    "the Vita layout's edge groups 43.352966 / 43 tex2d out, 0 in the others; %d problems\n",
                     edgeProblems);
+
         problems += edgeProblems;
     }
     app.noEncounters = keepNoEncounters;
@@ -21482,9 +21667,10 @@ int mobileInputSelfTest(App& app) {
         app.renderer.toLogical(0, 0, x0, y0);
         app.renderer.toLogical(1000, 1000, x1, y1);
         const bool phone = phoneMenus(app);
-        const float lx = wideRight(app) + 2 * (mx + (phone ? 16 : 0));
+        const float lx = vitaRight(app) + 2 * (mx + (phone ? 16 : 0)); // (the Camp's lists: the Vita's 43 further right)
         const float ly = 2 * (my + (phone ? 32 : 0));
         int ww, wh;
+
         SDL_GetWindowSize(app.window, &ww, &wh);
         const float x = (lx - x0) * 1000 / (x1 - x0) * ww / app.renderer.frameWidth();
         const float y = (ly - y0) * 1000 / (y1 - y0) * wh / app.renderer.frameHeight();
@@ -23851,6 +24037,9 @@ int runSelfTest(App& app) {
             mbad += !app.saveScreen.haveSave || app.saveScreen.data.map != 70 || app.saveScreen.data.game.scenario != 0 ||
                     app.saveScreen.data.game.oz != 500 || app.saveScreen.data.game.items[7] != 3;
             app.saveScreen.open = false;
+            // (the boards as 3.1.0 shows them: the Vita layout shows none - checked after)
+            const bool vitaTitle = app.renderer.vitaScreen();
+            app.renderer.setVitaScreen(false);
             // Before the clear: "New fun stuff available" once, not at the next launch (the owner's choice;
             // 3.1.0 repeats it till the clear)
             {
@@ -23889,7 +24078,25 @@ int runSelfTest(App& app) {
             titleTap(app);
             mbad += app.titleStage != 1;
             app.titleOpen = false;
-            std::printf("shared save: save1 + save2 fold into data.dat, scenario 0 loads its own place, the title's boards: %d problems\n", mbad);
+            { // The Vita's TitlePrc 3 marks what is new but goes on to the plates: no board, the marks still kept
+                app.renderer.setVitaScreen(true);
+                cr::SaveData vd = d;
+                vd.game.setFlag(0x1f, true);
+                for (int f = 0x65; f <= 0x7b; ++f) vd.game.setFlag(f, false);
+                cr::writeSave(dataPath(app), vd);
+                app.verUpShown = false, app.titleStage = 0, app.titleOpen = true;
+                const bool phone = app.renderer.phoneLayout();
+                app.renderer.setPhoneLayout(true); // (vitaScreen: the Vita's screen with the iPhone layout)
+                titleTap(app);
+                mbad += app.titleStage != 1;
+                cr::SaveData vback;
+                mbad += !readData(app, vback) || !vback.game.flag(0x6f) || !vback.game.flag(0x7b);
+                app.renderer.setPhoneLayout(phone);
+                app.titleStage = 0, app.titleOpen = false;
+            }
+            app.renderer.setVitaScreen(vitaTitle);
+            std::printf("shared save: save1 + save2 fold into data.dat, scenario 0 loads its own place, the title's boards (none on the Vita): %d problems\n", mbad);
+
             problems += mbad;
             for (const char* f : {"save1.dat", "save2.dat", "data.dat"}) SDL_RemovePath(savePath(app, f).c_str());
         }
@@ -27076,7 +27283,7 @@ int runSelfTest(App& app) {
                 // a touch held on a plate lights it (battlePressIn: the plate's box from battleClick)
                 float lx = 0, ly = 0;
                 { // (the box's middle back to the frame's pixels)
-                    const float uiX = app.renderer.uiX(), rightX = app.renderer.phoneLayout() ? uiX : 2 * uiX;
+                    const float uiX = app.renderer.uiX(), rightX = (app.renderer.phoneLayout() ? uiX : 2 * uiX) + 2 * vitaEdge43(app);
                     lx = rightX + 2 * (btlui::kButtonX + 68), ly = 2 * (btlui::kButtonY + btlui::kButtonStep + 20);
                 }
                 float ax, ay, bx, by;
@@ -28337,6 +28544,11 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             app.runner.stop();
         }
         if (found < app.captureTalk) std::printf("talk-portrait: only %d moments with a portrait\n", found + 1);
+    }
+    if (app.captureTitle && SDL_getenv("CR_CAPTURE_TITLE_TAP") && app.titleOpen && app.titleStage == 0) {
+        app.verUpShown = true;  // (the plates, not a version-up board)
+        titleTap(app);          // --title: the title's tap - its plates, slid in
+        app.titleAnim = 30;
     }
     if (app.vita.isOpen()) std::printf("vita textures used: %d\n", app.vitaTextures);
     if (app.android.isOpen()) std::printf("android textures used: %d\n", app.androidTextures);
@@ -29811,8 +30023,10 @@ void pressRelease(App& app, int screen, float px, float py) {
 // _ComUty_NumCountProc: a touch held on a count's < or > steps it as it goes down, then - past 20
 // frames held - one a frame; let go, it starts over (the shop's count, the Camp's seeds)
 bool campPressIn(const App& app, float origin, float x, float y, float w, float h);
-bool shopPressIn(const App& app, bool right, float x, float y, float w, float h);
+bool shopPressIn(const App& app, bool right, float x, float y, float w, float h, float shift);
 void pressCountStep(App& app, float dt) {
+
+
     int side = 0;
     bool shop = false;
     if (app.shop.open && app.shop.phase == App::Shop::Count) {

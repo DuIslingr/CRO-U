@@ -31,8 +31,15 @@ public:
     // White-on-transparent lines: `em` pixels to the em, baselines `lineStep` apart, `pad`
     // pixels of margin.
     bool rasterise(const std::vector<std::string>& lines, float em, float lineStep, int pad, Image& out) const;
+    // The line box (ascent and descent in ems, descent negative) the glyphs are placed in, in place of the
+    // face's own (hhea) - a face standing in for another keeps the text where the other put it; 0, 0: the face's
+    void setLineBox(float ascentEm, float descentEm) {
+        if (ascentEm != boxAscent_ || descentEm != boxDescent_) boxAscent_ = ascentEm, boxDescent_ = descentEm, ++generation_;
+    }
 
 private:
+    float boxAscent_ = 0, boxDescent_ = 0;
+
     struct Face;
     std::vector<unsigned char> data_;
     std::unique_ptr<Face> face_;

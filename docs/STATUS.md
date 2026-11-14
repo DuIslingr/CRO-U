@@ -146,7 +146,16 @@ separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
       textures (P8 with an ARGB palette for the effects), its boot logos; alone it runs as the Vita
       does - the iPhone's Retina path (`_is_iPadDisplay` 0, `_is_RetinaDisplay` 1, the `_hd` sheets)
       on its 960 x 544 screen (Layout "Vita": the 2D at 0.85, the paintings, script pictures and
-      portraits at full size, the battle over the whole screen)
+      portraits at full size, the battle over the whole screen); its edge groups 43.35 tex2d out
+      to the screen's edges (`vitaEdgeX` / `vitaLeft` / `vitaRight`: the battle's badge and rows
+      left, its menus right; the field's corner, bar, "!" and Pheromones / puzzle panel; the
+      message's skip, mark, name at (-12, 205) and lines at x -7 beside a name; the choice plates
+      at 371, Back 235, HELP 187, the clock board, the scroll lists and the shop's left group 43
+      left), the face boards at y 25, no battery, the title without the store pictures or the
+      version-up board, the `_MuCom_MctTexRead` pictures (title, World Select gates, staff roll,
+      last battle, Camp Status and genes) at full size, and the copy's own faces
+      (resources/font: TB Gothic Pro B, DFHeiW9-GB, DFLiHei-Md, DFKMincho-Bd) in Noto's line box
+
 - [x] the self-test runs clean on Omega's data (its checks moved onto Omega's rooms, groups,
       scripts and tables)
 - [x] the worlds' treasure boxes as Omega's TreasureBoxManager keeps them: drawn again each time
