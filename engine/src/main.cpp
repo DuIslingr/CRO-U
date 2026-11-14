@@ -868,6 +868,8 @@ struct App {
         int camSets = 0;                   // btlcamera_set calls (the frames between steps: a cut)
         int attackVariant = -1;            // que +0xc: _btlact_attack_init's random(3) for the camera
         int attackCam2At = -1;             // que +0x10: the approach's last frame (a variant-2 member blow's second camera then)
+        int attackBackAt = -1;             // _btlact_attack 1000's que +8: the blow's max frame (its slot's frames - 1), then 0x406
+        int attackEndAt = -1;              // 0x406's way back (the return slot's max frame) and 1999's ten done: 9999
         cr::Vec3 camWantEye{488, 12, 555}, camWantTarget{500, 4, 498}; // +0xa8 / +0xb4
         cr::Vec3 camEye{488, 12, 555}, camTarget{500, 4, 498};         // +0xcc / +0xd8: shown
         std::vector<Effect> effects;       // eff3d: playing effects (32 at most)
@@ -16632,6 +16634,32 @@ void victory(App& app) {
 //   (btl +0xa64, __menub_mainPrc's Pair) or enemies 2 and 3 act together (+0xa68, btlord_enemy_rand).
 // The second of a pair: slot 8 toward the target, or 13 for a party model 7 / a monster of 0xa0..0xa2.
 // (Each then through mdl_set_act_motion_nextanm: playSlot passes slots of 3 frames or less.)
+void turnOver(App::Battle::Actor& a, float want, float frames);
+// _btlact_attack 1000 -> 0x406 (3.1.0 decomp 12911-12990): the return slot (nextanm 3, then the idle) and
+// btlmove_setpos home over that slot's own window; the wanted yaw the heading out again, turned to over it
+void startAttackReturn(App& app, App::Battle::Actor& a) {
+    playSlot(app, a, btlui::kSlotReturn, btlui::kSlotIdle);
+    const cr::BattleAnim ra = app.battleData.anim(a.modelId, btlui::kSlotReturn);
+    if (ra.hasMoveWindow()) {
+        a.from = a.pos;
+        a.to = a.home;
+        a.moveFrom = ra.moveStart;
+        a.moveTo = ra.moveEnd;
+    } else
+        a.moveFrom = a.moveTo = 0;
+    if (a.approached) turnOver(a, a.approachYaw, float(ra.hasMoveWindow() ? ra.moveEnd - ra.moveStart : 1));
+    a.turnHome = false;
+}
+
+// _btlanm_get_max_frm (3.1.0 0x47e44): a fighter's motion slot's frames less one (the raw slot, no skipping)
+int battleMaxFrame(App& app, int fighter, int slot) {
+    const App::Battle::Actor* u = battleActor(app, fighter);
+    if (!u) return 0;
+    const LoadedModel& lm = app.battle.models[u->model];
+    const int i = battleAction(lm, slot);
+    return i >= 0 ? int(lm.actions[size_t(i)].duration) - 1 : 0;
+}
+
 int attackSlot(App& app, const cr::BattleTurn& t, int k, int cls, bool& inPlace) {
     App::Battle& b = app.battle;
     const App::Battle::Actor* u = battleActor(app, t.actors[k]);
@@ -16709,6 +16737,7 @@ void startTurn(App& app) {
         }
     }
     b.turnFrame = 0;
+    b.attackBackAt = b.attackEndAt = -1;
     b.hitsShown = false;
     b.hitFrame = 20;
     b.bounceAt = -1;
@@ -16761,6 +16790,22 @@ void startTurn(App& app) {
         int slot = a && a->cls >= 8 && a->cls < cr::kBattleAnimSlots ? a->cls : 8;
         bool inPlace = false;
         if (t.kind == cr::kCmdAttack) slot = attackSlot(app, t, k, a ? a->cls : 0, inPlace);
+        if (t.kind == cr::kCmdAttack && k == 0 && !inPlace) {
+            // _btlact_attack_init's state 1000 (3.1.0 decomp 12465-12468): que +8 the blow's max frame - the
+            // user's; a pair's second member's when that is model 1 (12601) or, standing in place (model 7's
+            // slot 13), its hit frame (12552); an enemy pair's second's for models 0x8e..0x90 (12673) or its
+            // slot-13 hit frame for 0xa0..0xa2 (12618). (Slots 9 / 10 go other ways - their clips time them)
+            b.attackBackAt = battleMaxFrame(app, t.actors[0], slot);
+            const App::Battle::Actor* v = t.actors[1] >= 0 ? battleActor(app, t.actors[1]) : nullptr;
+            const int vm = v ? v->modelId : -1;
+            if (v && t.actors[0] < 2 && b.rules.pair) {
+                if (vm == 7) b.attackBackAt = app.battleData.anim(vm, 13).hit;
+                else if (vm == 1) b.attackBackAt = battleMaxFrame(app, t.actors[1], 8);
+            } else if (v && t.actors[0] >= 2 && b.rules.enemyPair) {
+                if (vm >= 0xa0 && vm <= 0xa2) b.attackBackAt = app.battleData.anim(vm, 13).hit;
+                else if (vm >= 0x8e && vm <= 0x90) b.attackBackAt = battleMaxFrame(app, t.actors[1], 8);
+            }
+        }
         if (t.kind == cr::kCmdAttack && SDL_getenv("CR_BATTLE_DEBUG"))
             std::printf("attack: fighter %d (model %d %s) slot %d%s, cls %d\n", t.actors[k], u->modelId, u->model.c_str(), slot,
                         inPlace ? " in place" : "", a ? a->cls : -1);
@@ -17655,20 +17700,9 @@ void stepBattle(App& app) {
             if (a.time >= std::max(dur, 1.0f)) {
                 const int next = a.then;
                 const bool back = next == btlui::kSlotReturn;
-                playSlot(app, a, next, back ? btlui::kSlotIdle : -1);
-                if (back) { // and walks back to its place meanwhile
-                    const cr::BattleAnim ra = app.battleData.anim(a.modelId, btlui::kSlotReturn);
-                    if (ra.hasMoveWindow()) { // (btlact_attack 0x406: the return slot's own window)
-                        a.from = a.pos;
-                        a.to = a.home;
-                        a.moveFrom = ra.moveStart;
-                        a.moveTo = ra.moveEnd;
-                    } else
-                        a.moveFrom = a.moveTo = 0;
-                    // (0x406: the wanted yaw the heading out again, turned to over the way back)
-                    if (a.approached) turnOver(a, a.approachYaw, float(ra.hasMoveWindow() ? ra.moveEnd - ra.moveStart : 1));
-                    a.turnHome = false;
-                } else if (next == btlui::kSlotIdle) { // (the yaw is left: the attack's end turns it home)
+                if (back) startAttackReturn(app, a); // and walks back to its place meanwhile (a blow not on _btlact_attack's count)
+                else playSlot(app, a, next, -1);
+                if (!back && next == btlui::kSlotIdle) { // (the yaw is left: the attack's end turns it home)
                     a.pos = a.home;
                     a.moveFrom = a.moveTo = 0;
                 }
@@ -17836,6 +17870,20 @@ void stepBattle(App& app) {
             const int slot = enemyCameraSlot(app, b.turn.hits[0].target);
             setBattleCamera(app, slot * 4 + (b.rules.pair ? 0x14b : b.turn.actors[0] == 0 ? 0x7b : 0xe3), 0);
         }
+        if (b.attackBackAt > 0 && b.turnFrame == b.attackBackAt && b.attackBackAt >= b.hitFrame && !b.stageAction) { // (a count that ends before the hit: the clips time it)
+            // _btlact_attack 1000 -> 0x406 (3.1.0 decomp 12862-12911) once its count reaches que +8, whatever the
+            // clip: the user back over its return slot (12916-12930) - a pair's / an enemy pair's second too
+            // (12952 / 12976), unless it stood in place (que +0x14: model 7 / 0xa0..0xa2), which adds five frames
+            // instead (12992) - for the user's return slot's max frame; then 1999's ten (13004-13007) and 9999
+            // (12818-12828). (+0xaf0 / +0xaf4 as the hit left them)
+            const bool members = b.turn.actors[0] < 2, paired = members ? b.rules.pair : b.rules.enemyPair;
+            const App::Battle::Actor* v = b.turn.actors[1] >= 0 ? battleActor(app, b.turn.actors[1]) : nullptr;
+            const bool standing = v && (members ? v->modelId == 7 : v->modelId >= 0xa0 && v->modelId <= 0xa2);
+            for (int k = 0; k < (paired && !standing ? 2 : 1); ++k) // (one that never stepped out keeps its own clip)
+                if (App::Battle::Actor* u = b.turn.actors[k] >= 0 ? battleActor(app, b.turn.actors[k]) : nullptr; u && u->then == btlui::kSlotReturn)
+                    startAttackReturn(app, *u);
+            b.attackEndAt = b.turnFrame + battleMaxFrame(app, b.turn.actors[0], btlui::kSlotReturn) + (paired && standing ? 5 : 0) + 10;
+        }
         if (!b.hitsShown && b.turnFrame >= b.hitFrame) {
             if (!b.turn.barriers.empty() && b.bounceAt < 0) {
                 // btlact_gene / btlact_item 0x1004: the barriers light up, the users stop; 40 frames
@@ -17893,6 +17941,7 @@ void stepBattle(App& app) {
                               : b.stageAction && b.stageEnd ? b.turnFrame >= std::max(b.stageEnd, b.hitFrame + 1)
                               : b.stageAction ? b.turnFrame >= b.hitFrame + b.stageWait // the staged ones' wait
                               : b.turn.cancelled ? b.turnFrame >= 60
+                              : attackLike && b.attackEndAt >= 0 ? b.turnFrame >= b.attackEndAt // (_btlact_attack's count)
                               : attackLike ? (b.idleSince >= 0 && b.turnFrame >= b.idleSince + 10) || b.turnFrame > 400
                                            : (!busy && b.turnFrame >= b.hitFrame + 40) || b.turnFrame > 400;
             if (over) {
