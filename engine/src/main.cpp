@@ -29409,7 +29409,46 @@ static cr::SetupGame crSetupGame() {
     return setup;
 }
 
+// The desktop log file (from CR3-U: its Windows build is a GUI app with no console, so a start that
+// goes wrong left nothing to read): SDL's log teed into chaosrings.log in the profile folder, the
+// previous start's kept as chaosrings.prev.log - not on the phones, not for captures, tests, exports
+namespace logfile {
+SDL_LogOutputFunction chained = nullptr;
+void* chainedData = nullptr;
+FILE* file = nullptr;
+std::mutex lock;
+void output(void* userdata, int category, SDL_LogPriority priority, const char* message) {
+    (void)userdata;
+    if (chained) chained(chainedData, category, priority, message);
+    std::lock_guard<std::mutex> guard(lock);
+    if (!file) return;
+    static const char* const kLevel[] = {"", "trace", "verbose", "debug", "info", "warn", "error", "critical"};
+    const int level = int(priority);
+    std::fprintf(file, "%s: %s\n", level >= 0 && level < 8 ? kLevel[level] : "log", message);
+    std::fflush(file);
+}
+void start(int argc, char** argv) {
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+    (void)argc, (void)argv;
+#else
+    for (int i = 1; i < argc; ++i)
+        for (const char* f : {"--capture", "--selftest", "--explore", "--export-textures", "--export-models"})
+            if (SDL_strcmp(argv[i], f) == 0) return;
+    const std::string dir = cr::saveDir();
+    if (dir.empty()) return;
+    const std::string now = dir + "chaosrings.log", prev = dir + "chaosrings.prev.log";
+    SDL_RemovePath(prev.c_str());
+    SDL_RenamePath(now.c_str(), prev.c_str());
+    file = std::fopen(now.c_str(), "w");
+    if (!file) return;
+    SDL_GetLogOutputFunction(&chained, &chainedData);
+    SDL_SetLogOutputFunction(output, nullptr);
+#endif
+}
+} // namespace logfile
+
 SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
+    logfile::start(argc, argv);
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
     SDL_SetAppMetadata("Chaos Rings Omega HD (reimplementation)", "0.1", "local.preservation.chaosringsomega");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD)) {
