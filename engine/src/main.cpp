@@ -724,6 +724,8 @@ struct App {
             float homeYaw = 0;
             int moveFrom = 0, moveTo = 0;  // the move's frames of the current slot
             int loopFrom = -1, loopTo = -1; // mdl_set_act_motion_loop's frames (-1: the slot's own)
+            bool castRest = false;         // a cast's loop let go (btlact_gene / item 2000): to its end, then
+                                           // the idle - the turn's 40 frames don't wait for it
             bool fading = false;           // a fallen monster
             bool hidden = false;           // the model's +0xfb4 cleared (a boss's end, a defeat): not drawn
             float alpha = 1;
@@ -14664,6 +14666,7 @@ void playSlot(App& app, App::Battle::Actor& a, int slot, int then = -1) {
     a.time = 0;
     a.then = then;
     a.loopFrom = a.loopTo = -1;
+    a.castRest = false;
 }
 
 float actorDuration(App& app, const App::Battle::Actor& a) {
@@ -16748,7 +16751,8 @@ void startTurn(App& app) {
         if ((t.kind == cr::kCmdGene || t.kind == cr::kCmdItem) && !approach) {
             // _btlact_gene_init / _btlact_item_init (42018 / 42756): _mdl_set_act_motion_loop(slot, 2,
             // loop start, loop end) - played to the loop's end, then its loop over and over (the whole
-            // slot when it has none) till another motion is set (the round's end, a blow)
+            // slot when it has none) till the hit's next frame (state 2000's nextanm 0: see the
+            // hitsShown step - the clip plays out, then the idle) or another motion (a blow)
             // (the loop's range from the class slot's row - btlanm_get_loop_start / _end(.., class), 3.1.0
             // decomp 42014-42019 - whichever clip mdl_set_act_motion_loop then moves on to)
             playSlot(app, *u, slot, -1);
@@ -17815,10 +17819,29 @@ void stepBattle(App& app) {
             }
         }
         if (b.hitsShown) {
+            // _btlact_gene / _btlact_item 2000's first frame (3.1.0 decomp 42350-42363 / 42803-42815): each
+            // user (que +0x98, make_que's copy of the users +0x84 - 34895; the item's +0x84 itself), alive
+            // (the gene's _IsDead) and not guarding (_btlact_autoguard), gets _mdl_set_act_nextanm(0): its
+            // cast slot's loop cleared, next 0 - the clip plays on to its end, then the idle. (A boss's
+            // gene - groups 676 / 677's 508 / 510, Part 14 863.7 s - stands at rest after the white.)
+            if ((b.turn.kind == cr::kCmdGene || b.turn.kind == cr::kCmdItem) && !b.stageAction && !b.turn.cancelled &&
+                b.turnFrame == b.hitFrame + 1)
+                for (int k = 0; k < 2; ++k) {
+                    const int who = b.turn.actors[k];
+                    App::Battle::Actor* u = who >= 0 ? battleActor(app, who) : nullptr;
+                    if (!u || u->then >= 0 || u->slot == btlui::kSlotIdle) continue; // (a mover's own way; nextanm(0) on slot 0 returns)
+                    if (who < int(b.rules.f.size()) && (b.rules.f[size_t(who)].guarding || (b.turn.kind == cr::kCmdGene && !b.rules.f[size_t(who)].alive())))
+                        continue;
+                    u->then = btlui::kSlotIdle, u->castRest = true;
+                    u->loopFrom = u->loopTo = -1;
+                    if (SDL_getenv("CR_BATTLE_DEBUG"))
+                        std::printf("cast rest: fighter %d slot %d at frame %.0f of %.0f, then the idle (turn frame %d)\n", who, u->slot, u->time,
+                                    actorDuration(app, *u), b.turnFrame);
+                }
             bool busy = false;
             for (int k = 0; k < 2; ++k)
                 if (const App::Battle::Actor* u = b.turn.actors[k] >= 0 ? battleActor(app, b.turn.actors[k]) : nullptr)
-                    busy |= u->then >= 0 && u->slot != btlui::kSlotHit;
+                    busy |= u->then >= 0 && u->slot != btlui::kSlotHit && !u->castRest;
             // (the tail after the action: an attack's ten frames once its actors are back (btlact_attack
             // 1999), a gene's or item's forty after its hit (btlact_gene / item 2000); Analyze's forty
             // after its last line's tap)
