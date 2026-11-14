@@ -1776,6 +1776,7 @@ void loadModelFile(App& app, const std::string& name, LoadedModel& out, bool cha
     const bool fromVita = app.vita.isOpen() && app.vita.read(name, data) && cr::loadModelPackage(data, m, &err);
     if (fromVita) ++app.vitaTextures;
     else if (!cr::readFile(app.dataDir + name, data) || !cr::loadModelPackage(data, m, &err)) {
+        if (err.empty()) err = "not in the data"; // (e.g. the rivals' m00Xa / b: only the Vita ships them, no battle uses them)
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s: %s", name.c_str(), err.c_str());
         updateTitle(app);
         return;
