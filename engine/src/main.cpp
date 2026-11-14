@@ -2593,6 +2593,21 @@ bool cjkLanguage(int language) { return language == 0 || language >= 5; }
 void applyLanguage(App& app) {
     if (!languageUsable(app, app.language)) app.language = 1;
     static const char* const kRegion[cr::kLanguages] = {"JP", "JP", "JP", "JP", "JP", "SC", "TC", "KR"};
+    // Your own font (font/ in the game folder - cr::ownFont): over the Vita copy's faces and the system's (CR_FONT over
+    // it) - for Japanese, Chinese and Korean the first with their glyphs, else the first; in Noto Sans CJK's line box,
+    // which the port's text places were set with. One without CJK glyphs while those are wanted: the system's
+    if (!SDL_getenv("CR_FONT")) {
+        const std::string own = cr::ownFont(cjkLanguage(app.language));
+        if (!own.empty()) {
+            if (app.font.path() != own && app.font.load(own)) SDL_Log("font/: %s", own.c_str());
+            if (app.font.path() == own) {
+                app.font.setLineBox(1.16f, -0.288f);
+                app.font.selectRegion(kRegion[app.language]); // (a CJK collection's regional face; else nothing)
+                app.menu.setMenuFont(multilingualData(app) && !cjkLanguage(app.language) ? 13.0f : 14.0f);
+                return;
+            }
+        } else if (cr::isOwnFont(app.font.path())) cr::loadSystemFont(app.font), app.font.setLineBox(0, 0);
+    }
     // The Vita copy as the game: its own faces, as its scePvf draws them (resources/font: TB Gothic Pro B for
     // Japanese and the Latin languages, DFHeiW9-GB for Simplified Chinese, DFLiHei-Md for Traditional,
     // DFKMincho-Bd for Korean); the system's (Noto) when the copy has none or CR_FONT picks one
@@ -30034,7 +30049,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     else SDL_EnumerateDirectory(app->dataDir.c_str(), collectAssets, app);
     app->systemText.load(app->dataDir);
     // The game's text in every language: a system font (CR_FONT overrides), else the 8x8 font
-    if (cr::loadSystemFont(app->font)) SDL_Log("font: %s", app->font.path().c_str());
+    if (cr::loadSystemFont(app->font)) SDL_Log("font: %s%s", app->font.path().c_str(), cr::isOwnFont(app->font.path()) ? " (font/)" : "");
     else SDL_Log("no CJK font found (set CR_FONT): Japanese, Chinese and Korean text unavailable");
     // (the options menu is the engine's own, column-aligned for the 8x8 font)
     for (cr::Hud* h : {&app->dialogueHud, &app->promptHud, &app->itemHud, &app->choiceHud, &app->nameHud,

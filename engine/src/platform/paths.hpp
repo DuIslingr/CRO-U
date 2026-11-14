@@ -15,6 +15,7 @@ namespace cr {
 //   ios/             the iOS release: its .app (or what is in it), or the unpacked .ipa (Payload/...)
 //   android/         the Android release: its main.*.obb and its APK
 //   vita/            the Vita release: its game folder (PCSG00499: eboot.bin, sce_sys/ ...) or what is in it
+//   font/            your own font (.ttf / .otf / .ttc), over the system's (gfx/font.hpp: ownFont)
 //   textures/export/ where --export-textures writes the pictures to upscale (<hash>.crraw)
 //   textures/hd/     where the upscaled ones are read from (<hash>.crhd: tools/hd_textures.py)
 // A release's folder may hold it one or two folders down (ios/Payload/ChaosRingsOmegaHDeng.app,

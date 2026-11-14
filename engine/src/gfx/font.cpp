@@ -3,11 +3,14 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 #include "core/file.hpp"
 #include "core/text.hpp"
+#include "platform/paths.hpp"
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #define STBTT_STATIC
@@ -164,12 +167,63 @@ bool Font::rasterise(const std::vector<std::string>& lines, float em, float line
     return true;
 }
 
+namespace {
+struct OwnFile {
+    std::string path;
+    bool cjk = false;
+};
+// (looked at once: each file read to see what it holds)
+const std::vector<OwnFile>& ownFiles() {
+    static const std::vector<OwnFile> files = [] {
+        std::vector<OwnFile> out;
+        for (const std::string& folder : gameFolders()) {
+            const std::string dir = folder + "font/";
+            int count = 0;
+            char** names = SDL_GlobDirectory(dir.c_str(), "*", SDL_GLOB_CASEINSENSITIVE, &count);
+            std::vector<std::string> paths;
+            for (int k = 0; names && k < count; ++k) {
+                std::string n = names[k], low = n;
+                for (char& c : low) c = char(std::tolower(static_cast<unsigned char>(c)));
+                const auto ends = [&](const char* e) { return low.size() > 4 && low.compare(low.size() - 4, 4, e) == 0; };
+                if (n[0] != '.' && (ends(".ttf") || ends(".otf") || ends(".ttc"))) paths.push_back(dir + n);
+            }
+            SDL_free(names);
+            if (paths.empty()) continue;
+            std::sort(paths.begin(), paths.end());
+            for (const std::string& path : paths) {
+                Font f;
+                if (!f.load(path)) {
+                    SDL_Log("font/: %s isn't a font this can read", path.c_str());
+                    continue;
+                }
+                out.push_back({path, f.covers("\xe3\x81\x82\xe6\xbc\xa2")}); // (あ漢)
+            }
+            break; // (the first game folder with font files)
+        }
+        return out;
+    }();
+    return files;
+}
+} // namespace
+
+std::string ownFont(bool cjk) {
+    for (const OwnFile& f : ownFiles())
+        if (!cjk || f.cjk) return f.path;
+    return {};
+}
+bool isOwnFont(const std::string& path) {
+    for (const OwnFile& f : ownFiles())
+        if (f.path == path) return true;
+    return false;
+}
+
 bool loadSystemFont(Font& font) {
     std::vector<std::string> candidates;
     if (const char* env = SDL_getenv("CR_FONT")) {
         if (SDL_strcmp(env, "none") == 0) return false; // the 8x8 font only
         candidates.push_back(env);
     }
+    if (const std::string own = ownFont(true); !own.empty()) candidates.push_back(own); // (font/: yours)
     for (const char* p : {
              // Linux (Noto CJK under several distributions' paths, then other CJK families)
              "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",

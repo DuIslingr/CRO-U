@@ -82,6 +82,7 @@ Inside it, one folder per release you have (the downloads come with these folder
 ├── android/                               the .obb and the 1.1.6 APK (or its classes.dex), or the .xapk / .apks
 ├── vita/PCSG00499/                        the installed title (CRO/resources/cro.psarc, CRO/sound/*.psarc)
 ├── fsr4/                                  optional: AMD's FSR 4 files (see Settings)
+├── font/                                  optional: your own font (see Settings)
 └── textures/  models/                     optional: your HD textures and models
 ```
 
@@ -156,6 +157,12 @@ Everything is in **Options** (START, or V). Settings and saves live in the profi
 - **Frame Rate:** 30 / 60 / 120 / 144 / unlimited. The game logic runs at its own 20 frames a
   second; characters, cameras and battle actors are drawn moving smoothly between those frames.
 - *Original Presentation* puts every display and graphics option back to the original's look.
+- **Fonts:** the text is drawn with a system font, as the iOS game does: Noto Sans CJK (its
+  Japanese, Chinese or Korean face for each language), Hiragino on macOS, Yu Gothic on Windows. With
+  the Vita copy as the game, its own fonts. A `.ttf`, `.otf` or `.ttc` you put into `font/` in the
+  game folder takes their place: for Japanese, Chinese and Korean the first (by file name) with
+  their characters, for the other languages the first. A font without CJK characters is used only
+  for the Latin languages. `CR_FONT=<file>` still comes first; the log names the `font/` file used.
 
 **Detail** (most need the Vulkan renderer)
 - **Render Scale**, **Anti-aliasing**, **Upscaler** and **Upscale Mode**. Upscalers: FSR 3.1

@@ -49,8 +49,15 @@ private:
     bool openFace(int index);
 };
 
-// Loads the first usable font with CJK coverage among the platform's usual locations
-// (CR_FONT overrides; CR_FONT=none uses none); false if none.
+// Loads the first usable font with CJK coverage: CR_FONT's (none: none), else the game folder's font/
+// one (ownFont), else among the platform's usual locations; false if none.
 bool loadSystemFont(Font& font);
+
+// Your own fonts: the .ttf / .otf / .ttc files in a game folder's font/ (the first game folder holding
+// one; its files by name). The first that reads - with `cjk` the first with Japanese / Chinese / Korean
+// glyphs -, "" none
+std::string ownFont(bool cjk);
+// whether `path` is one of them
+bool isOwnFont(const std::string& path);
 
 } // namespace cr

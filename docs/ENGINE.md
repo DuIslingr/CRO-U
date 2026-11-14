@@ -381,8 +381,10 @@ c101/c102/c104/m207a, 2026-10-12).
       1.0.1 has Japanese and English). Drawn with a system font through stb_truetype
       (`engine/third_party/stb`, public domain), as the iOS game uses the system font: Noto
       Sans CJK on Linux (its JP / SC / TC / KR face per language), Hiragino / PingFang / Apple
-      SD Gothic on macOS, Yu Gothic / MS Gothic / Meiryo on Windows; `CR_FONT=<file>` picks one,
-      `CR_FONT=none` keeps the 8x8 font (English and the Latin languages, accents folded)
+      SD Gothic on macOS, Yu Gothic / MS Gothic / Meiryo on Windows; a font in the game folder's
+      `font/` over those and the Vita copy's (`cr::ownFont`: for the CJK languages the first by name
+      with their glyphs, else the first); `CR_FONT=<file>` over all, `CR_FONT=none` keeps the 8x8
+      font (English and the Latin languages, accents folded)
 - [x] Vita assets (Options, Game, Vita Assets: pick your copy's PCSG00497 folder - saved as
       settings.ini's `vita=`, used from the next start - or `--vita <folder | cr1.psarc>`, `CR_VITA`;
       `--vita none` for a run without): from your Vita copy the textures and model packages
