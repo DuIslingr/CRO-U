@@ -56,9 +56,12 @@ First-start notes per system:
 - **macOS:** right-click `chaosrings.app` and choose *Open* (it isn't signed).
 - **Linux:** `chmod +x` the AppImage, then run it.
 - **iPhone / iPad (iOS 15+):** the download's `.ipa` is unsigned: sideload it with AltStore, Sideloadly or
-  the like (they sign it with your Apple ID). Put your copy into the app's folder in the Files app (*On My
-  iPhone / iPad > Chaos Rings Omega*, or Finder's Files tab with the device connected): `ios/` (the
-  `.app`, or the `.ipa` itself - unpacked when the game starts), `android/` or `vita/`, then *Look again*.
+  the like (they sign it with your Apple ID). The first start asks for your copy as on Android and the
+  desktops - the system's file picker: an `.ipa`, the APK and OBB, a Vita folder or a dump's archive -, with
+  its progress windows. Or put it into the app's folder in the Files app yourself (*On My iPhone / iPad >
+  Chaos Rings Omega*, or Finder's Files tab with the device connected): `ios/` (the `.app`, or the `.ipa`
+  itself), `android/` (the APK and OBB, or the `.xapk`) or `vita/` (the folder, or a dump's `.zip` / `.rar` /
+  `.7z` / `.vpk`) - unpacked or decrypted when the game starts.
   It runs at the display's rate (120 Hz on ProMotion screens), keeps the menus clear of the camera's notch
   or punch hole, and with Layout on *Auto* takes the iPhone layout on a small screen and the iPad layout on
   a large one - on a foldable (iPhone Duo) it changes as you fold or open it.

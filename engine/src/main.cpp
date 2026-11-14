@@ -1594,7 +1594,7 @@ std::string vitaPicked;
 bool vitaPickedReady = false;
 
 void chooseVitaFolder(App& app) {
-    SDL_ShowOpenFolderDialog(
+    crShowOpenFolderDialog(
         [](void*, const char* const* list, int) {
             if (!list || !list[0]) return; // cancelled or failed
             std::lock_guard<std::mutex> lock(vitaPickMutex);
@@ -1680,7 +1680,7 @@ std::string androidPicked;
 bool androidPickedReady = false;
 
 void chooseAndroidFolder(App& app) {
-    SDL_ShowOpenFolderDialog(
+    crShowOpenFolderDialog(
         [](void*, const char* const* list, int) {
             if (!list || !list[0]) return;
             std::lock_guard<std::mutex> lock(androidPickMutex);
@@ -29938,11 +29938,10 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     if (!app->modelsDir.empty() && app->modelsDir.back() != '/') app->modelsDir += '/';
     if (app->dataDir.empty()) {
         const std::vector<std::string> g = cr::gameFolders();
-#ifdef SDL_PLATFORM_ANDROID
-        if (!g.empty()) // (the folders made, to be seen over USB)
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+        if (!g.empty()) // (the folders made, to be seen over USB - an iPhone's in the Files app)
             for (const char* f : {"ios", "android", "vita"}) SDL_CreateDirectory((g.front() + f).c_str());
 #endif
-#if !defined(SDL_PLATFORM_IOS)
         // The first start without a copy: where is it? (platform/setup.hpp - what's chosen copied into
         // the game folder's ios/, android/, vita/: found as on any start - a phone's too)
         static bool setupAsked = false;
@@ -29954,8 +29953,8 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
             setupAsked = true;
             const cr::SetupGame setup = crSetupGame();
             cr::SetupResult got;
-#ifdef SDL_PLATFORM_ANDROID
-            const std::string fallback; // (a phone's game folder is always its own: no other)
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+            const std::string fallback; // (a phone's game folder is always its own - an iPhone's Documents: no other)
 #else
             const std::string fallback = cr::saveDir();
 #endif
@@ -29972,7 +29971,6 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
             *state = nullptr;
             return SDL_AppInit(state, argc, argv); // (found now, as on any start)
         }
-#endif
         bool plainStart = true; // (a test's, a tool's: the message alone, nothing waited for)
         for (int i = 1; i < argc; ++i)
             for (const char* f : {"--capture", "--selftest", "--explore", "--export-textures", "--export-models"})
