@@ -1083,6 +1083,10 @@ struct App {
     bool playerByReadMdl = false, playerLoadedByReadMdl = false;
     cr::FieldWalker walker;
     bool havePlayer = false;
+    // _prty + 0x14..0x20: where the field was last loaded - a warp's arrival (or a load); a save in a
+    // puzzle room (area 1) records it, not where the player stands (SaveData_Save / ContData_Save_set)
+    float fieldLoad[4] = {0, 0, 0, 0}; // x, y, z, heading (radians)
+    bool fieldLoadSet = false;
     float walkClock = 0;                   // movement runs in fixed 20 Hz steps like the original
     // Between the game's frames: each field step's values at its start and its end - the leader,
     // the NPCs drawn, the script's camera, the scroll - and how far into the next step the clock is
@@ -2399,6 +2403,8 @@ bool performWarp(App& app, const cr::WarpRequest& wIn, int fromEvent) {
         p = q;
     }
     const bool moved = w.map != fromMap || area != app.area || again || reloads; // (a same-map warp writes the position alone)
+    app.fieldLoad[0] = w.pos[0], app.fieldLoad[1] = w.pos[1], app.fieldLoad[2] = w.pos[2];
+    app.fieldLoad[3] = w.angleDegrees * 3.14159265f / 180.0f, app.fieldLoadSet = true;
     app.walker.pos = p;
     if (moved) app.walker.heading = w.angleDegrees * 3.14159265f / 180.0f; // FieldPCCtrl::reset: DegToRad
     app.walker.gait = cr::Gait::Stand;
@@ -5492,6 +5498,9 @@ cr::SaveData captureSave(const App& app) {
     s.pos[1] = app.walker.pos.y;
     s.pos[2] = app.walker.pos.z;
     s.yaw = app.walker.heading;
+    if (app.area == 1 && app.fieldLoadSet) // (a puzzle room: where it was loaded - the try starts over there)
+        for (int k = 0; k < 3; ++k) s.pos[k] = app.fieldLoad[k];
+    if (app.area == 1 && app.fieldLoadSet) s.yaw = app.fieldLoad[3];
     s.leader = app.playerChar;
     s.playSeconds = app.playSeconds;
     s.savedAt = int64_t(std::time(nullptr));
@@ -5517,6 +5526,10 @@ bool applySave(App& app, const cr::SaveData& s) {
     // ContData_memcpy / Load_SaveData: once "About Progress Tracker" has been shown this launch
     // (MuTitle_GetInInterruptFlg), the state taken up keeps flag 0x44 - the message isn't offered again
     if (app.interruptShown) app.game.setFlag(0x44, true);
+    // _SaveData_Load_init (Load and the Progress Tracker's resume alike): flag 0xff7 - every area's
+    // entry 0 then clears it and 4076 and stops short of its arrival (no title card, no "Save data?"
+    // again on the Ark, no arrival triggers)
+    app.game.setFlag(0xff7, true);
     if (!app.game.wornInBag) cr::putWornInBag(app.game, app.itemTable);
     app.treasureBoxes.clear();
     app.entryArea = -1;
@@ -5653,7 +5666,10 @@ bool saveGame(App& app) {
     cr::SaveData old;
     if (readData(app, old)) s.places = old.places;
     s.setPlace(s.game.scenario, s.placeInPlay());
-    return cr::writeSave(dataPath(app), s);
+    s.game.vars[9] = 0; // (SaveData_Save: the saved copy's var 9, +0x2c8, written as 0)
+    if (!cr::writeSave(dataPath(app), s)) return false;
+    SDL_RemovePath(savePath(app, "resume.dat").c_str()); // (_removeContData: a save ends the Progress Tracker's)
+    return true;
 }
 
 int currentPair(const App& app) { return app.game.scenario + 1; } // (Omega: the scenario + 1)
@@ -10255,20 +10271,42 @@ void newPairParty(App& app, int pair, bool clearData) {
         auto it = g.items.find(item);
         if (it != g.items.end() && --it->second <= 0) g.items.erase(it);
     };
+    if (!ng) { // prty_init_new's memset of the scenario's own bag comes first (mode 3 puts the saved one
+        // back): the Oz and the shared items stay
+        for (auto it = g.items.begin(); it != g.items.end();)
+            if (!cr::sharedItem(app.itemTable, it->first)) it = g.items.erase(it);
+            else ++it;
+        if (p == 1) // (0x1024..0x1043: scenario 1's learned entries of its Human Genes plates, 477..480)
+            for (int plate = 477; plate <= 480; ++plate)
+                for (int entry : cr::plateContents(plate))
+                    if (entry > 0) g.items.erase(entry);
+    }
     if (p == 0)
         for (int item : {114, 116, 82, 117, 187, 188, 189, 190}) g.items.erase(item); // del_item_cnt0
+    // add_item2: one only when none is owned
+    auto add2 = [&](int item) { // (_GetItmCnt: the other scenario's Human Genes plates count 0)
+        auto it = g.items.find(item);
+        const bool owned = !cr::otherScenarioPlate(g, item) && it != g.items.end() && it->second > 0;
+        if (item > 0 && !owned) cr::addScenarioItem(g, app.itemTable, p, item, 1);
+    };
     cr::Party fresh = g.party;
     cr::newScenarioRecords(fresh, p);
     for (int k = 0; k < 3; ++k) {
         const size_t c = size_t(4 + 3 * p + k);
         cr::PartyMember m = fresh[c];
-        if (ng) { // mode 3 copies the six bonus fields only: the starting gear and plate are worn again
+        if (ng) { // mode 3 copies the six bonus fields only: the starting gear and plate are worn again.
+            // Each field holds the levels' growth from 20 on too (pcparam_change_lv adds it there), so
+            // what the old record's levels gave goes into the boosts as its level starts again
             const cr::PartyMember& old = g.party[c];
             std::copy(std::begin(old.seeds), std::end(old.seeds), m.seeds);
             std::copy(std::begin(old.boosts), std::end(old.boosts), m.boosts);
+            for (int st = 0; st < cr::kStats; ++st) m.boosts[st] += cr::levelGrowth(old.level, cr::Stat(st), old.start);
         }
-        cr::addScenarioItem(g, app.itemTable, p, m.genes[0], 1); // (add_item2, every mode)
-        for (int e = 0; e < 2; ++e) cr::addScenarioItem(g, app.itemTable, p, cr::startItem(int(c), e), 1);
+        // (every mode, add_item2: the weapon and armor worn - a record's jewel slot starts empty - the
+        // Human Genes plate and its two known entries)
+        add2(m.equip[cr::kWeapon]), add2(m.equip[cr::kArmor]);
+        add2(m.genes[0]);
+        for (int e = 0; e < 2; ++e) add2(cr::startItem(int(c), e));
         m.hp = m.mp = -1;
         g.party[c] = m;
         g.party[c].mp = cr::memberStat(g, int(c), cr::kMp, app.itemTable); // (prty_init: _pcparam_max_mp, a number)
@@ -10305,10 +10343,6 @@ void newPairParty(App& app, int pair, bool clearData) {
             else ++it;
         }
         if (p == 1) g.vars[0x28] = 0, g.vars[0x29] = 0;
-    } else { // mode 2: the scenario's bag is emptied (memset: the Oz and the shared genes / skills stay)
-        for (auto it = g.items.begin(); it != g.items.end();)
-            if (!cr::sharedItem(app.itemTable, it->first)) it = g.items.erase(it);
-            else ++it;
     }
     if (size_t(p) < g.noEncounters.size()) g.noEncounters[size_t(p)] = false; // (both modes: the scenario's unencountflg)
     app.game = std::move(g);
