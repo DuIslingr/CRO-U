@@ -8453,8 +8453,9 @@ void scrollBar(cr::MenuPainter& m, float dx, int top, int n, float a) {
     m.picture(77, sx - 4, y + h - 2, a);
     m.picture(106, sx, y + (h - 40) * float(top) / float(n - kRows), a);
 }
-void levelList(App& app, float from) {
+void levelList(App& app, float from, bool fresh) {
     App::WorldSelect& ws = app.worldSelect;
+    if (fresh) ws.levelCursor = 0, ws.levelTop = 0; // (__WldChoice_LvlChoiceListInit: a new list for each world)
     on(app, 3, -140, 0);
     on(app, 7, from, 0);
     ws.levelCursor = std::clamp(ws.levelCursor, 0, ws.levels - 1);
@@ -8514,7 +8515,8 @@ void closeWorldSelect(App& app) { // __menuu_WldChoiceClr
     app.game.setFlag(0, ws.cancelled);
     if (ws.cancelled) return;
     app.game.vars[0] = ws.world - wldsel::firstWorld(ws.pair);
-    app.game.vars[1] = ws.world == wldsel::lastWorld(ws.pair) ? 0 : ws.level;
+    app.game.vars[1] = ws.level; // (DAT_000eb2a8: 0 from WldChoiceSet's memset, else the band list's last answer -
+    // -1 after a Back out of it, kept for the last world, which has no list)
     app.game.vars[2] = ws.pair;
     if (ws.skip) app.game.setFlag(1, true);
     if (app.game.vars[0] == 5) app.game.setFlag(1, false);
@@ -8546,7 +8548,7 @@ void worldSelectChoose(App& app, int pos) { // state 1: a gate, or Back (-1)
         toYesNo(app, true);
         ws.state = 3, ws.timer = 4;
     } else
-        levelList(app, 480);
+        levelList(app, 480, true);
 }
 
 void worldSelectLevel(App& app, int n) { // state 6: a band, or Back (-1)
@@ -8557,6 +8559,7 @@ void worldSelectLevel(App& app, int n) { // state 6: a band, or Back (-1)
         menuSound(app, se::kBack);
         off(app, 3, 0, -140), off(app, 7, 480, 0), on(app, 6, -480, 0);
         ws.skip = false;
+        ws.level = -1; // (DAT_000eb2a8 = MuScrList_GetChoiceListNo(): -1, kept for a gate chosen next)
         ws.state = 1;
         return;
     }
@@ -8577,7 +8580,7 @@ void worldSelectAnswer(App& app, bool yes, bool cancelled = false) { // states 4
         off(app, 8, -360, 0), off(app, 9, 0, 160), off(app, 10, 0, 160);
         on(app, 4), on(app, 5);
         ws.skip = yes;
-        levelList(app, 480);
+        levelList(app, 480, true);
         return;
     }
     if (!yes) {
@@ -8587,7 +8590,7 @@ void worldSelectAnswer(App& app, bool yes, bool cancelled = false) { // states 4
             on(app, 6, -480, 0);
             ws.state = 1;
         } else
-            levelList(app, -480);
+            levelList(app, -480, false); // (state 8's No: the list as it was, MuScrList_DispOn)
         return;
     }
     off(app, 0), off(app, 1), off(app, 8), off(app, 9, 0, 160), off(app, 10, 0, 160);
@@ -19328,6 +19331,22 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                     for (const cr::EncounterGroup& g : t.groups) starts.insert({t.stage, g.group});
             }
         }
+        { // the last world (area 7): monsters with no level of their own take the World Select's band,
+            // which is -1 there after a Back out of a band list (btl_enemy_init_lv: level 0) - any?
+            int unfixed = 0, groups = 0;
+            cr::EventFile ef;
+            if (ef.load(app.dataDir, 7))
+                for (int map = 0; map < cr::kNumMaps; ++map) {
+                    cr::EncounterTable t;
+                    if (!cr::encounterTable(ef, map, t)) continue;
+                    for (const cr::EncounterGroup& g : t.groups) {
+                        ++groups;
+                        for (int id : app.battleData.group(g.group))
+                            if (const cr::MonsterDef* m = app.battleData.monster(id); id > 0 && m && m->level <= 0) ++unfixed;
+                    }
+                }
+            std::printf("last world: %d encounter groups, %d monsters taking the band's level\n", groups, unfixed);
+        }
         if (!app.events.loaded() || app.mapNumber < 0) showMap(app, 0, 0, 2);
         int started = 0, actors = 0, unnamed = 0, noModel = 0, noAction = 0, errs = 0;
         for (const auto& [stage, group] : starts) {
@@ -19601,6 +19620,26 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                     }
                     bad += good != 12;
                     std::printf("counter after a multi-go move's last go: %d/12 %s\n", good, good == 12 ? "ok" : "WRONG");
+                }
+                { // btl_enemy_init_lv: a monster of no level of its own, the band 0 against a level-60 pair -
+                    // its top, 10; the band -1 (the World Select's Back, then the last world) - level 0
+                    int id = 0;
+                    for (int k = 1; k <= app.battleData.monsterCount() && !id; ++k)
+                        if (const cr::MonsterDef* md = app.battleData.monster(k); md && md->model >= 0 && md->level <= 0 && !md->strongGrowth) id = k;
+                    cr::GameState lg;
+                    cr::giveStartingItems(lg, app.itemTable);
+                    lg.party[0].level = lg.party[1].level = 60;
+                    cr::BattleRules lr;
+                    lr.seed(1);
+                    lr.setupParty(lg, app.itemTable, 0);
+                    std::array<int, 3> one{id, 0, 0};
+                    lr.setupEnemies(app.battleData, one, 0);
+                    const int at0 = lr.f[2].level;
+                    lr.setupEnemies(app.battleData, one, -1);
+                    const int atBack = lr.f[2].level;
+                    const bool ok = id > 0 && at0 == 10 && atBack == 0;
+                    bad += !ok;
+                    std::printf("band levels (monster %d, pair 60): band 0 %d, band -1 %d %s\n", id, at0, atBack, ok ? "ok" : "WRONG");
                 }
                 { // _add_item takes no item whose icon byte (+0x10) is 0 (225-228, 310-312, 395-418, ...):
                     // does a monster's drop or steal row (+0xc8..+0xda) name one? (none: no guard needed)

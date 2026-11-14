@@ -156,7 +156,7 @@ int BattleRules::leaderLevel() const {
 void BattleRules::setupEnemies(const BattleData& data, const std::array<int, 3>& ids, int band) {
     const int L = leaderLevel();
     const int hi = L > 198 ? 200 : L + 2, lo = L < 6 ? 1 : L - 5;
-    band = std::clamp(band, 0, 19);
+    band = std::clamp(band, -1, 19); // (-1: the World Select's Back - top 0, so level 0)
     for (int k = 0; k < 3; ++k) {
         Fighter& x = f[size_t(2 + k)];
         x = Fighter();
@@ -179,7 +179,7 @@ void BattleRules::setupEnemies(const BattleData& data, const std::array<int, 3>&
             }
         } else
             lv = m->level > 0 ? m->level : L;
-        x.level = std::clamp(lv, 1, kMaxLevel);
+        x.level = std::clamp(lv, 0, kMaxLevel);
         x.hp = x.hpMax = int(m->hpAt(x.level));
         x.atk = m->atkAt(x.level);
         x.grd = m->grdAt(x.level);
