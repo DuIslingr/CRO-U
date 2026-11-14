@@ -28145,9 +28145,14 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             const size_t at = v.find('@');
             const int frame = at == std::string::npos ? -1 : SDL_atoi(v.c_str() + at + 1);
             b.rules.forceAction = action;
+            // (CR_BATTLE_PAIR: the pair stands in pair mode - a single blow on it hits both, as the videos'
+            // 508 / 510 at Part 14 861 s and Part 15 2260 s; the battle may open on the enemy's turn,
+            // so it is set again before each one)
+            const bool asPair = SDL_getenv("CR_BATTLE_PAIR") && !battleTopBarred(app, 1);
             for (int f = 0; f < 6000 && b.active; ++f) {
+                if (asPair && !b.turnOn && !b.rules.pair) b.rules.pair = true, placePair(app, true);
                 if (b.phase == App::Battle::Command && b.menu == App::Battle::Top) { // the pair defends
-                    battleChooseTop(app, 0);
+                    battleChooseTop(app, asPair ? 1 : 0);
                     battleChooseCommand(app, 3);
                     if (b.menu == App::Battle::Commands) battleChooseCommand(app, 3);
                 }

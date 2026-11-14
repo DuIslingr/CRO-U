@@ -499,7 +499,8 @@ c101/c102/c104/m207a, 2026-10-12).
       models' 14th / 15th slots), runs of cameras, effects at points and on the targets,
       sounds, white flashes over the 3D and screen quakes at the original's frames, the hit at
       the end and the wait after. Every landing hit shakes the screen (`StartQuake(3, 100, 0,
-      5)`). `--battle-view stage<action>[@frame]` makes the first enemy use one.
+      5)`). `--battle-view stage<action>[@frame]` makes the first enemy use one;
+      `CR_BATTLE_PAIR=1` puts the pair in pair mode first (a single blow then hits both).
 - [x] Smaller menu pieces from the playthrough: the event Yes / No (Util 3) as the original's
       plates at (336, 104) / (336, 160) sliding in from the right (`__menuu_EventPut`), not a
       text panel; the battle's Genes list with its HELP board (target and effect); the camp's
