@@ -78,8 +78,8 @@ Inside it, one folder per release you have (the downloads come with these folder
 ```
 <game folder>/
 ├── chaosrings                  (or chaosrings.exe, chaosrings.app, the .AppImage)
-├── ios/ChaosRingsOmegaHDeng.app/          the iPad .app (1.0.0 or 3.1.0), or Payload/ChaosRingsOmegaHDeng.app/
-├── android/                               the .obb and the 1.1.6 APK (or its classes.dex)
+├── ios/ChaosRingsOmegaHDeng.app/          the iPad .app (1.0.0 or 3.1.0), or Payload/ChaosRingsOmegaHDeng.app/, or the .ipa
+├── android/                               the .obb and the 1.1.6 APK (or its classes.dex), or the .xapk / .apks
 ├── vita/PCSG00499/                        the installed title (CRO/resources/cro.psarc, CRO/sound/*.psarc)
 ├── fsr4/                                  optional: AMD's FSR 4 files (see Settings)
 └── textures/  models/                     optional: your HD textures and models
@@ -87,16 +87,20 @@ Inside it, one folder per release you have (the downloads come with these folder
 
 - A copy may sit one or two folders deeper (as it was unpacked); the folder names below `ios/`,
   `android/` and `vita/` don't matter.
-- A NoNpDrm dump put into `vita/` still encrypted (its `app/`, plus `addcont/` for the Prequel
-  Trilogy) is decrypted on the next start, on a phone too. It needs room for the decrypted copy;
-  the dump can be deleted afterwards.
+- Files put in as they come are unpacked when the game starts, with a progress window, and that
+  same start goes on with the game: an `.ipa` in `ios/` (its `.app` unpacked beside it), an `.xapk`
+  or `.apks` in `android/` (its OBB and APKs unpacked beside it; an `.apks` needs the OBB put in
+  too), and a NoNpDrm dump in `vita/` still encrypted (its `app/`, plus `addcont/` for the Prequel
+  Trilogy: decrypted into `vita/PCSG00499/`) - on a phone too. Each needs room for the unpacked
+  copy; the file or dump you put in can be deleted afterwards.
 - Older places still work: `dataHD/`, `data/`, `ChaosRingsOmegaHDeng.app/` or `Payload/` straight in
   the game folder, or the working directory.
 - A copy somewhere else: `--data <iOS data>` (or `CR_DATA`), `--vita <PCSG00499 folder>`
   (`CR_VITA`), `--android <folder>` (`CR_ANDROID`), or pick the folders in Options, Game (kept in
   `settings.ini`). `--vita none` / `--android none` run without them.
 
-If nothing is found, the program tells you where it looked. All four ports (CR1:U, CRO-U, CR2-U,
+If nothing is found, the program tells you where it looked; put the files in and choose *Look
+again* - no restart needed. All four ports (CR1:U, CRO-U, CR2-U,
 CR3-U) find their copies the same way.
 
 ## Controls

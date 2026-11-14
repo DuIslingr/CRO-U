@@ -331,7 +331,9 @@ bool zipEntries(std::FILE* f, uint64_t fileSize, std::vector<ZipEntry>& out, std
     return true;
 }
 
-bool unpackEntry(std::FILE* f, const ZipEntry& e, const std::string& path, std::string* error) {
+// (`wrote`: the bytes written so far, as it goes - a 1 GB OBB's bar moves)
+bool unpackEntry(std::FILE* f, const ZipEntry& e, const std::string& path, std::string* error,
+                 const std::function<void(uint64_t)>& wrote = {}) {
     uint8_t h[30];
     if (!readAt(f, e.local, h, sizeof h) || u32(h) != 0x04034b50) return fail(error, e.name + ": no local header");
     const uint64_t data = e.local + 30 + u16(h + 26) + u16(h + 28);
@@ -344,6 +346,7 @@ bool unpackEntry(std::FILE* f, const ZipEntry& e, const std::string& path, std::
             const size_t n = size_t(std::min<uint64_t>(left, in.size()));
             ok = std::fread(in.data(), 1, n, f) == n && std::fwrite(in.data(), 1, n, o) == n;
             left -= n;
+            if (wrote) wrote(e.size - left);
         }
     } else if (e.method == 8) {
 #if defined(CR_HAVE_ZLIB)
@@ -362,6 +365,7 @@ bool unpackEntry(std::FILE* f, const ZipEntry& e, const std::string& path, std::
             if (r != Z_OK && r != Z_STREAM_END) ok = false;
             const size_t got = buf.size() - s.avail_out;
             ok = ok && std::fwrite(buf.data(), 1, got, o) == got;
+            if (wrote) wrote(s.total_out);
         }
         inflateEnd(&s);
         ok = ok && r == Z_STREAM_END;
@@ -1100,6 +1104,62 @@ bool inGameFolder(const std::vector<std::string>& roots, const std::function<int
     return false;
 }
 
+// ---- the Android release as a bundle: an .xapk (its APKs and Android/obb/<package>/main.*.obb), an
+// .apks (its APKs; the OBB beside it) or a .zip holding the OBB - its parts unpacked into android/ as
+// files put there by hand (the bundle read from where it lies: no copy of it first)
+
+std::string lowered(std::string s) {
+    for (char& c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+bool androidBundle(const std::string& name) {
+    const std::string n = lowered(name);
+    return endsWith(n, ".xapk") || endsWith(n, ".apks") || endsWith(n, ".zip");
+}
+// the game's own OBB (main.<version>.<package>.obb), wherever it is in the bundle
+bool gameObb(const SetupGame& g, const std::string& entry) {
+    const std::string n = lowered(baseName(entry));
+    return n.compare(0, 5, "main.") == 0 && endsWith(n, ("." + lowered(g.package) + ".obb").c_str());
+}
+
+// `bundle`'s OBB and APKs unpacked into `dest` (each by .part, those there already at their size
+// kept); `made` what was written. A .zip without the game's OBB isn't one (not any zip lying there)
+bool unbundleAndroid(const SetupGame& g, const std::string& bundle, const std::string& dest, std::vector<std::string>& made,
+                     std::string* error, const std::function<void(double)>& progress = {}) {
+    std::FILE* f = std::fopen(bundle.c_str(), "rb");
+    if (!f) return fail(error, "can't be opened");
+    std::vector<ZipEntry> all, parts;
+    if (!zipEntries(f, fileBytes(bundle), all, error)) return std::fclose(f), false;
+    bool obb = false;
+    for (const ZipEntry& e : all) {
+        if (e.name.empty() || e.name.back() == '/') continue;
+        if (gameObb(g, e.name)) parts.push_back(e), obb = true;
+        else if (e.name.find('/') == std::string::npos && endsWith(lowered(e.name), ".apk")) parts.push_back(e);
+    }
+    if (parts.empty() || (endsWith(lowered(bundle), ".zip") && !obb))
+        return std::fclose(f), fail(error, std::string("neither ") + g.title + "'s APK nor its OBB is in it");
+    uint64_t total = 0, done = 0;
+    std::vector<ZipEntry> todo;
+    for (const ZipEntry& e : parts)
+        if (fileBytes(dest + baseName(e.name)) != e.size || e.size == 0) todo.push_back(e), total += e.size; // (unpacked before: kept)
+    bool ok = true;
+    for (const ZipEntry& e : todo) {
+        const std::string to = dest + baseName(e.name), part = to + ".part";
+        ok = unpackEntry(f, e, part, error, [&](uint64_t n) {
+            if (progress && total) progress(double(done + n) / double(total));
+        });
+        if (ok) SDL_RemovePath(to.c_str()), ok = SDL_RenamePath(part.c_str(), to.c_str()) || fail(error, to + ": can't be made");
+        if (!ok) {
+            SDL_RemovePath(part.c_str());
+            break;
+        }
+        made.push_back(to);
+        done += e.size;
+    }
+    std::fclose(f);
+    return ok;
+}
+
 // the Android files: those picked that are packages, and beside them the OBB of its name and the
 // APKs carrying its package (not every APK in a downloads folder - another game's)
 std::vector<std::string> androidFiles(const SetupGame& g, const std::vector<std::string>& picked) {
@@ -1235,7 +1295,8 @@ bool runSetup(const SetupGame& g, const std::string& folder, const std::string& 
             }
             uint64_t total = 0;
             for (const std::string& f : files) total += fileBytes(f);
-            Progress bar(g.title, "Copying the Android release ...");
+            Progress bar(g.title, std::any_of(files.begin(), files.end(), [](const std::string& f) { return androidBundle(f); }) ? "Unpacking the Android release ..."
+                                                                                                                      : "Copying the Android release ...");
             Copier copy{[&](double v) { bar.show(v); }, total};
             std::string dest;
             bool notGame = false;
@@ -1245,6 +1306,26 @@ bool runSetup(const SetupGame& g, const std::string& folder, const std::string& 
                 copy.done = 0;
                 std::vector<std::string> made;
                 for (const std::string& f : files) {
+                    if (androidBundle(f)) { // (an .xapk / .apks: its OBB and APKs unpacked into android/, not the bundle copied - read as they are)
+                        const uint64_t at = copy.done, size = fileBytes(f);
+                        std::vector<std::string> parts;
+                        std::string why;
+                        const bool got = unbundleAndroid(g, f, a, parts, &why, [&](double v) {
+                            copy.done = at + uint64_t(v * double(size));
+                            if (total) bar.show(double(copy.done) / double(total));
+                        });
+                        made.insert(made.end(), parts.begin(), parts.end());
+                        if (!got) {
+                            SDL_Log("setup: %s: %s", f.c_str(), why.c_str());
+                            for (const std::string& m : made) SDL_RemovePath(m.c_str());
+                            if (why.find(" is in it") == std::string::npos) return 0;
+                            notGame = true;
+                            return -1;
+                        }
+                        copy.done = at + size;
+                        if (staged(f)) SDL_RemovePath(f.c_str()); // (a pick copied in: unpacked, gone)
+                        continue;
+                    }
                     const std::string to = a + baseName(f);
                     const bool placed = staged(f) ? SDL_RenamePath(f.c_str(), (to + ".part").c_str()) : copy.file(f, to + ".part"); // (a pick copied in: moved)
                     if (!placed || (SDL_RemovePath(to.c_str()), !SDL_RenamePath((to + ".part").c_str(), to.c_str()))) {
@@ -1484,6 +1565,148 @@ bool installDroppedVita(const SetupGame& g, const std::string& folder, SetupResu
     }
     if (video) SDL_QuitSubSystem(SDL_INIT_VIDEO);
     return got > 0;
+}
+
+std::function<void(const std::string&, double)> progressWindow(const SetupGame& g, const std::string& what) {
+    // (opened at the first call - nothing to do, no window -, closed with the last copy of the function)
+    auto bar = std::make_shared<std::unique_ptr<Progress>>();
+    auto shown = std::make_shared<std::string>();
+    return [g, what, bar, shown](const std::string& item, double f) {
+        if (!*bar) {
+            SDL_InitSubSystem(SDL_INIT_VIDEO); // (before the game's window: SDL may not be up yet)
+            *bar = std::make_unique<Progress>(g.title, what);
+        }
+        if (item != *shown) { // (each item named: logged, and on the bar)
+            *shown = item;
+            SDL_Log("setup: %s %s", what.c_str(), item.c_str());
+            (*bar)->label = what + " " + item;
+            (*bar)->show(f, true);
+        } else
+            (*bar)->show(f);
+    };
+}
+
+namespace {
+// <dir>.unpacked: the files dropped in there that were dealt with ("name size" lines) - said once,
+// not at every start; the same file put in again (another size) taken anew
+std::string readDoneList(const std::string& path) {
+    std::string list;
+    if (std::FILE* f = std::fopen(path.c_str(), "rb")) {
+        char buf[4096];
+        for (size_t n; (n = std::fread(buf, 1, sizeof buf, f)) > 0;) list.append(buf, n);
+        std::fclose(f);
+    }
+    return list;
+}
+std::string doneLine(const std::string& file) { return baseName(file) + " " + std::to_string(fileBytes(file)) + "\n"; }
+void writeDoneList(const std::string& path, const std::string& list) {
+    if (std::FILE* f = std::fopen(path.c_str(), "wb")) {
+        std::fwrite(list.data(), 1, list.size(), f);
+        std::fclose(f);
+    }
+}
+} // namespace
+
+bool installDroppedIpa(const SetupGame& g, const std::string& folder, bool quiet) {
+    const std::string t = withSlash(folder) + "ios/";
+    if (!isDir(t)) return false;
+    // each .ipa there unpacked once - ios/.unpacked lists those done (name and size) -, not where an
+    // unpacked .app the game reads is there already (put in by hand, or the setup's)
+    const std::string listPath = t + ".unpacked";
+    std::string list = readDoneList(listPath);
+    std::vector<std::string> ipas;
+    bool haveApp = false;
+    int count = 0;
+    char** names = SDL_GlobDirectory(t.c_str(), "*", 0, &count);
+    for (int k = 0; names && k < count; ++k) {
+        const std::string n = names[k], p = t + n;
+        if (n.empty() || n[0] == '.') continue;
+        if (isDir(p)) {
+            if (endsWith(n, ".app") && (!g.iosOk || g.iosOk(p))) haveApp = true;
+            continue;
+        }
+        if (!endsWith(lowered(n), ".ipa")) continue;
+        if (list.find(doneLine(p)) == std::string::npos) ipas.push_back(p);
+    }
+    SDL_free(names);
+    if (ipas.empty() || haveApp) {
+        if (!ipas.empty()) SDL_Log("setup: %s in %s left - an unpacked .app is there already", baseName(ipas.front()).c_str(), t.c_str());
+        return false;
+    }
+    const bool video = SDL_InitSubSystem(SDL_INIT_VIDEO);
+    bool any = false;
+    for (const std::string& ipa : ipas) {
+        SDL_Log("setup: %s in %s, unpacking it", baseName(ipa).c_str(), t.c_str());
+        std::string app, why;
+        bool ok;
+        {
+            Progress bar(g.title, "Unpacking " + baseName(ipa) + " ...");
+            ok = unpackIpa(ipa, t, app, &why, [&](double v) { bar.show(v); });
+        }
+        if (ok && g.iosOk && !g.iosOk(app)) { // (another app's .ipa: taken out again)
+            removeTree(app);
+            ok = false, why = std::string("it isn't ") + g.title + "'s iOS release";
+        }
+        if (!ok) note(g, baseName(ipa) + " can't be unpacked: " + why, quiet);
+        else note(g, baseName(ipa) + " is unpacked into " + app + " - the .ipa isn't needed any more: delete it to get the space back.", quiet);
+        any = any || ok;
+        list += doneLine(ipa); // (listed either way: said once, not at every start)
+        if (ok) break; // (one release is the game)
+    }
+    writeDoneList(listPath, list);
+    if (video) SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    return any;
+}
+
+bool installDroppedAndroid(const SetupGame& g, const std::string& folder, bool quiet) {
+    const std::string a = withSlash(folder) + "android/";
+    if (!isDir(a)) return false;
+    // each .xapk / .apks / .zip there unpacked once - android/.unpacked lists those done -, not where
+    // the release the game reads is there already (its OBB and APK, put in by hand or unpacked before)
+    const std::string listPath = a + ".unpacked";
+    std::string list = readDoneList(listPath);
+    std::vector<std::string> bundles;
+    int count = 0;
+    char** names = SDL_GlobDirectory(a.c_str(), "*", 0, &count);
+    for (int k = 0; names && k < count; ++k) {
+        const std::string n = names[k], p = a + n;
+        if (n.empty() || n[0] == '.' || isDir(p) || !androidBundle(n)) continue;
+        if (list.find(doneLine(p)) == std::string::npos) bundles.push_back(p);
+    }
+    SDL_free(names);
+    if (bundles.empty()) return false;
+    if (g.androidOk && g.androidOk(a)) {
+        SDL_Log("setup: %s in %s left - the Android release is there already", baseName(bundles.front()).c_str(), a.c_str());
+        return false;
+    }
+    const bool video = SDL_InitSubSystem(SDL_INIT_VIDEO);
+    bool any = false;
+    for (const std::string& b : bundles) {
+        SDL_Log("setup: %s in %s, unpacking it", baseName(b).c_str(), a.c_str());
+        std::vector<std::string> made;
+        std::string why;
+        bool ok;
+        {
+            Progress bar(g.title, "Unpacking " + baseName(b) + " ...");
+            ok = unbundleAndroid(g, b, a, made, &why, [&](double v) { bar.show(v); });
+        }
+        const bool whole = ok && (!g.androidOk || g.androidOk(a));
+        if (!ok) {
+            for (const std::string& m : made) SDL_RemovePath(m.c_str());
+            const bool other = endsWith(lowered(b), ".zip") && why.find(" is in it") != std::string::npos; // (any zip lying there: not said)
+            note(g, baseName(b) + " can't be unpacked: " + why, quiet || other);
+        } else if (whole) {
+            note(g, baseName(b) + " is unpacked into " + a + " - the " + baseName(b) + " isn't needed any more: delete it to get the space back.", quiet);
+        } else { // (an .apks: its OBB lies beside it - kept, found once the OBB is put in)
+            note(g, baseName(b) + " is unpacked into " + a + ", but " + g.title + "'s " + g.obbHint + " isn't there - put it in " + a + " too.", quiet);
+        }
+        any = any || whole;
+        list += doneLine(b); // (listed either way: said once, not at every start)
+        if (whole) break; // (one release is the game)
+    }
+    writeDoneList(listPath, list);
+    if (video) SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    return any;
 }
 
 bool installDroppedPatch(const SetupGame& g, const std::string& folder, bool quiet) {
