@@ -21661,6 +21661,7 @@ int mobileInputSelfTest(App& app) {
     app.game = cr::GameState();
     app.playerChar = 0;
     for (int n = 1; n <= 630; ++n) app.game.items[n] = 10;
+    app.game.setFlag(0x38, true); // (56010, the first plate's once-only message, read: 3.1.0's CampMainSet - 4d8fe6a)
     const auto keepVideo = app.video;
     auto pointer = [&](SDL_EventType type, float mx, float my) {
         float x0, y0, x1, y1;
@@ -21737,7 +21738,20 @@ int mobileInputSelfTest(App& app) {
             c.page = App::Camp::Equip, c.phase = App::Camp::Slot, c.anim = anim;
             c.slot = c.slotTop = slot; // (the slot on the line)
             tap(campListX(app) + 60, campui::kFocusY + 20);
-            const bool ok = c.slot == slot && c.phase == App::Camp::List;
+            // In scenario 0 the Human Genes row of Escher's own 474 is a -4 row (3.1.0's _MuScrList_GetChoiceListNo
+            // kind 4: 474..476 while the scenario byte is 0 - b171882): the tap on it is refused, the Slot phase kept.
+            // The row's hitbox is then checked in scenario 1, where the pair's own Human Genes (477..) open
+            const bool refused = slot == 3;
+            bool ok = c.slot == slot && c.phase == (refused ? App::Camp::Slot : App::Camp::List);
+            if (refused) {
+                app.game.scenario = 1;
+                openCamp(app);
+                c.page = App::Camp::Equip, c.phase = App::Camp::Slot, c.anim = anim;
+                c.slot = c.slotTop = slot;
+                tap(campListX(app) + 60, campui::kFocusY + 20);
+                ok &= c.slot == slot && c.phase == App::Camp::List;
+                app.game.scenario = 0;
+            }
             problems += !ok;
             if (!ok) std::printf("mobile equipment: layout %d wide %d anim %d slot %d FAILED\n", layout, wide, anim, slot);
             ++slots;
@@ -22058,6 +22072,10 @@ int graphicsRecoverySelfTest(App& app) {
         app.renderer.readPixels(pixels, w, h);
         return pixels;
     };
+    if (!SDL_GL_GetCurrentContext()) { // (Vulkan: the GL backups and their context aren't used - nothing to replace)
+        std::printf("graphics recovery: needs the OpenGL renderer (--renderer gl); 1 problem\n");
+        return 1;
+    }
     frame(); // populate lazy UI resources
     const auto before = frame();
     if (const char* file = SDL_getenv("CR_SELFTEST_GRAPHICS_CAPTURE")) saveFrame(app, file);
@@ -22174,11 +22192,19 @@ int sessionUiSelfTest(App& app) {
         event.key.key = code;
         SDL_AppEvent(&app, &event);
     };
+    // Options' Return to Title as 3.1.0's OptionPrc plays it (a638921): the row asks 57060 with No under
+    // the cursor (0xc / 0xd), Yes fades to black and the title comes twelve frames on (0x18 / 0x19)
+    auto returnToTitle = [&] {
+        key(SDLK_END); key(SDLK_RETURN);
+        if (app.resetAsk != 3 || app.resetConfirm != 1) return;
+        key(SDLK_UP); key(SDLK_RETURN);
+        for (int f = 0; f < 14 && app.titleReturnIn > 0; ++f) stepEvents(app);
+    };
     field();
     openCamp(app);
     campOpenPage(app, 4); // Camp -> Options, the real Return to Title path
     app.playing = false;
-    key(SDLK_END); key(SDLK_RETURN);
+    returnToTitle();
     check(app.booting && !app.campOpen && !app.optionsOpen, "Camp cannot cover or capture input on the title");
     check(app.playing, "return to title resumes normal game updates");
     // This directory contains only this test's synthetic save, never player progress.
@@ -22234,15 +22260,19 @@ int sessionUiSelfTest(App& app) {
         SDL_SaveFile(path.c_str(), text.data(), text.size());
         check(cr::readSave(path, got) && got.game.oz == 54321, "a whole save still reads");
     }
-    std::vector<uint8_t> before, after;
+    std::vector<uint8_t> before, after, dataBefore, dataAfter;
     cr::readFile(path, before);
     openSaveScreen(app, false);
-    key(SDLK_V); key(SDLK_END); key(SDLK_RETURN);
+    // (a save goes to data.dat since 63286c5, the one save: the screen's read folds save1.dat into it)
+    cr::readFile(dataPath(app), dataBefore);
+    key(SDLK_V); returnToTitle();
     check(app.booting && !app.saveScreen.open && app.saveScreen.pending == 0,
           "return to title cancels a pending save confirmation");
     key(SDLK_RETURN); // a late confirmation must not overwrite the test's existing file
     cr::readFile(path, after);
-    check(!before.empty() && after == before, "late Enter cannot overwrite the previous save from the title");
+    cr::readFile(dataPath(app), dataAfter);
+    check(!before.empty() && after == before && !dataBefore.empty() && dataAfter == dataBefore,
+          "late Enter cannot overwrite the previous save from the title");
     // Clear broader overlays and detach an asynchronous picker from the old session.
     app.campOpen = app.manualOpen = app.scc.open = app.charSelectOpen = true;
     app.itemWindowOpen = app.shop.open = app.shop.talkRunning = true;
@@ -29573,6 +29603,9 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     for (int i = 1; i + 1 < argc; ++i)
         if (SDL_strcmp(argv[i], "--renderer") == 0) choice = argv[i + 1];
     if (choice && (SDL_strcasecmp(choice, "gl") == 0 || SDL_strcasecmp(choice, "opengl") == 0)) want = cr::Backend::OpenGL;
+    // (the graphics-recovery self-test replaces the GL context - docs/GRAPHICS_RECOVERY.md - so it starts on
+    // OpenGL unless a renderer is named: under Vulkan there is no context to lose)
+    if (!choice && SDL_getenv("CR_SELFTEST_GRAPHICS")) want = cr::Backend::OpenGL;
     cr::useBundledVulkan(); // (macOS: the .app's own loader)
     for (cr::Backend b : {want, cr::Backend::OpenGL}) {
         const uint64_t flags = cr::Renderer::windowFlags(b);

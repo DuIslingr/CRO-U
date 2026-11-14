@@ -104,6 +104,9 @@ Use `CR_GLES=ON` for CR1/Omega, `CR2_GLES=ON` for CR2, or `CR3_GLES=ON`
 for CR3 when configuring a desktop GLES build. The real-scene checks use
 `CR_SELFTEST_GRAPHICS=1` with CR1/Omega's `--selftest`, or with CR2/CR3's
 `--capture` and a selected model/area. They require user-supplied game data.
+CR1/Omega's group starts on OpenGL unless `--renderer` / `CR_RENDERER` names a
+renderer: under the default Vulkan renderer there is no GL context to replace, and
+the check says so instead of passing.
 
 Remaining device validation: background/resume with the OS actually discarding
 the EGL context, orientation changes on physical Android hardware, and the
