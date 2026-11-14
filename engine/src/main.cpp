@@ -812,6 +812,10 @@ struct App {
         int turnFrame = 0, hitFrame = 0;
         int bounceAt = -1;                 // a reflected gene's turn: when it comes back (-1 not yet met)
         bool hitsShown = false;
+        // the pair flags the action's calculation left (a member's fall ends pair mode, a fall the enemies'
+        // pair round), held back until its hit: the original calculates there (_btlcalc_prc at the hit
+        // frame, after _btlact_*_init chose the cameras and spots from +0xaf0 / +0xaf4)
+        bool pairHeld = false, pairAfterHit = false, enemyPairAfterHit = false;
         struct Popup {                     // __dmg_set's slot (+0x990, 0x28 each)
             bool on = false;               // +0x9b7
             cr::Vec3 at;                   // +0x994: the target's node 1102 as it was hit
@@ -15397,7 +15401,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     b.view = {};
     b.viewState = 0, b.slide = battleSlideDistance(app), b.slideHold = 0, b.menuGone = 100, b.roundWait = false, b.hudSlide = 0;
     b.analyze = {};
-    b.turnOn = false;
+    b.turnOn = false, b.pairHeld = false;
     for (App::Battle::Popup& p : b.popups) p = App::Battle::Popup();
     b.banner.clear();
     b.bannerFrames = 0;
@@ -15680,7 +15684,7 @@ void battleStartRound(App& app) {
             if (App::Battle::Actor* a = battleActor(app, k)) playSlot(app, *a, btlui::kSlotGuard);
     b.phase = App::Battle::Acting;
     b.phaseFrames = 0;
-    b.turnOn = false;
+    b.turnOn = false, b.pairHeld = false;
     b.roundWait = true; // (the menu goes first: menub_mainPrc 0x270e, then btl_main 500 / 600)
     // btl_main 500: the message queue's count (+0xae4) back to 0; the banner up stays - 500 / 600 /
     // 700 don't wait for it (only 799, between actions, does), and the first action's name replaces it
@@ -16867,10 +16871,16 @@ void analyzeTap(App& app) {
     b.bannerFrames = std::min(b.bannerFrames, 40); // (2000 ms left on it)
 }
 
+void releasePair(App::Battle& b) { // the calc's pair flags, as its hit comes (see pairHeld)
+    if (b.pairHeld) b.rules.pair = b.pairAfterHit, b.rules.enemyPair = b.enemyPairAfterHit;
+    b.pairHeld = false;
+}
+
 // The hits land: the numbers, the targets' reactions, the HP the HUD shows
 void showHits(App& app) {
     App::Battle& b = app.battle;
     b.hitsShown = true;
+    releasePair(b);
     if (b.turn.message > 0) { // stolen Oz, a monster running, the barrier, the Apples
         std::string name = b.turn.message == 57005 || b.turn.message == 57049 || b.turn.message == 57050
                                ? itemName(app, b.turn.messageValue)
@@ -17742,7 +17752,13 @@ void stepBattle(App& app) {
             // original's frame, the port's view after the logic - so the logic sees the view a frame on)
             if (b.roundWait && (b.viewState != 0 || b.menuGone < 1)) break;
             b.roundWait = false;
+            const bool pairWas = b.rules.pair, enemyPairWas = b.rules.enemyPair;
             if (b.rules.nextTurn(app.battleActions, b.turn)) {
+                // the calc ran ahead of the scene: its chk_dead may have ended pair mode (3.1.0 _btlcalc_chk_dead
+                // 27581 clears +0xaf0) - shown at the hit (showHits), as the original's _btlact_attack calls
+                // _btlcalc_prc there (12904), after _btlact_attack_init read +0xaf0 for its camera (12271)
+                b.pairHeld = true, b.pairAfterHit = b.rules.pair, b.enemyPairAfterHit = b.rules.enemyPair;
+                b.rules.pair = pairWas, b.rules.enemyPair = enemyPairWas;
                 b.turnOn = true;
                 startTurn(app);
             } else if (std::none_of(std::begin(b.popups), std::end(b.popups), [](const App::Battle::Popup& p) { return p.on; })) {
@@ -17822,6 +17838,7 @@ void stepBattle(App& app) {
                 b.stageSkip = 0;
                 b.fov = 28.5f;
                 b.turnOn = false;
+                releasePair(b); // (a turn without a hit shown)
                 // btlord_chk: a side lost the Break - its effect first (btl_main 0x5dc)
                 if (b.rules.breakChanging()) startBreakFx(app);
                 // btl_main 700: the action's tutorials - an element taken, a status, a gene learned
