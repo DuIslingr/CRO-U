@@ -29520,6 +29520,9 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
     if (app.captureOptions) { // --volume-menu (page 1) / --video-menu (page 4)
         loadMix(app);
         const int page = app.optionsPage;
+        // (the page itself: "About Option" - flag 0x43's once-only message, which holds it back - seen;
+        // CR_CAPTURE_OPTIONS_ABOUT=1 keeps it)
+        if (!SDL_getenv("CR_CAPTURE_OPTIONS_ABOUT")) app.game.setFlag(0x43, true);
         openOptions(app, page);
         app.optionsAnim = 100;
         if (const char* ra = SDL_getenv("CR_CAPTURE_RESET")) app.resetAsk = SDL_atoi(ra); // (Reset Data's question 1 / 2)
