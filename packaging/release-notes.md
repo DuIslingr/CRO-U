@@ -1,43 +1,31 @@
-# CRO-U v0.7.1
+# CRO-U v0.7.2
 
-A fix release for [v0.7.0](https://github.com/DuIslingr/CRO-U/releases/tag/v0.7.0): two story battles
-that ended the game, a controller Windows stopped finding, and missing text on some Android phones.
-Everything in v0.7.0's notes still applies.
-
-> **Hotfix (downloads replaced):** the downloads were rebuilt on the day of release with one more fix:
-> **Infinite HP no longer traps you in a battle the story has you lose.** Those fights go on from
-> your pair's defeat, which Infinite HP never let come, so some could go on with nothing to end
-> them. Infinite HP now holds in them as long as you can still bring a foe down (so a fight you can
-> win stays winnable), and lapses once no foe can fall: each one is at its last-stand HP or can't be
-> hurt, or three rounds pass with no foe losing HP. Then the defeat comes and the story goes on.
-> One-Hit Kills stays on everywhere (a foe the story keeps standing stays standing). If you
-> downloaded v0.7.1 before the hotfix, download it again.
+A fix release for [v0.7.1](https://github.com/DuIslingr/CRO-U/releases/tag/v0.7.1): three things that
+looked wrong, all reported by metastigma. Everything in v0.7.0's and v0.7.1's notes still applies.
 
 ## Fixed
 
-- **The opening battle with the Agent, and its twin in the second scenario, no longer end in a game
-  over** ([#3](https://github.com/DuIslingr/CRO-U/issues/3)). These are battles you're meant to lose:
-  in the original, the pair falls in the first round and the story carries on, as the reference
-  recording shows. CRO-U only let the story go on from the second round, so the first-round defeat
-  sent you back to the title; only Infinite HP got past it.
-- **Flydigi controllers on Windows** ([#4](https://github.com/DuIslingr/CRO-U/issues/4)): a Vader 4
-  Pro, wired or through its receiver, wasn't found since v0.7.0's SDL update. SDL 3.4 added its own
-  Flydigi driver, which takes the controller and then gets no input from it; CRO-U now leaves that
-  driver off on Windows, so the controller is read through XInput as before. Setting the environment
-  variable `SDL_JOYSTICK_HIDAPI_FLYDIGI=1` turns SDL's driver back on. Every controller SDL finds is
-  now written to `chaosrings.log`, so if one still isn't picked up, the log shows why.
-- **No text on some Android phones:** phones whose maker ships its own fonts, without Android's usual
-  Noto fonts where CRO-U looked, showed the game's Japanese, Chinese and Korean text missing (and the
-  rest in a blocky fallback). CRO-U now reads the phone's own font list and uses the fonts it names
-  for those languages, then the phone's default font.
+- **Battle models no longer turn speckled and see-through on some graphics cards**
+  ([#5](https://github.com/DuIslingr/CRO-U/issues/5)). A battle model draws parts of itself twice, and
+  the second copy only keeps pixels that are fully opaque. CRO-U checked that with an exact
+  comparison, while the original allows for rounding; on GPUs that land a hair short, scattered pixels
+  were dropped and Vieg's skin, arms and sword showed the sky through them. The check now matches the
+  original's, in both the Vulkan and the OpenGL renderer.
+- **The opening's "CHAOS RINGS" title sits inside the eclipse's ring**
+  ([#7](https://github.com/DuIslingr/CRO-U/issues/7)), as the original has it, instead of up and to
+  the left of it with its black box showing over the glow.
+- **The snowfield's frosty frame borders the whole screen**
+  ([#8](https://github.com/DuIslingr/CRO-U/issues/8)) on the iPhone, Android and Vita layouts and in
+  widescreen, instead of sitting off-centre with a second copy at the edge. The same goes for the
+  canvas and frames of a later area.
+- **Infinite HP no longer traps you in a battle the story has you lose** (already in v0.7.1's
+  re-uploaded downloads): it holds while you can still bring a foe down, and lapses once none can
+  fall, so the defeat and the story come.
 
 ### Thanks to metastigma
 
-[metastigma](https://github.com/metastigma) reported the Flydigi problem and investigated it in their
-fork ([CRO-U-metastigma#42](https://github.com/metastigma/CRO-U-metastigma/pull/42),
-[#43](https://github.com/metastigma/CRO-U-metastigma/pull/43)); CRO-U's controller events already work
-as their #43 does, and this release takes the narrower fix above instead of their development build of
-SDL.
+[metastigma](https://github.com/metastigma) reported all three, with screenshots that made each one
+easy to find.
 
 ## Downloads
 
