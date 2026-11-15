@@ -4626,6 +4626,9 @@ void applyVideo(App& app) {
     // (a phone's or tablet's: no resolution, window or aspect choice - the whole screen at its own pixels, the
     // picture widening to its shape; a settings file's other values, an older version's, set aside)
     v.display = 0, v.widescreen = true;
+    r.setFillScreen(true);
+#else
+    r.setFillScreen(SDL_getenv("CR_PHONE_FILL") != nullptr); // (tests: a phone's fill on a desktop)
 #endif
     r.setWidescreen(v.widescreen);
     // 2.2.0's / Omega's iPhone screens (3:2): the iPhone's data, or the Vita's alone - its art is the
@@ -5104,7 +5107,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
             app.video.avoidCutout = i == 0;
             saveMix(app);
         });
-        rows.back().hint = "Avoid: the menus and the picture kept clear of the camera's notch or punch hole. Ignore: the picture to the screen's edges";
+        rows.back().hint = "Avoid: the menus and buttons kept clear of the camera's notch or punch hole (the picture fills the screen either way). Ignore: they reach the edges too";
 #else
         static const char* const kDisplay[] = {"Window", "Fullscreen", "Borderless"};
         value("Resolution", v.display == 2 ? "Desktop" : std::to_string(v.width) + " x " + std::to_string(v.height),
@@ -5322,11 +5325,12 @@ void phoneMenuPoint(const App& app, float& mx, float& my) {
 // (inside the display's safe area: off a camera hole)
 float wideLeft(const App& app) {
     const cr::Renderer& r = app.renderer;
-    return r.phoneLayout() ? r.uiX() : std::min(r.uiX(), r.safeLeft());
+    return r.phoneLayout() ? r.uiX() : r.safeLeft(); // (no further out than a camera cutout's inset; where it reaches the
+    // interface itself, the renderer draws that smaller - Renderer::interfaceRect)
 }
 float wideRight(const App& app) {
     const cr::Renderer& r = app.renderer;
-    return r.phoneLayout() ? r.uiX() : std::max(r.uiX(), 2 * r.uiX() - r.safeRight());
+    return r.phoneLayout() ? r.uiX() : 2 * r.uiX() - r.safeRight();
 }
 // The Android layout (docs/ANDROID.md "The phone's edges"): how far the phone's own edges lie
 // outside the centred 480 x 320 screen, in tex2d units - Android 1.1.6's gac +0x1e2688 / +0x1e268c
@@ -19611,6 +19615,11 @@ void drawMenuMaskShape(App& app, int alpha) {
     if (alpha <= 0) return;
     cr::Renderer& r = app.renderer;
     r.setOrigin(0);
+    struct Picture { // (the mask is the picture's: to the screen's edges, unshrunk by a camera cutout - interfaceRect)
+        cr::Renderer& r;
+        explicit Picture(cr::Renderer& rr) : r(rr) { r.setPictureLayer(true); }
+        ~Picture() { r.setPictureLayer(false); }
+    } picture(r);
     const float a = float(alpha) / 255.0f, SW = r.screenW(), H = cr::Renderer::kLogicalH, x0 = r.uiX();
     switch (app.menuMask.type) {
     case 1: { const float q[8] = {0, 0, x0 + 427, 0, x0 + 747, H, 0, H}; r.fillQuad(q, 0, 0, 0, a); break; }

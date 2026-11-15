@@ -168,11 +168,24 @@ public:
     int frameHeight() const { return drawableH_; }
     // Window pixels per logical pixel (text is rasterised at this density).
     float pixelScale() const { return phone_ ? scale_ * layoutScale() : scale_; }
+    // (what is drawn meanwhile is the picture's, not the interface's - a menu's mask made of pieces narrower than the
+    // screen: left to fill it, unshrunk)
+    void setPictureLayer(bool on) { pictureLayer_ = on; }
+    // a phone's or tablet's: widescreen goes narrower than the layout's own shape (down to 4:3) - the picture fills
+    // the screen, the interface is drawn smaller where it doesn't fit (applyVideo; CR_PHONE_FILL for tests)
+    void setFillScreen(bool on) { fillScreen_ = on; }
+    float interfaceShrink() const { return uiShrink_; } // (1 unless a camera's cutout reaches into the interface)
 
 private:
     bool clipV(float& y, float& h, float& t0, float& t1) const;
     void mapScreen(int w, int h); // logical screen -> the current target's pixels
     float safeEdge(float insetPx) const; // a window-pixel inset, in logical units in from the screen's edge
+    // The interface's shrink about the screen's centre, clear of a camera's cutout (1: none - mapScreen);
+    // a quad as wide as the screen (art, backgrounds, fades) keeps its place: the picture fills the screen
+    float uiShrink_ = 1;
+    bool pictureLayer_ = false;
+    bool fillScreen_ = false;
+    void interfaceRect(float& x, float& y, float& w, float& h) const;
 
     std::unique_ptr<RenderDevice> dev_;
     Backend backend_ = Backend::OpenGL;
