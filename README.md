@@ -320,7 +320,7 @@ share `re/` or `extracted/`.
 - **Licence:** GPL-2.0-or-later (`LICENSE`). The macOS `.app` is GPL-3.0, because the Vulkan loader
   and MoltenVK it carries are Apache-2.0.
 - **Third-party code:** the bundled libraries (FAAD2, LibAtrac9, vgmstream's HE-VAG table, AMD's FSR
-  SDK, stb, cgltf, Vita3K's psvpfsparser, and SDL3, zlib and libarchive built from source) keep
+  SDK, stb, cgltf, and SDL3, zlib and libarchive built from source) keep
   their own licences: see [`THIRD_PARTY.md`](THIRD_PARTY.md).
 - **Not affiliated:** a fan preservation project, not affiliated with or endorsed by Square Enix or
   Media.Vision. *Chaos Rings Omega* and its assets are their property; the port loads them at run
