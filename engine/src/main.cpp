@@ -1127,6 +1127,10 @@ struct App {
     int playerChar = 0;                    // the leader's record (game.leaders[scenario]): its field model
     bool messageSkip = false;              // Uty_Chg_MsgSkip
     LoadedModel player;
+    // A script's Anim on npc 0 (__EvtAnim: mdl_set_act_motion_loop on the leader, gac +0x1338): its
+    // motion and loop start while a script holds the field - FieldPCCtrl::operate sets the leader's
+    // stand / walk / run from the stick only when nothing holds it (G+0x364 & 9); -1 none
+    int leaderMotion = -1, leaderLoopFrom = 0;
     std::string playerName;
     // the leader's model read by Set_Prtyno (read_mdl: colour 1 white) rather than with the map
     // (fldread_prc's read_mdl_set: as the file has it - f011's 0.8)
@@ -3673,6 +3677,10 @@ struct ViewerHost : cr::EventHost {
         openItemWindow(app, item);
     }
     void playAnim(int id, int slot, int loopFrom, int loopTo) override {
+        if (id == 0) { // the leader (the turn-backs' Anim 0, 1 / FrmAdjc 0 / Anim 0, 0: he walks the steps back)
+            app.leaderMotion = slot, app.leaderLoopFrom = loopFrom;
+            return;
+        }
         int action = slot; // a slot LoadAct filled, else the model's own action of that number
         if (auto a = app.actorSlots.find(id); a != app.actorSlots.end())
             if (auto it = a->second.find(slot); it != a->second.end()) action = it->second;
@@ -14234,13 +14242,15 @@ void updatePlayer(App& app, float dt, float camYaw) {
     // block is held, slot 3 looped from frame 2 (Psychokinesis::onCheckTouch's
     // mdl_set_act_motion_loop(leader, 3, 2, 2))
     const bool hold = app.puzzle.pkState != 0 && app.player.actions.size() > 3;
-    const int want = hold ? 3 : std::min(int(app.walker.gait), int(app.player.actions.size()) - 1);
+    if (!fieldSceneRunning(app)) app.leaderMotion = -1; // (operate's motion again once the field is free)
+    const bool scripted = !hold && app.leaderMotion >= 0 && app.leaderMotion < int(app.player.actions.size());
+    const int want = hold ? 3 : scripted ? app.leaderMotion : std::min(int(app.walker.gait), int(app.player.actions.size()) - 1);
     if (want != app.player.action) {
         app.player.action = want;
         app.player.time = 0;
         app.footPrev = 0;
     }
-    app.player.loopFrom = hold ? 2 : -1;
+    app.player.loopFrom = hold ? 2 : scripted && app.leaderLoopFrom > 0 ? app.leaderLoopFrom : -1;
     animate(app, app.player, dt);
     playFootsteps(app);
 }
