@@ -5371,12 +5371,13 @@ void phoneMenuPoint(const App& app, float& mx, float& my) {
 // (inside the display's safe area: off a camera hole)
 float wideLeft(const App& app) {
     const cr::Renderer& r = app.renderer;
-    return r.phoneLayout() ? r.uiX() : r.safeLeft(); // (no further out than a camera cutout's inset; where it reaches the
-    // interface itself, the renderer draws that smaller - Renderer::interfaceRect)
+    // (no further out than a camera cutout's inset; where it reaches the interface itself the renderer draws that
+    // smaller - Renderer::interfaceRect - which clears the cutout already: the layout's own place then, not pushed in twice)
+    return r.phoneLayout() || r.interfaceShrink() < 1 ? r.uiX() : r.safeLeft();
 }
 float wideRight(const App& app) {
     const cr::Renderer& r = app.renderer;
-    return r.phoneLayout() ? r.uiX() : 2 * r.uiX() - r.safeRight();
+    return r.phoneLayout() || r.interfaceShrink() < 1 ? r.uiX() : 2 * r.uiX() - r.safeRight();
 }
 // The Android layout (docs/ANDROID.md "The phone's edges"): how far the phone's own edges lie
 // outside the centred 480 x 320 screen, in tex2d units - Android 1.1.6's gac +0x1e2688 / +0x1e268c
@@ -14923,6 +14924,12 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
     // the lines at x -7 when a name shows (36 without) and the name at (-12, 205) - 3.1.0's (24, 206) - or,
     // over the 0x20 band, at (-27, 236) beside the streak at x - 43.35 (vita decomp 51502-51535, 90345)
     const float vx2 = 2 * vitaEdgeX(app);
+    // (the bands across the screen - draw_vista's, draw_abeblack's -: the visible screen's whole width; in the iPhone
+    // layout on a screen wider than its 3:2 they stopped short at (32, 960) - CR1-U 9b36e2c. The Android and Vita
+    // screens' widen by their edges, ex / vx2)
+    const bool wideBand = phone && !r.androidScreen() && !r.vitaScreen();
+    const float bandL = wideBand ? (r.screenW() - r.layoutRight()) - r.uiX() - 1 : left - 2 * androidEdgeX(app) - vx2,
+                bandW = wideBand ? 2 * (r.layoutRight() - r.screenW() / 2) + 2 : width + 2 * (2 * androidEdgeX(app) + vx2);
     const bool vitaNamed = r.vitaScreen() && !speaker.empty();
     bool portraits = false;
     for (const App::Portrait& p : app.portraits) portraits = portraits || (p.tex.id && p.alpha > 0.5f);
@@ -14961,7 +14968,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
             outline = (style & 0x10) != 0 && app.msgColour != 1;
         } else if (style & 0x20) { // a black band across the bottom (tex2d y 252..352), the name on its edge
             // (draw_vista; Android: x - ox .. 480 + ox, the phone's whole width)
-            r.fillRect(left - ex - vx2, 2.0f * 252 + 64, width + 2 * (ex + vx2), 768 - (2.0f * 252 + 64), 0, 0, 0, wa);
+            r.fillRect(bandL, 2.0f * 252 + 64, bandW, 768 - (2.0f * 252 + 64), 0, 0, 0, wa);
             if (!speaker.empty() && textOn) { // PutMsg: drawfont_l at tex2d (16, 236), just above the band
                 // draw_vista2: the grey streak under the name - window (612, 14) 140 x 22 at tex2d
                 // (0, 238), the iPad's (-16, 238); Android's at (0, 238) too (Part 1 815 s: x 160 ..)
@@ -14977,7 +14984,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         } else if (style & 8) { // a tutorial's band: dark, its edges soft (8 / 88 / 8 tex2d), the text further left
             // (draw_abeblack: 0xc0 at the window's alpha; Android: x - ox .. 480 + ox, the phone's whole
             // width - Part 3 352.0 s, Part 9 653.0 s)
-            const float a = 0.75f * wa, y1 = wy + 16, y2 = wy + 192, bl = left - ex - vx2, bw = width + 2 * (ex + vx2);
+            const float a = 0.75f * wa, y1 = wy + 16, y2 = wy + 192, bl = bandL, bw = bandW;
             for (int k = 0; k < 8; ++k) { // the 2D path has no per-vertex colour: the edges in strips
                 const float t = (float(k) + 0.5f) / 8.0f;
                 r.fillRect(bl, wy + 2.0f * float(k), bw, 2.0f, 0, 0, 0, a * t);
@@ -19133,6 +19140,7 @@ void drawBattleHud(App& app, float W, float H) {
     // slot 0's put 30 higher. Drawn opaque (tex2d_add's own colour, not the HUD's fade)
     r.setOrigin(0);
     const int shown = int(std::count_if(std::begin(b.popups), std::end(b.popups), [](const App::Battle::Popup& p) { return p.on; }));
+    r.setPictureLayer(true); // (over their targets in the 3D: the picture's place, unshrunk by a camera cutout - interfaceRect; CR1-U 9b36e2c)
     for (int slot = 0; slot < 5; ++slot) {
         App::Battle::Popup& p = b.popups[slot];
         if (talk || b.phase == App::Battle::Results) break;
@@ -19171,6 +19179,7 @@ void drawBattleHud(App& app, float W, float H) {
             m.piece(dx, dy - hop, float((t[i] - '0') * 24 + style % 2 * 240), float(style / 2 * 24 + 24), 24, 24, a);
         }
     }
+    r.setPictureLayer(false); // (the HUD from here on: the interface's)
 
     // Top left: the Break badge - the ring, a piece per point, the holder's name
     const int g = b.gaugeShown;
@@ -20021,8 +20030,10 @@ void drawFrame(App& app, bool present = true) {
                         app.order2d.portrait = ++app.order2d.seq;
                         continue;
                     }
-                    const float vw = phone ? 960.0f : SW, vh = phone ? 640.0f : float(H), top = phone ? 64.0f : 0.0f;
-                    const float k = phone ? vh / ph : std::max(vw / pw, vh / ph); // (the iPhone's: its height)
+                    // (the iPhone layout's screen in its own units: on one wider than 3:2 the card covers it - its
+                    // height alone left bars at the sides; CR1-U 9b36e2c)
+                    const float vw = phone ? r.screenW() / r.layoutScale() : SW, vh = phone ? 640.0f : float(H), top = phone ? 64.0f : 0.0f;
+                    const float k = std::max(vw / pw, vh / ph);
                     r.drawQuadUV(p.tex, 512 - pw * k / 2 + p.x, top + (vh - ph * k) / 2 + p.y, pw * k, ph * k, 0, 0, pw, ph,
                                  p.shade, p.shade, p.shade, p.alpha);
                     app.order2d.portrait = ++app.order2d.seq;
