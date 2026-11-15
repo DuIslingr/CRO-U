@@ -54,6 +54,9 @@ private:
 // Loads the first usable font with CJK coverage: CR_FONT's (none: none), else the game folder's font/
 // one (ownFont), else among the platform's usual locations; false if none.
 bool loadSystemFont(Font& font);
+// Android's fonts from the system's own font lists (fonts.xml, font_fallback.xml, ...) and font folders, under
+// `root` ("" on a device): Japanese, Chinese, Korean families first, then the default sans-serif, then the rest
+std::vector<std::string> androidFonts(const std::string& root);
 
 // Apple's (iOS, macOS): the system font of this PostScript name ("HiraKakuProN-W6", "PingFangSC-Regular")
 // - its file from CoreText, its face in a collection - into `font`; nothing done if it is the face loaded
