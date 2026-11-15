@@ -29972,6 +29972,15 @@ void start(int argc, char** argv) {
 SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     logfile::start(argc, argv);
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#ifdef SDL_PLATFORM_WINDOWS
+    // Flydigi pads (CRO-U #4: a Vader 4 Pro, wired and through its receiver, not found since SDL 3.4.20): SDL
+    // 3.4.0 added a HIDAPI driver for Flydigi controllers, on by default, which takes the pad and then gets no
+    // input from one in XInput mode (SDL's own fixes for it - XInput detection, ignored devices, a hot-plug
+    // lockup - are on its development branch only, after 3.4.20). Off here, so the pad is read through XInput
+    // as with SDL 3.2.0, where it worked. SDL_JOYSTICK_HIDAPI_FLYDIGI=1 in the environment turns it back on
+    // (the environment's value wins over this one)
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_FLYDIGI, "0");
+#endif
     SDL_SetAppMetadata("Chaos Rings Omega HD (reimplementation)", "0.1", "local.preservation.chaosringsomega");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SDL_Init: %s", SDL_GetError());
@@ -30988,6 +30997,14 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
     case SDL_EVENT_WINDOW_RESIZED: // (a foldable folded or opened: Auto's layout for the screen now in use)
         if (app.video.layout == 0 && autoPhoneLayout(app) != app.renderer.phoneLayout()) applyVideo(app);
         break;
+    case SDL_EVENT_JOYSTICK_ADDED: { // (logged: what SDL found and whether it maps it as a gamepad - a pad that never
+        // takes shows here; as the metastigma fork's diagnostics)
+        const SDL_JoystickID id = event->jdevice.which;
+        const char* name = SDL_GetJoystickNameForID(id);
+        SDL_Log("joystick: %s (%04x:%04x, type %d)%s", name ? name : "(unnamed)", unsigned(SDL_GetJoystickVendorForID(id)),
+                unsigned(SDL_GetJoystickProductForID(id)), int(SDL_GetJoystickTypeForID(id)), SDL_IsGamepad(id) ? "" : " - not a gamepad to SDL");
+        break;
+    }
     case SDL_EVENT_GAMEPAD_ADDED: // (taken while none is in use - or the one held went quiet: a wireless pad's receiver keeps a dead handle)
         if (!app.pad || !SDL_GamepadConnected(app.pad))
             if (SDL_Gamepad* pad = SDL_OpenGamepad(event->gdevice.which)) {
