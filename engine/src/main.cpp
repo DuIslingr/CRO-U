@@ -18081,12 +18081,17 @@ void endRound(App& app) {
         if (App::Battle::Actor* a = battleActor(app, k); a && a->slot == btlui::kSlotGuard) playSlot(app, *a, btlui::kSlotIdle);
     for (int i = 0; i < 5; ++i) b.shownHp[i] = b.rules.f[size_t(i)].hp, b.shownMp[i] = b.rules.f[size_t(i)].mp;
     { // btlord_chk's story ends, before the round's outcome is read: scenario 0's group 0x28e once enemy 3 is
-      // down (no enemy there counts as down), 0x28a from its second round (its first, the opening: the
-      // Agent's blow in round 2 - _btlque_special 0x1ae - ends it), scenario 1's 0x2a3 from its second - flag
-      // 0xffe; with it set (btl_main 799) the battle ends there (9000), the pair standing or not: its
-      // script goes on
-        const int g = b.start.group, s = app.game.scenario, n = b.rules.round;
-        if ((s == 0 && g == 0x28e && !b.rules.f[3].alive()) || (s == 0 && g == 0x28a && n > 1) || (s == 1 && g == 0x2a3 && n > 1))
+      // down (no enemy there counts as down), 0x28a - the opening, j001_t01's Agent - and scenario 1's 0x2a3
+      // - c101_t01's, its twin - from the first round: flag 0xffe; with it set (btl_main 799) the battle ends
+      // there (9000), the pair standing or not: its script goes on. The code reads "round > 1" / ">= 2" for
+      // these two, but the reference video shows the opening's FIRST round end that way: Part 1 1581-1594 s,
+      // one command page, the pair's Snow Tiger Lunar Lion, then the Particle Cannon (_btlque_special's
+      // "round 2" action) for 2848 / 3031 on Vieg 803 / Olgar 1153, both HP rolled to 0, and the scene goes
+      // on ("Gah! This is lookin' bad...") - no defeat. (Why the count reads one more there is not traced.)
+      // The port's first round lost was the game over (CRO-U #3: both battles, the Agent's passed only
+      // with Infinite HP)
+        const int g = b.start.group, s = app.game.scenario;
+        if ((s == 0 && g == 0x28e && !b.rules.f[3].alive()) || (s == 0 && g == 0x28a) || (s == 1 && g == 0x2a3))
             app.game.setFlag(0xffe, true);
         if (app.game.flag(0xffe)) {
             b.phase = App::Battle::StoryEnd;
@@ -22974,17 +22979,16 @@ int fieldEventsSelfTest(App& app) {
 }
 
 // Story battles lost: btl_main 0x4b0 ends groups 0x289, 0x28e - j001_d06's Vieg alone -, 0x2a2 - c101_t01's
-// - and 0x295 as a won one (9000), and btlord_chk's flag 0xffe ends 0x28a - the opening, j001_t01's - from
-// its second round, lost or not: no defeat, the script goes on from its Battle. Any other story battle lost
-// (0x28a in its first round too) is the game over (0x4b1, btl_lose: the title)
+// - and 0x295 as a won one (9000), and btlord_chk's flag 0xffe ends 0x28a - the opening, j001_t01's - and
+// scenario 1's 0x2a3 - c101_t01's - from their first round, lost or not: no defeat, the script goes on from
+// its Battle. Any other story battle lost is the game over (0x4b1, btl_lose: the title)
 int storyLossSelfTest(App& app) {
-    const int kOpeningLevel = SDL_getenv("CR_OPENING_LEVEL") ? SDL_atoi(SDL_getenv("CR_OPENING_LEVEL")) : 40;
     int problems = 0;
     const cr::GameState keepGame = app.game;
     const int keepChar = app.playerChar;
     struct Case { int scenario, group, stage, round; bool story; };
-    for (const Case& c : {Case{0, 654, 19, 1, true}, Case{1, 674, 0, 1, true}, Case{0, 650, 0, 2, true}, Case{0, 650, 0, 1, false},
-                          Case{0, 651, 11, 1, false}}) {
+    for (const Case& c : {Case{0, 654, 19, 1, true}, Case{1, 674, 0, 1, true}, Case{0, 650, 0, 2, true}, Case{0, 650, 0, 1, true},
+                          Case{1, 675, 0, 1, true}, Case{0, 651, 11, 1, false}}) {
         app.game = cr::GameState();
         cr::giveStartingItems(app.game, app.itemTable);
         app.game.scenario = c.scenario;
@@ -23063,13 +23067,10 @@ int storyLossSelfTest(App& app) {
         app.pendingEntry = App::Entry::None;
     }
     { // j001_t01's opening (entry 202): from 0xa0d2 (vars 58 .. 60, then Battle 650 at 0xa0f6) the pair
-      // defending each round as it plays out - the Agent's blow in round 2 -, the battle over after its
-      // second round without a defeat, then its talk (Gosub 0xa191: Msg 1400 ..) and on to flag 1401 (0xa100)
+      // defending as it plays out - the Agent's Particle Cannon (430, some 2200 a shot) puts them down in the
+      // first round, as the reference video shows -, the battle over after that round without a defeat, then
+      // its talk (Gosub 0xa191: Msg 1400 ..) and on to flag 1401 (0xa100) - CRO-U #3
         startNewGame(app, 0); // (Vieg and Olgar as a new game makes them: newPairParty)
-        // (Vieg stronger than a new game's level 1: the Agent's one action, the Particle Cannon (430,
-        // power 220 at attack 1171), is some 2200 a shot, and lost in its first round the battle is the
-        // game over in the original too. Level 40 is this test's assumption, not his level in the story)
-        app.game.party[0].level = kOpeningLevel, app.game.party[0].exp = cr::expForLevel(kOpeningLevel), app.game.party[0].hp = -1;
         for (int f : {0xff1, 0xff2, 0xff3, 0xff4, 0xff5, 0xfa8, 0xfa9}) app.game.setFlag(f, true);
         showMap(app, 0, 0, 9); // (area 9: j001_t01.evt)
         app.pendingEntry = App::Entry::None;
@@ -23110,7 +23111,7 @@ int storyLossSelfTest(App& app) {
             stepEvents(app);
             on = app.game.flag(1401);
         }
-        const bool right = started && fought && group == 650 && !lostShown && !wrongWay && rounds == 2 && on;
+        const bool right = started && fought && group == 650 && !lostShown && !wrongWay && rounds == 1 && on;
         problems += !right;
         std::printf("j001_t01's Battle 650: %s, battle %d over after round %d, %s, %s %s\n", started ? "started" : "NOT STARTED", group,
                     rounds, lostShown ? "the defeat shown" : "no defeat",

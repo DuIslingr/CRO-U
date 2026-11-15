@@ -530,7 +530,7 @@ int BattleRules::specialAction(int enemy) const {
     const int m = enemy >= 2 && enemy < 5 && f[size_t(enemy)].def ? f[size_t(enemy)].def->model : 0;
     if (scenario == 0)
         switch (group) {
-        case 650: return round == 2 ? 430 : 0;                 // (0x28a) Particle Cannon
+        case 650: return round <= 2 ? 430 : 0;                 // (0x28a) Particle Cannon - "round 2", which the video shows in the first (main.cpp endRound)
         case 655: return round == 4 ? 437 : 0;
         case 656: return round == 4 || round == 6 ? 437 : 0;
         case 657: return round == 2 ? 437 : 0;
