@@ -119,6 +119,8 @@ public:
     // Offscreen frames: the frame can be smaller / larger than the window (render scale) and
     // multisampled; false = frames are the window's size, single-sampled
     virtual bool offscreen() const { return false; }
+    // The window's drawing surface may be another now (the app back from the background): rebuilt before the next present
+    virtual void surfaceChanged() {}
     virtual int maxSamples() const { return 1; }
     virtual void setSamples(int /*n*/) {}
 

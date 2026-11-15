@@ -19784,6 +19784,10 @@ void drawFrame(App& app, bool present = true) {
             const float k = vw / viewSize, w = t.width * k, h = t.height * k;
             r.drawQuad(t, vx + (vw - w) / 2, vy + (vh - h) / 2, w, h);
         };
+        // (the field's picture - its paintings, its 3D view, its effects, the prompts over them, the fades - fills the
+        // screen whatever a camera cutout does to the interface: a painting narrower than the screen shrunk while its
+        // 3D view kept its place would part them - CR1-U, the Ark hall's door beside its archway on the iPhone Duo)
+        r.setPictureLayer(true);
         drawSceneBack(app, false); // ScnEffectProc's z -1998 layers (the sky, the shaft, ...): behind the painting
         r.setOrigin(0);
         r.setLayer(3); // (the Vita's screen: fldread_prc's paintings and the view with them at full size)
@@ -19910,6 +19914,7 @@ void drawFrame(App& app, bool present = true) {
             stepMenuMask(app);
         drawMenuMask(app);
     }
+    r.setPictureLayer(false); // (the interface from here on: kept off a camera cutout - Renderer::interfaceRect)
     r.setOrigin(r.uiX()); // the game's 2D from here on: its 1024 x 768 layout, centred
     app.order2d = App::Order2D();
     // A message window this frame (the calls of drawMessageBox below): the front fade waits for its
@@ -31368,6 +31373,21 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
 }
 
 SDL_AppResult SDL_AppIterate(void* state) {
+    { // In the background (a phone's): nothing drawn - iOS refuses a background app's GPU work, and the device it
+      // leaves draws nothing again (the user's iPhone, CR1-U: the picture frozen on return, the game running on
+      // beneath it). The game's clock is stopped meanwhile (LifecycleClock). Back in front: the window's surface anew
+        App& a = *static_cast<App*>(state);
+        if (a.clock.backgrounded()) {
+            SDL_Delay(20);
+            return SDL_APP_CONTINUE;
+        }
+        static Uint64 resumes = 0;
+        if (const Uint64 n = a.clock.resumes(); n != resumes) {
+            resumes = n;
+            a.renderer.surfaceChanged();
+            SDL_Log("lifecycle: back from the background (%llu), the drawing surface made anew", (unsigned long long)n);
+        }
+    }
     if (!consumeGraphicsReset(*static_cast<App*>(state))) return SDL_APP_FAILURE;
     consumeInputCancel(*static_cast<App*>(state));
     static_cast<App*>(state)->sound.update();

@@ -48,12 +48,23 @@ public:
                 if (!wall) wall = SDL_GetTicksNS();
                 if (wall >= pausedAt_) excluded_ += wall - pausedAt_;
                 paused_ = false;
+                ++resumes_;
                 ++generation_;
             }
             break;
         }
         default: break;
         }
+    }
+    // In the background now (a phone's: no GPU work allowed there - iOS rejects it, and the device it
+    // leaves behind draws nothing again) / how many times the app has come back to the foreground
+    bool backgrounded() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return paused_;
+    }
+    Uint64 resumes() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return resumes_;
     }
     Uint64 ticksNS(Uint64 wall = 0) const {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -83,6 +94,6 @@ private:
     }
     mutable std::mutex mutex_;
     bool watching_ = false, paused_ = false, haveLast_ = false;
-    Uint64 excluded_ = 0, pausedAt_ = 0, last_ = 0, generation_ = 0, seen_ = 0;
+    Uint64 excluded_ = 0, pausedAt_ = 0, last_ = 0, generation_ = 0, seen_ = 0, resumes_ = 0;
 };
 } // namespace crtime

@@ -155,6 +155,7 @@ public:
     }
     int maxAnisotropy() const { return dev_ ? dev_->maxAnisotropy() : 1; }
     bool scalable() const { return dev_ && dev_->offscreen(); }
+    void surfaceChanged() { if (dev_) dev_->surfaceChanged(); } // (back from the background: the window's surface anew)
     // Temporal upscaling (FSR 3.1 / DLSS, Vulkan): the scene - everything until endScene -
     // renders at 1/ratio of the frame and is resolved to it; the UI then draws at full size.
     // upscalerProblem: "" when the mode can run, else why not
