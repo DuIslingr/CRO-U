@@ -2634,6 +2634,26 @@ void applyLanguage(App& app) {
         app.font.setLineBox(0, 0);
     }
 
+#ifdef SDL_PLATFORM_IOS
+    // iOS: the system's own faces (CoreText; none at fixed paths). 3.1.0 asks UIKit for HiraKakuProN-W6 and
+    // ArialMT (its binary's names): Japanese the former; ArialMT can't draw the others' scripts and the port's
+    // text is one face, so the Latin languages Hiragino's W3 (Latin and kana / kanji, ArialMT's weight), and
+    // Chinese / Korean what iOS falls back to from ArialMT - PingFang SC / TC, Apple SD Gothic Neo. In Noto
+    // Sans CJK's line box, as the Vita's faces and font/'s
+    if (!SDL_getenv("CR_FONT") && !cr::isOwnFont(app.font.path()) && !app.vitaOnly) {
+        static const char* const kIos[cr::kLanguages][2] = {
+            {"HiraKakuProN-W6", "HiraginoSans-W6"}, {"HiraKakuProN-W3", "HiraginoSans-W3"}, {"HiraKakuProN-W3", "HiraginoSans-W3"},
+            {"HiraKakuProN-W3", "HiraginoSans-W3"}, {"HiraKakuProN-W3", "HiraginoSans-W3"}, {"PingFangSC-Regular", "STHeitiSC-Light"},
+            {"PingFangTC-Regular", "STHeitiTC-Light"}, {"AppleSDGothicNeo-Regular", "AppleSDGothicNeo-Medium"}};
+        const int l = std::clamp(app.language, 0, cr::kLanguages - 1);
+        if (cr::loadAppleFont(app.font, kIos[l][0]) || cr::loadAppleFont(app.font, kIos[l][1])) {
+            SDL_Log("font: %s (iOS)", app.font.path().c_str());
+            app.font.setLineBox(1.16f, -0.288f);
+            app.menu.setMenuFont(multilingualData(app) && !cjkLanguage(app.language) ? 13.0f : 14.0f);
+            return;
+        }
+    }
+#endif
     app.font.selectRegion(kRegion[app.language]);
 
     app.menu.setMenuFont(multilingualData(app) && !cjkLanguage(app.language) ? 13.0f : 14.0f);

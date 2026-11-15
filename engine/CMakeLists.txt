@@ -65,6 +65,9 @@ add_library(crcore STATIC
     src/assets/gltf_model.cpp
 )
 target_include_directories(crcore PUBLIC src)
+if(APPLE) # (gfx/font.cpp - the game's, linking crcore -: the system's fonts by name from CoreText; iOS has none at fixed paths)
+    target_link_libraries(crcore PUBLIC "-framework CoreText" "-framework CoreFoundation")
+endif()
 target_include_directories(crcore PRIVATE third_party/hevag) # the HE-VAG filter table (vgmstream's, ISC)
 target_link_libraries(crcore PUBLIC SDL3::SDL3)
 # Music: AAC decoding through FAAD2 - the system's when pkg-config finds it, else the copy in

@@ -26,6 +26,8 @@ public:
     // In a collection, the face whose name ends with `region` ("JP", "KR", "SC", "TC");
     // keeps the current face when none does. True if the face changed.
     bool selectRegion(const char* region);
+    // In a collection, the face with this PostScript name ("HiraKakuProN-W6"); false if none has it
+    bool selectPostScript(const char* name);
     // Whether every character of `utf8` has a glyph in the current face.
     bool covers(const std::string& utf8) const;
     // White-on-transparent lines: `em` pixels to the em, baselines `lineStep` apart, `pad`
@@ -52,6 +54,11 @@ private:
 // Loads the first usable font with CJK coverage: CR_FONT's (none: none), else the game folder's font/
 // one (ownFont), else among the platform's usual locations; false if none.
 bool loadSystemFont(Font& font);
+
+// Apple's (iOS, macOS): the system font of this PostScript name ("HiraKakuProN-W6", "PingFangSC-Regular")
+// - its file from CoreText, its face in a collection - into `font`; nothing done if it is the face loaded
+// already. False elsewhere, or when the system has no such font (iOS has no fonts at fixed paths)
+bool loadAppleFont(Font& font, const char* postScriptName);
 
 // Your own fonts: the .ttf / .otf / .ttc files in a game folder's font/ (the first game folder holding
 // one; its files by name). The first that reads - with `cjk` the first with Japanese / Chinese / Korean
