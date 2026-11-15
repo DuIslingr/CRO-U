@@ -9233,8 +9233,12 @@ void drawVitaLogo(App& app) {
         const int s = std::clamp(l.slot, 0, 1);
         const float sw = float(t.width);
         const float pw = l.warning[s] ? sw : sw * 15 / 16, ph = l.warning[s] ? float(t.height) : sw * 10 / 16;
-        const float k = std::min(r.screenW() / pw, float(cr::Renderer::kLogicalH) / ph), w = pw * k, h = ph * k;
-        r.drawQuadUV(t, (r.screenW() - w) / 2, (cr::Renderer::kLogicalH - h) / 2, w, h, 0, 0, pw, ph, 1, 1, 1, a);
+        const float k = std::min(r.screenW() / pw, float(cr::Renderer::kLogicalH) / ph);
+        float x = (r.screenW() - pw * k) / 2, y = (cr::Renderer::kLogicalH - ph * k) / 2, w = pw * k, h = ph * k;
+        // (the screen's rect: the iPhone / Vita layout's own scaling not laid over it - else the warning and the
+        // logos came out 1.2 times the screen, cut at its edges, with the Vita copy as the game; CR1-U's 7875355)
+        if (r.phoneLayout()) r.screenToLayout(x, y), w /= r.layoutScale(), h /= r.layoutScale();
+        r.drawQuadUV(t, x, y, w, h, 0, 0, pw, ph, 1, 1, 1, a);
     }
     r.setOrigin(r.uiX());
 }
@@ -19834,6 +19838,8 @@ void drawFrame(App& app, bool present = true) {
             if (scriptCam) promptLater(mvp, 0, 0, SW, H);
             else promptLater(mvp, vx, vy, vw, vh);
         }
+        r.setOrigin(0); // (as the background's: the painting at the 3D view's place - in widescreen a 2D origin left at uiX
+        // put it beside its models; CR1-U's 7875355, the Ark hall's door)
         if (app.foreground.id && !hidden) drawLayer(app.foreground);
         r.setLayer(0);
         drawSceneEffects(app);
