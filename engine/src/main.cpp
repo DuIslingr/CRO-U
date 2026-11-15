@@ -16029,13 +16029,12 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     rules.escapeBlocked = app.runner.running() && start.group != 0x298;
     (void)flags;
     rules.setupParty(app.game, app.itemTable, route);
-    // (Options' Cheats. A battle the story has you lose - btl_main 0x4b0's 0x289 / 0x28e / 0x2a2 / 0x295, btlord_chk's
-    // 0x28a and scenario 1's 0x2a3 - plays without Infinite HP and One-Hit Kills: its script goes on from the pair's
-    // fall, which Infinite HP would never let come, and a boss the story keeps standing stays so)
-    const bool storyLoss = start.group == 0x289 || start.group == 0x28e || start.group == 0x2a2 || start.group == 0x295 ||
-                           (rules.scenario == 0 && start.group == 0x28a) || (rules.scenario == 1 && start.group == 0x2a3);
-    const bool cheatHp = app.cheats.hp && !storyLoss;
-    rules.cheatHp = cheatHp, rules.cheatMp = app.cheats.mp, rules.cheatOneHit = app.cheats.oneHit && !storyLoss;
+    // (Options' Cheats. A battle the story has you lose - btl_main 0x4b0's 0x289 / 0x28e / 0x2a2 / 0x295: its script goes
+    // on from the pair's fall - keeps them while it can be won, Infinite HP lapsing once no foe can fall (rules.infiniteHp);
+    // btlord_chk's 0x28a / 0x2a3 end after their first round whatever the HP, so they need nothing)
+    rules.storyLoss = start.group == 0x289 || start.group == 0x28e || start.group == 0x2a2 || start.group == 0x295;
+    const bool cheatHp = app.cheats.hp;
+    rules.cheatHp = cheatHp, rules.cheatMp = app.cheats.mp, rules.cheatOneHit = app.cheats.oneHit;
     rules.cheatBreak = app.cheats.fullBreak;
     if (rules.cheatBreak) rules.breakStarted = true, rules.breakTarget = rules.breakGauge = 8;
     rules.expScale = app.cheats.exp;
@@ -23016,9 +23015,21 @@ int storyLossSelfTest(App& app) {
             continue;
         }
         b.eventBattle = true; // (as a script's Battle starts it)
-        if (cheat && b.rules.cheatHp == c.story) { // (a story loss without the cheats, any other with them)
-            std::printf("story battle %d with the cheats on: Infinite HP %s - WRONG\n", c.group, b.rules.cheatHp ? "kept" : "dropped");
-            ++problems;
+        if (cheat) { // Infinite HP: on while a foe can fall; in a story loss (0x4b0's) it lapses once none can - held at its
+            // floor or invincible - so the pair's fall comes; anywhere else it holds
+            const bool lossGroup = c.group == 0x289 || c.group == 0x28e || c.group == 0x2a2 || c.group == 0x295;
+            const bool onAtStart = b.rules.infiniteHp();
+            const cr::BattleRules keep = b.rules;
+            for (int i = 2; i < 5; ++i)
+                if (b.rules.f[size_t(i)].alive()) b.rules.hpFloor[size_t(i)] = std::max(1, b.rules.hpFloor[size_t(i)]), b.rules.f[size_t(i)].hp = b.rules.hpFloor[size_t(i)];
+            const bool onHeld = b.rules.infiniteHp();
+            b.rules = keep;
+            const bool ok = b.rules.cheatHp && b.rules.cheatOneHit && onAtStart && onHeld == !lossGroup;
+            if (!ok) {
+                std::printf("story battle %d with the cheats on: Infinite HP %s at the start, %s with the foes held - WRONG\n", c.group,
+                            onAtStart ? "on" : "off", onHeld ? "on" : "off");
+                ++problems;
+            }
         }
         if (cheat && !c.story) { // (that one's defeat can't come with Infinite HP: checked above, not played)
             endBattle(app, false);
@@ -23086,6 +23097,57 @@ int storyLossSelfTest(App& app) {
         std::printf("j001_d06's Battle 654 lost: %s, battle %d, %s %s\n", started ? "started" : "NOT STARTED", group,
                     on ? "the script went on to flag 1408" : wrongWay ? "the game over" : "flag 1408 NOT reached", right ? "ok" : "WRONG");
         if (app.battle.active) endBattle(app, false);
+        app.runner.stop();
+        app.pendingEntry = App::Entry::None;
+    }
+    // Played with Infinite HP and One-Hit Kills on, the pair attacking each round: 654 (Vieg alone: its foes held at their
+    // 1-HP floor) and 674 (c101_t01: its foes take nothing from the pair and heal) still end, the story going on - never
+    // a fight with nothing to end it. (A story loss that can be won keeps Infinite HP while the foes' HP goes down; none of
+    // 0x4b0's four is: 661 - 0x295 - has no monsters in the data)
+    for (const Case& c : {Case{0, 654, 19, 0, true}, Case{1, 674, 0, 0, true}}) {
+        app.cheats = keepCheats;
+        app.cheats.hp = app.cheats.oneHit = true;
+        app.game = cr::GameState();
+        cr::giveStartingItems(app.game, app.itemTable);
+        app.game.scenario = c.scenario;
+        for (int f : {0xff1, 0xff2, 0xff3, 0xff4, 0xff5, 0xfa8, 0xfa9}) app.game.setFlag(f, true);
+        showMap(app, 0, 0, c.scenario == 0 ? 6 : 10);
+        app.pendingEntry = App::Entry::None;
+        app.runner.stop();
+        startBattle(app, {c.group, c.stage, -1, 0}, 0);
+        App::Battle& b = app.battle;
+        if (!b.active) {
+            std::printf("story battle %d played: didn't start - WRONG\n", c.group);
+            ++problems;
+            continue;
+        }
+        b.eventBattle = true;
+        int exit = 0, rounds = 0;
+        bool won = false, lostShown = false, pairFell = false;
+        for (int f = 0; f < 20000 && b.active; ++f) {
+            if (f % 45 == 44 && !app.dialogue.empty()) advanceDialogue(app);
+            if (b.phase == App::Battle::Command && b.menu == App::Battle::Top && !battletalk::on(app)) {
+                battleChooseTop(app, 1); // (Pair, else Solo)
+                if (b.menu == App::Battle::Top) battleChooseTop(app, 0);
+                if (b.menu == App::Battle::Commands) battleChooseCommand(app, 0);
+                if (b.menu == App::Battle::Targets && !b.picks.empty()) battleChooseTarget(app, b.picks[0]);
+                if (b.phase == App::Battle::Command && b.menu == App::Battle::Commands) battleChooseCommand(app, 0);
+                if (b.menu == App::Battle::Targets && !b.picks.empty()) battleChooseTarget(app, b.picks[0]);
+            }
+            rounds = std::max(rounds, b.rules.round);
+            won |= b.rules.outcome() == 2;
+            pairFell |= !b.rules.f[0].alive() && !b.rules.f[1].alive();
+            lostShown |= b.phase == App::Battle::Lost;
+            if (b.phase == App::Battle::Lost && b.phaseFrames >= 40) b.lostTap = true;
+            if (b.phase == App::Battle::Won || b.phase == App::Battle::Results) b.wonTap = true, resultsTap(app);
+            if (b.exit) { exit = b.exit, b.exit = 0; break; }
+            stepBattle(app);
+        }
+        const bool right = exit == 1 && !lostShown && (won || pairFell);
+        problems += !right;
+        std::printf("story battle %d played with Infinite HP and One-Hit Kills on: %s after %d rounds, way out %d %s\n", c.group,
+                    won ? "won" : pairFell ? "the pair fell (Infinite HP lapsed, no foe could fall)" : "neither", rounds, exit, right ? "ok" : "WRONG");
+        if (b.active) endBattle(app, false);
         app.runner.stop();
         app.pendingEntry = App::Entry::None;
     }

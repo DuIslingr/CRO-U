@@ -1056,7 +1056,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                             self.amount = floored(k, self.amount);
                             if (self.amount > 0) breakEvent(e.actors[0], 2, t);
                             u.hp = std::max(0, u.hp - self.amount);
-                            if (cheatHp) u.hp = u.hpMax;
+                            if (infiniteHp()) u.hp = u.hpMax;
                             if (u.hp == 0 && u.status[kStatusEndure]) u.status[kStatusEndure] = 0, u.hp = 1;
                             if (u.hp == 0) { // btlcalc_chk_dead
                                 self.fell = true;
@@ -1189,7 +1189,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             if (calc == 0 && round > 3 && h.amount >= 1 && a->id == 18) lateAttack = true; // btlcalc_0404: +0xa50
             if (h.amount > 0) breakEvent(breakBy, 2, t);
             tf.hp = std::clamp(tf.hp - h.amount, 0, tf.hpMax);
-            if (cheatHp && t < 2) tf.hp = tf.hpMax; // (Cheats: Infinite HP - the number shown, nothing lost)
+            if (t < 2 && infiniteHp()) tf.hp = tf.hpMax; // (Cheats: Infinite HP - the number shown, nothing lost)
             if (tf.hp == 0 && before > 0 && tf.status[kStatusEndure] && !direct) {
                 tf.status[kStatusEndure] = 0;
                 tf.hp = 1;
@@ -1280,7 +1280,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                     self.amount = floored(k, self.amount);
                     if (self.amount > 0) breakEvent(e.actors[0], 2, firstTarget_);
                     u.hp = std::max(0, u.hp - self.amount);
-                    if (cheatHp) u.hp = u.hpMax;
+                    if (infiniteHp()) u.hp = u.hpMax;
                     if (self.amount > 0 && u.hp > 0) autoGuard(k);
                     out.hits.push_back(self);
                 }
@@ -1357,7 +1357,7 @@ void BattleRules::endRound() {
         if (d > 0 && invincible(i)) d = 0; // (dmg_hp's Is_invincible: poison and the stage's loss none either)
         const int before = x.hp;
         x.hp = std::clamp(x.hp - d, 0, x.hpMax);
-        if (i < 2 && cheatHp) x.hp = x.hpMax;
+        if (i < 2 && infiniteHp()) x.hp = x.hpMax;
         if (i < 2 && cheatMp) x.mp = x.mpMax; // (Cheats: what an enemy drained back too)
         if (x.hp == 0 && d > 0 && x.status[kStatusEndure]) x.hp = 1, x.status[kStatusEndure] = 0; // (btlcalc_dmg_hp: Endure holds here too)
         if (storyKeepsUp(i) && x.hp == 0) x.hp = 1;
@@ -1377,6 +1377,14 @@ void BattleRules::endRound() {
                 fallRewards(i, who);
             }
         }
+    }
+    // (a story loss under Infinite HP: rounds in a row in which no foe's HP went down - healed, or nothing landing -
+    // count toward its lapse, rules.infiniteHp)
+    if (storyLoss && cheatHp) {
+        int sum = 0;
+        for (int i = 2; i < 5; ++i) sum += std::max(0, f[size_t(i)].hp);
+        stalled_ = foeHpSeen_ >= 0 && sum >= foeHpSeen_ ? stalled_ + 1 : 0;
+        foeHpSeen_ = sum;
     }
 }
 
@@ -1402,6 +1410,20 @@ void BattleRules::autoGuard(int t) {
     if (t < 2 && pair) f[0].guarding = f[1].guarding = true;
     else if (t >= 2 && enemyPair) f[2].guarding = f[3].guarding = true;
     else x.guarding = true;
+}
+
+bool BattleRules::infiniteHp() const {
+    if (!cheatHp) return false;
+    if (!storyLoss) return true;
+    bool standing = false;
+    for (int i = 2; i < 5; ++i) {
+        const Fighter& x = f[size_t(i)];
+        if (!x.alive()) continue;
+        standing = true;
+        if (!invincible(i) && !(hpFloor[size_t(i)] >= 1 && x.hp <= hpFloor[size_t(i)])) // (this one can still fall - unless
+            return stalled_ < kStallRounds;                                               // nothing has brought a foe down a while)
+    }
+    return !standing;
 }
 
 bool BattleRules::invincible(int t) const {

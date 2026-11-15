@@ -255,6 +255,14 @@ public:
     // Options' Cheats (the port's own): the pair's HP never drops (the numbers still show), its MP never paid,
     // the pair's blows fell what they hit, the EXP won multiplied
     bool cheatHp = false, cheatMp = false, cheatOneHit = false, cheatBreak = false; // (cheatBreak: the Break the pair's, full)
+    // A battle the story has you lose (btl_main 0x4b0's groups: lost, its script goes on). Infinite HP holds there
+    // while a foe can still fall - such a battle may be won, for its reward - and lapses once none can: each one
+    // standing invincible or held at its HP floor, or no foe's HP down for kStallRounds rounds in a row (674's take
+    // no damage and heal), so the pair's fall, and the story, come. One-Hit Kills needs no rule: its blow goes
+    // through the floors and Is_invincible like any other
+    bool storyLoss = false;
+    bool infiniteHp() const;
+    static constexpr int kStallRounds = 3;
     int expScale = 1;
     std::vector<int> drops;      // items (btlcalc_0505), gene plates (chk_dead), in the order won
     std::vector<int> learned;    // abilities and skills taught (btlcalc_0506) or dropped (0505): in the bag at once
@@ -271,6 +279,7 @@ public:
     // fighters are back to full HP as the round ends; +0xa50 - a pair attack (action 18) landed
     // after the third round (btlcalc_0404)
     std::array<int, 5> hpFloor{};
+    int stalled_ = 0, foeHpSeen_ = -1; // (infiniteHp's: rounds with no foe's HP down, the foes' HP last round)
     int floored(int t, int amount) const {
         const int fl = t >= 0 && t < 5 ? hpFloor[size_t(t)] : 0;
         return fl > 0 && amount > 0 && f[size_t(t)].hp - amount < fl ? std::max(0, f[size_t(t)].hp - fl) : amount;

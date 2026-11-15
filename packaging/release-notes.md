@@ -4,6 +4,15 @@ A fix release for [v0.7.0](https://github.com/DuIslingr/CRO-U/releases/tag/v0.7.
 that ended the game, a controller Windows stopped finding, and missing text on some Android phones.
 Everything in v0.7.0's notes still applies.
 
+> **Hotfix (downloads replaced):** the downloads were rebuilt on the day of release with one more fix:
+> **Infinite HP no longer traps you in a battle the story has you lose.** Those fights go on from
+> your pair's defeat, which Infinite HP never let come, so some could go on with nothing to end
+> them. Infinite HP now holds in them as long as you can still bring a foe down (so a fight you can
+> win stays winnable), and lapses once no foe can fall: each one is at its last-stand HP or can't be
+> hurt, or three rounds pass with no foe losing HP. Then the defeat comes and the story goes on.
+> One-Hit Kills stays on everywhere (a foe the story keeps standing stays standing). If you
+> downloaded v0.7.1 before the hotfix, download it again.
+
 ## Fixed
 
 - **The opening battle with the Agent, and its twin in the second scenario, no longer end in a game
