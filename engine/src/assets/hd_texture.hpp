@@ -9,6 +9,8 @@
 // <hash>.png:   an original exported upright (savePngImage), or a replacement made from one
 // <hash>.crhd:  its replacement ("CRHD1\0", u32 width, height, original width, original height,
 //               flags, zlib-compressed RGBA8 rows, top first)
+// <hash>.dds:   a replacement from a texture tool - BC1 / BC2 / BC3 (DXT1 / 3 / 5), BC4 / BC5, BC7 or 32-bit
+//               RGBA / BGRA; its first mip, top row first
 
 #include "assets/texture.hpp"
 
@@ -29,7 +31,7 @@ bool hdShapeFits(int w, int h, int originalW, int originalH);
 // .crraw's flags in a tEXt chunk ("cr-flags") for tools/hd_textures.py
 bool savePngImage(const std::string& path, const Image& img);
 // The replacement for `original` in `dir` (with its trailing slash), if there is one -
-// <hash>.crhd, else <hash>.png (any upscale or edit, upright) - of a size hdShapeFits; one
+// <hash>.crhd, else <hash>.png (any upscale or edit, upright), else <hash>.dds - of a size hdShapeFits; one
 // that doesn't fit is left out, `why` saying why
 bool loadHdImage(const std::string& dir, const Image& original, Image& out, std::string* why = nullptr);
 

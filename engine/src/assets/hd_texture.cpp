@@ -3,6 +3,10 @@
 #include "stb/stb_image.h"
 #include "stb/stb_image_write.h"
 
+#define BCDEC_STATIC
+#define BCDEC_IMPLEMENTATION
+#include "bcdec/bcdec.h" // (iOrange's block-compression decoder: MIT / Unlicense)
+
 #include <algorithm>
 
 #include <SDL3/SDL.h>
@@ -118,6 +122,103 @@ void putBe32(std::vector<uint8_t>& out, uint32_t v) {
     for (int i = 3; i >= 0; --i) out.push_back(uint8_t(v >> (8 * i)));
 }
 
+// A .dds replacement's top picture as RGBA8, top row first - the DDS's own order. Block compression BC1 (DXT1),
+// BC2 (DXT3), BC3 (DXT5), BC4 / BC5 (unsigned: ATI1 / ATI2, BC4U / BC5U) and BC7 (sRGB or not: the same bytes), and
+// uncompressed 32-bit RGBA / BGRA (a DX10 header's R8G8B8A8 / B8G8R8A8 / B8G8R8X8, or a legacy one's masks). A plain
+// 2D texture only - its first mip; a cube, volume or array is refused. BC4 is a grey (its value on R, G and B),
+// BC5 red and green. (After metastigma's fork's PNG / DDS replacements, CRO-U-metastigma#10.) False and `what`
+// set when it can't be read
+bool decodeDds(const uint8_t* p, size_t n, Image& out, std::string& what) {
+    if (n < 128 || std::memcmp(p, "DDS ", 4) != 0 || get32(p + 4) != 124 || get32(p + 76) != 32) return what = "not a DDS", false;
+    const uint32_t h = get32(p + 12), w = get32(p + 16), pfFlags = get32(p + 80), fourCC = get32(p + 84);
+    const uint32_t caps2 = get32(p + 112);
+    if (w == 0 || h == 0 || w > 8192 || h > 8192) return what = "no picture, or over 8192", false;
+    if (caps2 & (0x200u | 0x200000u)) return what = "a cube map or a volume, not a picture", false;
+    enum Kind { kNone, kBc1, kBc2, kBc3, kBc4, kBc5, kBc7, kRgba, kBgra, kBgrx, kMasks } kind = kNone;
+    size_t at = 128;
+    auto cc = [](const char* s) { return uint32_t(uint8_t(s[0])) | uint32_t(uint8_t(s[1])) << 8 | uint32_t(uint8_t(s[2])) << 16 | uint32_t(uint8_t(s[3])) << 24; };
+    if ((pfFlags & 4u) && fourCC == cc("DX10")) {
+        if (n < 148) return what = "a DX10 header cut short", false;
+        const uint32_t dxgi = get32(p + 128), dim = get32(p + 132), misc = get32(p + 136), array = get32(p + 140);
+        at = 148;
+        if (dim != 3 || (misc & 4u) || array > 1) return what = "not a single 2D picture (a cube, an array or a volume)", false;
+        switch (dxgi) {
+        case 71: case 72: kind = kBc1; break;
+        case 74: case 75: kind = kBc2; break;
+        case 77: case 78: kind = kBc3; break;
+        case 80: kind = kBc4; break;
+        case 83: kind = kBc5; break;
+        case 98: case 99: kind = kBc7; break;
+        case 28: case 29: kind = kRgba; break;
+        case 87: case 91: kind = kBgra; break;
+        case 88: case 93: kind = kBgrx; break;
+        default: return what = "DXGI format " + std::to_string(dxgi) + " (BC1-5, BC7 or 32-bit RGBA / BGRA read)", false;
+        }
+    } else if (pfFlags & 4u) {
+        if (fourCC == cc("DXT1")) kind = kBc1;
+        else if (fourCC == cc("DXT2") || fourCC == cc("DXT3")) kind = kBc2;
+        else if (fourCC == cc("DXT4") || fourCC == cc("DXT5")) kind = kBc3;
+        else if (fourCC == cc("ATI1") || fourCC == cc("BC4U")) kind = kBc4;
+        else if (fourCC == cc("ATI2") || fourCC == cc("BC5U")) kind = kBc5;
+        else return what = "its compression (DXT1 / 3 / 5, ATI1 / 2, BC4U / BC5U or a DX10 header read)", false;
+    } else if ((pfFlags & 0x40u) && get32(p + 88) == 32) kind = kMasks; // (RGB, 32 bits a pixel: by its masks)
+    else return what = "its pixel format (block-compressed or 32-bit read)", false;
+    out.width = int(w), out.height = int(h);
+    out.rgba.assign(size_t(w) * h * 4, 0);
+    if (kind == kRgba || kind == kBgra || kind == kBgrx || kind == kMasks) {
+        if (n - at < size_t(w) * h * 4) return what = "its pixels cut short", false;
+        uint32_t m[4] = {0xffu, 0xff00u, 0xff0000u, 0xff000000u}; // (R, G, B, A in a little-endian 32-bit pixel)
+        if (kind == kBgra || kind == kBgrx) m[0] = 0xff0000u, m[2] = 0xffu;
+        if (kind == kBgrx) m[3] = 0;
+        if (kind == kMasks) {
+            for (int c = 0; c < 4; ++c) m[c] = get32(p + 92 + 4 * c);
+            if (!(pfFlags & 1u)) m[3] = 0; // (no alpha: opaque)
+        }
+        auto channel = [](uint32_t v, uint32_t mask) -> uint8_t {
+            if (!mask) return 255;
+            int shift = 0;
+            while (!((mask >> shift) & 1u)) ++shift;
+            const uint32_t top = mask >> shift;
+            return uint8_t(((v & mask) >> shift) * 255u / top);
+        };
+        for (size_t i = 0; i < size_t(w) * h; ++i) {
+            const uint32_t v = get32(p + at + i * 4);
+            for (int c = 0; c < 4; ++c) out.rgba[i * 4 + size_t(c)] = channel(v, m[c]);
+        }
+        return true;
+    }
+    const size_t block = kind == kBc1 || kind == kBc4 ? 8 : 16;
+    const uint32_t bx = (w + 3) / 4, by = (h + 3) / 4;
+    if ((n - at) / block < size_t(bx) * by) return what = "its blocks cut short", false;
+    uint8_t tile[4 * 4 * 4];
+    for (uint32_t y = 0; y < by; ++y)
+        for (uint32_t x = 0; x < bx; ++x) {
+            const uint8_t* b = p + at + (size_t(y) * bx + x) * block;
+            switch (kind) {
+            case kBc1: bcdec_bc1(b, tile, 16); break;
+            case kBc2: bcdec_bc2(b, tile, 16); break;
+            case kBc3: bcdec_bc3(b, tile, 16); break;
+            case kBc7: bcdec_bc7(b, tile, 16); break;
+            case kBc4: { // (one channel: a grey)
+                uint8_t r[16];
+                bcdec_bc4(b, r, 4);
+                for (int i = 0; i < 16; ++i) tile[i * 4] = tile[i * 4 + 1] = tile[i * 4 + 2] = r[i], tile[i * 4 + 3] = 255;
+                break;
+            }
+            default: { // kBc5: red and green
+                uint8_t rg[32];
+                bcdec_bc5(b, rg, 8);
+                for (int i = 0; i < 16; ++i) tile[i * 4] = rg[i * 2], tile[i * 4 + 1] = rg[i * 2 + 1], tile[i * 4 + 2] = 0, tile[i * 4 + 3] = 255;
+                break;
+            }
+            }
+            for (uint32_t ty = 0; ty < 4 && y * 4 + ty < h; ++ty)
+                for (uint32_t tx = 0; tx < 4 && x * 4 + tx < w; ++tx)
+                    std::memcpy(&out.rgba[((size_t(y) * 4 + ty) * w + x * 4 + tx) * 4], &tile[(ty * 4 + tx) * 4], 4);
+        }
+    return true;
+}
+
 } // namespace
 
 bool hdShapeFits(int w, int h, int originalW, int originalH) {
@@ -191,6 +292,18 @@ bool loadHdImage(const std::string& dir, const Image& original, Image& out, std:
         out.alphaOnly = original.alphaOnly;
         out.rgba.assign(px, px + size_t(w) * size_t(h) * 4);
         stbi_image_free(px);
+        return true;
+    }
+    if (void* data = SDL_LoadFile((dir + name + ".dds").c_str(), &size)) { // (a texture tool's: BC1-5, BC7, 32-bit)
+        std::string what;
+        Image img;
+        const bool read = decodeDds(static_cast<const uint8_t*>(data), size, img, what);
+        SDL_free(data);
+        if (!read) return leftOut(why, name + ".dds", what);
+        if (!hdShapeFits(img.width, img.height, original.width, original.height))
+            return leftOut(why, name + ".dds", sizesText(img.width, img.height, original.width, original.height));
+        out = std::move(img);
+        out.alphaOnly = original.alphaOnly;
         return true;
     }
     return false;

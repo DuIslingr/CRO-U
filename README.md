@@ -234,7 +234,9 @@ are made from the game's art, so keep them out of anything you share.
 3. Start the game: with `textures/hd/` present, HD Textures switches on by itself.
 
 Any upscaler or image editor works: save the result under the same name in `textures/hd/`, keep its
-proportions (at least the original size, up to 8192 a side) and keep it the right way up. A picture
+proportions (at least the original size, up to 8192 a side) and keep it the right way up. It can be a
+`<hash>.png` or a `<hash>.dds` from a texture tool: BC1 / BC2 / BC3 (DXT1 / 3 / 5), BC4, BC5, BC7 or
+uncompressed 32-bit RGBA / BGRA, its first mip (a cube map or an array is skipped). A picture
 that doesn't fit is skipped and the log says why. Exports made with Vita Assets on leave `.cralias`
 files so one upscale serves the game with or without the Vita's art. `CR_HD_TEXTURES=<folder>`
 reads them from elsewhere; `--no-hd-textures` runs without.
