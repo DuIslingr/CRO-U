@@ -9290,25 +9290,22 @@ void drawVitaLogo(App& app) {
     r.setOrigin(r.uiX());
 }
 
-// Uty_TexDisp_Put: a 480 x 96 piece (w, h) is a strip: (u, v) x2 of the slot's picture, 1024 x 192
-// at tex2d (2x - 32, 320 - h) of the HD 2x frame - the screen's (2x, 288); anything else the whole
-// picture over the screen (tex2d (-32, -64), 1024 x 768)
+// Uty_TexDisp_Put: tex2d_add(slot, x, y, u, v, w, h) - the piece (u, v) w x h of the slot's picture at tex2d (x, y),
+// whatever its size (1.0.0 0x276e0: no other case). An _hd sheet holds it at twice those units (daimei01_hd's
+// "CHAOS RINGS" box at (358, 297), the SD sheet's at (179, 148)), at the screen's (2x + 32, 2y + 64). The opening's
+// title (j001_d05 / c101_t01: slot 1, (0, 0) 480 x 320 over the eclipse effect) was drawn - on every layout - as a
+// 1024 x 768 card instead: its box at (358, 297) of the 4:3 area, up and left of the eclipse's black disc, which
+// the effect centres on (512, 384) - the box showing over the ring (CRO-U #7). Now at (390, 361) 240 x 53, its
+// centre on the disc's, as the reference video has it (Part 1 600 s: the title inside the black disc)
 void drawTexDisp(App& app) {
     const App::TexDisp& t = app.texDisp;
     if (!t.on || t.alpha <= 0 || t.g[0] < 0 || t.g[0] >= 16) return;
     const cr::Texture& tex = app.portraits[t.g[0]].tex;
-    if (!tex.id) return;
+    if (!tex.id || t.g[5] <= 0 || t.g[6] <= 0) return;
     cr::Renderer& r = app.renderer;
-    const float a = float(t.alpha) / 255.0f, ox = r.uiX();
-    r.setOrigin(0);
-    const float k = float(tex.width) / 1024.0f; // the HD sheet's pixels (1024 wide)
-    // tex2d_add with an _hd sheet: x, y, u, v, w, h all doubled, the screen's (2x + 32, 2y + 64) -
-    // the title strip (0, 112) 480 x 96 of row v is (32, 288) 960 x 192 of texels (0, 2v): centred
-    if (t.g[5] > 0 && t.g[6] > 0 && (t.g[5] < 480 || t.g[6] < 320))
-        r.drawQuadUV(tex, ox + 32 + 2.0f * float(t.g[1]), 64 + 2.0f * float(t.g[2]), 2.0f * float(t.g[5]), 2.0f * float(t.g[6]),
-                     2.0f * float(t.g[3]) * k, 2.0f * float(t.g[4]) * k, 2.0f * float(t.g[5]) * k, 2.0f * float(t.g[6]) * k, 1, 1, 1, a);
-    else r.drawQuadUV(tex, ox, 0, 1024, 768, 0, 0, 1024 * k, 768 * k, 1, 1, 1, a);
-    r.setOrigin(ox);
+    const float a = float(t.alpha) / 255.0f, tk = float(tex.width) / 1024.0f; // (the HD sheet's pixels: 1024 wide)
+    r.drawQuadUV(tex, 32 + 2.0f * float(t.g[1]), 64 + 2.0f * float(t.g[2]), 2.0f * float(t.g[5]), 2.0f * float(t.g[6]),
+                 2.0f * float(t.g[3]) * tk, 2.0f * float(t.g[4]) * tk, 2.0f * float(t.g[5]) * tk, 2.0f * float(t.g[6]) * tk, 1, 1, 1, a);
 }
 
 // MsgUty_TexDispProc, a frame: 1 the picture read, 2 each page turn (flag 4075) the next page (its
