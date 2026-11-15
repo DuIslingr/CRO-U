@@ -270,6 +270,11 @@ std::vector<int> BattleRules::targets(const BattleActionDef& a, int user) const 
 }
 
 void BattleRules::breakEvent(int who, int event, int target) {
+    if (cheatBreak) { // (Options' Full Break Gauge: the pair's, full, whatever happens - no change of hands)
+        breakStarted = true;
+        breakTarget = breakGauge = 8;
+        return;
+    }
     const bool party = who < 2;
     if (!breakStarted) { // the battle's first event: four for whoever caused it
         breakStarted = true;
@@ -856,7 +861,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             }
             --bag_[size_t(e.item)];
         }
-        if (e.kind == kCmdGene && e.actors[0] < 2 && !e.paid) { // the gene's MP: each member pays it in pair mode
+        if (e.kind == kCmdGene && e.actors[0] < 2 && !e.paid && !cheatMp) { // the gene's MP: each member pays it in pair mode
             const int cost = geneCost(*a, e.actors[0]);
             bool enough = true;
             for (int k : e.actors)
@@ -1051,6 +1056,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                             self.amount = floored(k, self.amount);
                             if (self.amount > 0) breakEvent(e.actors[0], 2, t);
                             u.hp = std::max(0, u.hp - self.amount);
+                            if (cheatHp) u.hp = u.hpMax;
                             if (u.hp == 0 && u.status[kStatusEndure]) u.status[kStatusEndure] = 0, u.hp = 1;
                             if (u.hp == 0) { // btlcalc_chk_dead
                                 self.fell = true;
@@ -1168,6 +1174,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             const int before = tf.hp;
             const bool direct = calc == 1 && a->id == 241; // (0406's 0xf1: hp -= 99999 - no dmg_hp, Endure or floor)
             if (h.type == kHitKill) h.amount = tf.hp;
+            if (cheatOneHit && t >= 2 && h.amount > 0 && e.actors[0] >= 0 && e.actors[0] < 2) h.amount = tf.hp; // (Cheats: One-Hit Kills)
             // _btlcalc_dmg_hp's story rules (scenario 0): group 0x290 (656) - no healing Olgar (kind 9);
             // group 0x292 (658) - no healing the party while the enemies hold the Break ("No effect")
             if (!direct && storyNoHeal(t, h.amount)) h.amount = 0, note_ = 57047;
@@ -1182,6 +1189,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             if (calc == 0 && round > 3 && h.amount >= 1 && a->id == 18) lateAttack = true; // btlcalc_0404: +0xa50
             if (h.amount > 0) breakEvent(breakBy, 2, t);
             tf.hp = std::clamp(tf.hp - h.amount, 0, tf.hpMax);
+            if (cheatHp && t < 2) tf.hp = tf.hpMax; // (Cheats: Infinite HP - the number shown, nothing lost)
             if (tf.hp == 0 && before > 0 && tf.status[kStatusEndure] && !direct) {
                 tf.status[kStatusEndure] = 0;
                 tf.hp = 1;
@@ -1272,6 +1280,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                     self.amount = floored(k, self.amount);
                     if (self.amount > 0) breakEvent(e.actors[0], 2, firstTarget_);
                     u.hp = std::max(0, u.hp - self.amount);
+                    if (cheatHp) u.hp = u.hpMax;
                     if (self.amount > 0 && u.hp > 0) autoGuard(k);
                     out.hits.push_back(self);
                 }
@@ -1348,6 +1357,8 @@ void BattleRules::endRound() {
         if (d > 0 && invincible(i)) d = 0; // (dmg_hp's Is_invincible: poison and the stage's loss none either)
         const int before = x.hp;
         x.hp = std::clamp(x.hp - d, 0, x.hpMax);
+        if (i < 2 && cheatHp) x.hp = x.hpMax;
+        if (i < 2 && cheatMp) x.mp = x.mpMax; // (Cheats: what an enemy drained back too)
         if (x.hp == 0 && d > 0 && x.status[kStatusEndure]) x.hp = 1, x.status[kStatusEndure] = 0; // (btlcalc_dmg_hp: Endure holds here too)
         if (storyKeepsUp(i) && x.hp == 0) x.hp = 1;
         // btlcalc_chk_dead(fighter, 0, i, 99) for every changed HP: an enemy felled by poison pays as
@@ -1490,7 +1501,7 @@ std::vector<int> BattleRules::applyRewards(GameState& gs) const {
         PartyMember& m = gs.party[size_t(x.character)];
         m.mp = x.skills[163 - 131] && outcome() != 3 ? x.mpMax : x.mp; // 163: MP back to full (_pcparam_max_mp, a number)
         if (won) {
-            const int gained = expGained * (doubleExp ? 2 : 1);
+            const int gained = expGained * (doubleExp ? 2 : 1) * std::max(1, expScale); // (Cheats: EXP Multiplier)
             m.exp += x.hp > 0 ? gained : gained / 2; // MbResultSet: a fallen member gets half
             const int before = m.level;
             while (m.level < levelCap(gs.scenario) && m.exp >= expForLevel(m.level + 1)) ++m.level; // (GetLvMax)

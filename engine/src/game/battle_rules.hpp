@@ -252,6 +252,10 @@ public:
     int purse = 0;               // the party's Oz at the start (calc 10 takes from it)
     int ozStolen = 0;            // what the enemies took
     bool doubleExp = false, doubleOz = false; // calcs 35 / 36 (Paradise Apples)
+    // Options' Cheats (the port's own): the pair's HP never drops (the numbers still show), its MP never paid,
+    // the pair's blows fell what they hit, the EXP won multiplied
+    bool cheatHp = false, cheatMp = false, cheatOneHit = false, cheatBreak = false; // (cheatBreak: the Break the pair's, full)
+    int expScale = 1;
     std::vector<int> drops;      // items (btlcalc_0505), gene plates (chk_dead), in the order won
     std::vector<int> learned;    // abilities and skills taught (btlcalc_0506) or dropped (0505): in the bag at once
     std::vector<int> stolen;     // Steal Item's catch (btlcalc_0504: in the bag at once, never on the result screen)
