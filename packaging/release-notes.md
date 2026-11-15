@@ -1,115 +1,34 @@
-# CRO-U v0.7.0
+# CRO-U v0.7.1
 
-A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux, Android and now
-iPhone and iPad.
+A fix release for [v0.7.0](https://github.com/DuIslingr/CRO-U/releases/tag/v0.7.0): two story battles
+that ended the game, a controller Windows stopped finding, and missing text on some Android phones.
+Everything in v0.7.0's notes still applies.
 
-Ninety changes since v0.5.0. The headline is the **iOS build**, with phones and foldables treated
-as first-class screens; underneath, another full pass over the battles, the menus and the controls
-against the newest iPad release (3.1.0) and a full recording of the original.
+## Fixed
 
-## What's new
-
-### iPhone and iPad (new)
-
-- **An iOS build** (`CRO-U-ios-unsigned.ipa`, iOS 15+): Vulkan through MoltenVK with **MetalFX**
-  upscaling (iOS 16+) and FSR 3.1, OpenGL ES as the fallback. It is unsigned: sideload it with
-  AltStore, Sideloadly or the like, which sign it with your Apple ID.
-- **Your copy, as on Android:** the first start asks for it with the system's file picker (an `.ipa`,
-  the APK and OBB, a Vita folder or a dump's archive) and shows its progress. Or put it into the app's
-  folder in the Files app (*On My iPhone / iPad > Chaos Rings Omega*) yourself.
-- **Built for today's screens:** 120 Hz on ProMotion displays, the iPhone layout on a small screen and
-  the iPad layout on a large one - on the **iPhone Duo** it changes as you fold or open it. Built with
-  the iOS 27.1 SDK, so the game fills the Duo's screens instead of sitting in a box.
-- Text in iOS's own fonts (Hiragino for Japanese, as 3.1.0; PingFang and Apple SD Gothic Neo for
-  Chinese and Korean), the app's own icon, and nothing drawn while the app is in the background, so
-  the picture never freezes when you come back.
-
-### Phones and tablets
-
-- **The game fills the screen**, whatever its shape. Only the menus and buttons keep clear of a
-  camera's notch or punch hole; the picture runs to the edges. *Options > Display > Camera Cutout*
-  turns that off.
-- **No resolution, window or aspect options on phones:** the game uses the screen's own resolution
-  and shape.
-- Your `ios/`, `android/`, `vita/` and `font/` folders are made on every start, so they always show
-  over USB and in the Files app.
-
-### Your copy, put in by hand
-
-- **Drop an archive in and play:** an `.ipa` in `ios/`, an `.xapk` / `.apks` in `android/`, a Vita
-  dump's `.zip` / `.rar` / `.7z` / `.vpk` in `vita/` - each is unpacked (and decrypted) when the game
-  starts, with a progress window, and the game goes straight on. No setup, no second start.
-- **"Could not find your copy"** now has *Look again*, so you can put the files in and carry on.
-- **A Vita dump's .rar that wouldn't unpack** (the Prequel Trilogy's) now does: libarchive 3.8.11.
-- **The Vita decrypter** is the project's own clean-room code, and decrypts correctly on macOS and
-  Apple devices (an AES fault there was fixed).
-
-### Cheats (new)
-
-- **Options > Cheats:** Infinite HP, Infinite MP, Max Oz, an EXP Multiplier (up to 10x), Always First
-  Strike, No Random Battles, One-Hit Kills and a Full Break Gauge. Saved with your settings.
-
-### Battles
-
-- **Rules as 3.1.0's:** drain shared among its users, scenario 2's boss moves, enemy pairs, counters
-  after a multi-hit move, the escape chance, speed ties, story battles' HP rules (Olgar can't be
-  healed or fall in his duel), a target that fell before its turn re-picked.
-- **Presentation as the videos show it:** physical genes play as attacks, Risk Breaker and Venom
-  Kiss, bounces, an attack's length and the next action's timing as the original's, in-place
-  attacks, partner-timed pair hits, the HUD, results, escape and defeat. Shadows fade out softly at
-  their edge.
-- A lost battle plays the Ark's after-defeat scene again.
-
-### Field, menus and scenes
-
-- **The Camp's Equip page** slides its windows step by step as 3.1.0's, a worn slot's list opens on
-  what is worn, and gear the partner wears is listed (a jewel with no free copy greyed out).
-- **Held controls light, and act as you lift** your finger, as in 3.1.0, everywhere from the Camp to
-  the World Select; counts step as the original's.
-- Scene actors keep their motion while hidden, actors a scene brings in cast their shadow, the hall's
-  news marks, model colours that left a body see-through, the Options sounds, puzzle taps on the Vita
-  layout, the save question's taps, the title's pieces.
-- **The Vita layout** as the Vita release draws it: the screen's edges, the messages, the title, the
-  pictures, its fonts, no battery icon.
-- **Your own font:** a `.ttf`, `.otf` or `.ttc` in `font/` replaces the system's.
-
-### Controllers and keyboard
-
-- **As the Vita's:** L / R, ×, the title, the D-pad running, kept battle cursors, lists that repeat,
-  ○ to go on, × answering No everywhere.
-- **Hot-plug:** another connected controller takes over when one is unplugged, and a wireless pad
-  that wakes behind its receiver is picked up again.
-- **F11 or Alt+Enter** toggles windowed / fullscreen.
-
-### Under the hood
-
-- SDL 3.4.20, the Vulkan SDK 1.4.363.1 and MoltenVK 1.4.2 (macOS and iOS).
-- A log file, `chaosrings.log`, in the profile folder (on iOS, the app's Files folder).
+- **The opening battle with the Agent, and its twin in the second scenario, no longer end in a game
+  over** ([#3](https://github.com/DuIslingr/CRO-U/issues/3)). These are battles you're meant to lose:
+  in the original, the pair falls in the first round and the story carries on, as the reference
+  recording shows. CRO-U only let the story go on from the second round, so the first-round defeat
+  sent you back to the title; only Infinite HP got past it.
+- **Flydigi controllers on Windows** ([#4](https://github.com/DuIslingr/CRO-U/issues/4)): a Vader 4
+  Pro, wired or through its receiver, wasn't found since v0.7.0's SDL update. SDL 3.4 added its own
+  Flydigi driver, which takes the controller and then gets no input from it; CRO-U now leaves that
+  driver off on Windows, so the controller is read through XInput as before. Setting the environment
+  variable `SDL_JOYSTICK_HIDAPI_FLYDIGI=1` turns SDL's driver back on. Every controller SDL finds is
+  now written to `chaosrings.log`, so if one still isn't picked up, the log shows why.
+- **No text on some Android phones:** phones whose maker ships its own fonts, without Android's usual
+  Noto fonts where CRO-U looked, showed the game's Japanese, Chinese and Korean text missing (and the
+  rest in a blocky fallback). CRO-U now reads the phone's own font list and uses the fonts it names
+  for those languages, then the phone's default font.
 
 ### Thanks to metastigma
 
-Thanks again to [metastigma](https://github.com/metastigma), whose fork
-([CRO-U-metastigma](https://github.com/metastigma/CRO-U-metastigma)) found or led to a good share of
-this release:
-
-- **Found and worked out by metastigma:** the model colours that left a body see-through
-  ([metastigma/CRO-U-metastigma#24](https://github.com/metastigma/CRO-U-metastigma/pull/24);
-  [4e623f5](https://github.com/DuIslingr/CRO-U/commit/4e623f5)).
-- **Found in their fork:** the puzzle taps on the Vita layout
-  ([008c54a](https://github.com/DuIslingr/CRO-U/commit/008c54a)), the save question's taps
-  ([43af962](https://github.com/DuIslingr/CRO-U/commit/43af962)), the title's pieces
-  ([fe6ad42](https://github.com/DuIslingr/CRO-U/commit/fe6ad42)), the voiced data's action records
-  ([9950d98](https://github.com/DuIslingr/CRO-U/commit/9950d98)), physical genes playing as attacks
-  ([a187062](https://github.com/DuIslingr/CRO-U/commit/a187062)), a gene's cast loop
-  ([de01a67](https://github.com/DuIslingr/CRO-U/commit/de01a67)) and the soft shadow edges
-  ([7495c1c](https://github.com/DuIslingr/CRO-U/commit/7495c1c)).
-- **From reviewing their fork:** the controller hot-plug, after their Windows XInput work
-  ([0571f0f](https://github.com/DuIslingr/CRO-U/commit/0571f0f)); F11 / Alt+Enter, which their fork had
-  first ([81a71a1](https://github.com/DuIslingr/CRO-U/commit/81a71a1)); script-read actors' shadows and
-  the Camp's worn-slot lists ([13bdb62](https://github.com/DuIslingr/CRO-U/commit/13bdb62)); and the
-  Equip page's slides ([945d981](https://github.com/DuIslingr/CRO-U/commit/945d981)).
-- [Issue #2](https://github.com/DuIslingr/CRO-U/issues/2), their Options bars report, was answered by
-  v0.5.0's gauges.
+[metastigma](https://github.com/metastigma) reported the Flydigi problem and investigated it in their
+fork ([CRO-U-metastigma#42](https://github.com/metastigma/CRO-U-metastigma/pull/42),
+[#43](https://github.com/metastigma/CRO-U-metastigma/pull/43)); CRO-U's controller events already work
+as their #43 does, and this release takes the narrower fix above instead of their development build of
+SDL.
 
 ## Downloads
 
