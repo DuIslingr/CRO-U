@@ -1,10 +1,16 @@
 # CRO-U v0.7.2
 
-A fix release for [v0.7.1](https://github.com/DuIslingr/CRO-U/releases/tag/v0.7.1): three things that
-looked wrong, all reported by metastigma. Everything in v0.7.0's and v0.7.1's notes still applies.
+A fix release for [v0.7.1](https://github.com/DuIslingr/CRO-U/releases/tag/v0.7.1): Flydigi controllers on
+Windows, and three things that looked wrong - all reported by metastigma. Everything in v0.7.0's and
+v0.7.1's notes still applies.
 
 ## Fixed
 
+- **Flydigi controllers on Windows, take two** ([#4](https://github.com/DuIslingr/CRO-U/issues/4)): v0.7.1's
+  fix didn't bring the Vader 4 Pro back. The Windows build now uses SDL's development version from
+  2026-11-14, which has SDL's later Flydigi fixes - the setup metastigma's fork uses and its user
+  confirmed works with this controller, wired and through its receiver. v0.7.1's workaround is gone.
+  Other platforms keep SDL 3.4.20.
 - **Battle models no longer turn speckled and see-through on some graphics cards**
   ([#5](https://github.com/DuIslingr/CRO-U/issues/5)). A battle model draws parts of itself twice, and
   the second copy only keeps pixels that are fully opaque. CRO-U checked that with an exact
@@ -24,8 +30,9 @@ looked wrong, all reported by metastigma. Everything in v0.7.0's and v0.7.1's no
 
 ### Thanks to metastigma
 
-[metastigma](https://github.com/metastigma) reported all three, with screenshots that made each one
-easy to find.
+[metastigma](https://github.com/metastigma) reported all four, with screenshots that made each one
+easy to find, and worked out the Windows SDL setup in their fork
+([CRO-U-metastigma#42](https://github.com/metastigma/CRO-U-metastigma/pull/42)).
 
 ## Downloads
 

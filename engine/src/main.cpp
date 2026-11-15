@@ -30075,15 +30075,6 @@ void start(int argc, char** argv) {
 SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     logfile::start(argc, argv);
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
-#ifdef SDL_PLATFORM_WINDOWS
-    // Flydigi pads (CRO-U #4: a Vader 4 Pro, wired and through its receiver, not found since SDL 3.4.20): SDL
-    // 3.4.0 added a HIDAPI driver for Flydigi controllers, on by default, which takes the pad and then gets no
-    // input from one in XInput mode (SDL's own fixes for it - XInput detection, ignored devices, a hot-plug
-    // lockup - are on its development branch only, after 3.4.20). Off here, so the pad is read through XInput
-    // as with SDL 3.2.0, where it worked. SDL_JOYSTICK_HIDAPI_FLYDIGI=1 in the environment turns it back on
-    // (the environment's value wins over this one)
-    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_FLYDIGI, "0");
-#endif
     SDL_SetAppMetadata("Chaos Rings Omega HD (reimplementation)", "0.1", "local.preservation.chaosringsomega");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SDL_Init: %s", SDL_GetError());
