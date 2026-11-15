@@ -1,127 +1,115 @@
-# CRO-U v0.5.0
+# CRO-U v0.7.0
 
-A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux and Android.
+A from-scratch reimplementation of *Chaos Rings Omega* for Windows, macOS, Linux, Android and now
+iPhone and iPad.
 
-This is a big one: over a hundred changes since v0.4.5. The game was re-read against the newest
-iPad release (3.1.0), and much of what's on screen was checked against a full recording of the
-original.
+Ninety changes since v0.5.0. The headline is the **iOS build**, with phones and foldables treated
+as first-class screens; underneath, another full pass over the battles, the menus and the controls
+against the newest iPad release (3.1.0) and a full recording of the original.
 
 ## What's new
 
-### Cutscenes and story scenes
+### iPhone and iPad (new)
 
-- **The opening's "Hmm!?"** shows the original's static instead of flickering with the space
-  painting tiled across the screen.
-- **The sea crossing:** the ship's wake follows the ship again instead of running ahead of and
-  above it. Effects in field scenes keep their own angles; only battle effects turn to the camera.
-- **The ship's side:** the view reaches the painting's edges on phone and Vita screens, and the
-  player is no longer hidden behind the waves.
-- **Timing as the original:** message windows fade in and out with their sounds, scripted pauses,
-  camera moves and quakes take the original's frames, and lines arrive when they should.
-- **Messages typed as in 3.1.0:** a tap brings out the text up to the next pause instead of the
-  whole page, lines stay up when the text goes on below them, and 75 voiced lines per language got
-  their voice back.
-- **Scripts across every area** checked against the original: characters turn and animate as
-  they should (Olgar's axe no longer stays raised in the Ark arrival), the first dungeon's fire
-  walls burn, story actors wait hidden until a scene brings them on, and the Ark's welcome-back
-  scene plays after every return.
-- **The message window** on phone layouts: the parchment reaches the screen's edges, with the
-  original's "next" arrow and skip button.
+- **An iOS build** (`CRO-U-ios-unsigned.ipa`, iOS 15+): Vulkan through MoltenVK with **MetalFX**
+  upscaling (iOS 16+) and FSR 3.1, OpenGL ES as the fallback. It is unsigned: sideload it with
+  AltStore, Sideloadly or the like, which sign it with your Apple ID.
+- **Your copy, as on Android:** the first start asks for it with the system's file picker (an `.ipa`,
+  the APK and OBB, a Vita folder or a dump's archive) and shows its progress. Or put it into the app's
+  folder in the Files app (*On My iPhone / iPad > Chaos Rings Omega*) yourself.
+- **Built for today's screens:** 120 Hz on ProMotion displays, the iPhone layout on a small screen and
+  the iPad layout on a large one - on the **iPhone Duo** it changes as you fold or open it. Built with
+  the iOS 27.1 SDK, so the game fills the Duo's screens instead of sitting in a box.
+- Text in iOS's own fonts (Hiragino for Japanese, as 3.1.0; PingFang and Apple SD Gothic Neo for
+  Chinese and Korean), the app's own icon, and nothing drawn while the app is in the background, so
+  the picture never freezes when you come back.
+
+### Phones and tablets
+
+- **The game fills the screen**, whatever its shape. Only the menus and buttons keep clear of a
+  camera's notch or punch hole; the picture runs to the edges. *Options > Display > Camera Cutout*
+  turns that off.
+- **No resolution, window or aspect options on phones:** the game uses the screen's own resolution
+  and shape.
+- Your `ios/`, `android/`, `vita/` and `font/` folders are made on every start, so they always show
+  over USB and in the Files app.
+
+### Your copy, put in by hand
+
+- **Drop an archive in and play:** an `.ipa` in `ios/`, an `.xapk` / `.apks` in `android/`, a Vita
+  dump's `.zip` / `.rar` / `.7z` / `.vpk` in `vita/` - each is unpacked (and decrypted) when the game
+  starts, with a progress window, and the game goes straight on. No setup, no second start.
+- **"Could not find your copy"** now has *Look again*, so you can put the files in and carry on.
+- **A Vita dump's .rar that wouldn't unpack** (the Prequel Trilogy's) now does: libarchive 3.8.11.
+- **The Vita decrypter** is the project's own clean-room code, and decrypts correctly on macOS and
+  Apple devices (an AES fault there was fixed).
+
+### Cheats (new)
+
+- **Options > Cheats:** Infinite HP, Infinite MP, Max Oz, an EXP Multiplier (up to 10x), Always First
+  Strike, No Random Battles, One-Hit Kills and a Full Break Gauge. Saved with your settings.
 
 ### Battles
 
-- **The opening as the original's:** a moment of white, the formation camera's turn under the fade,
-  the commands arriving on the original's frame; ambushes and first strikes are announced again.
-- **Presentation:** soft floor shadows under every fighter, gliding and tilting cameras, attackers
-  stepping to their spots, the original's hit labels ("Miss!", "Block!", "Counter"), HP and MP
-  counting down, slanted bars, the Break badge and its effect, damage numbers placed and stacked
-  as the original does.
-- **Menus:** pages slide in and out, Escape asks "Run from battle?", and the HELP box, gene costs
-  and results screen look as in 3.1.0. Analyze tells everything the original does.
-- **Rules** checked formula by formula: the pair attack's power, the Defense Gates, the level cap,
-  counters, the Ward, Endure, Steal Item and more. As in 3.1.0, the Counter skill always answers,
-  and a pair attack whose partner has fallen becomes the survivor's own.
-- **Battle voices:** the story battles' own victory lines, a line for every action, reactions by
-  the damage taken, and the lines the port never said.
-- **Scene battles:** the scene's own music, the original's fades, no Escape while a scene runs, and
-  a lost story battle shows its game-over screen.
+- **Rules as 3.1.0's:** drain shared among its users, scenario 2's boss moves, enemy pairs, counters
+  after a multi-hit move, the escape chance, speed ties, story battles' HP rules (Olgar can't be
+  healed or fall in his duel), a target that fell before its turn re-picked.
+- **Presentation as the videos show it:** physical genes play as attacks, Risk Breaker and Venom
+  Kiss, bounces, an attack's length and the next action's timing as the original's, in-place
+  attacks, partner-timed pair hits, the HUD, results, escape and defeat. Shadows fade out softly at
+  their edge.
+- A lost battle plays the Ark's after-defeat scene again.
 
-### Field and menus
+### Field, menus and scenes
 
-- **Painted Rooms: Original or Fill.** *Fill* zooms the painted backgrounds to cover a wide screen
-  while still following the player and the scripted pans. (The old Whole and Fill Width options are
-  gone; they stopped the pans.)
-- **Achievements:** the original's 32, earned as in 3.1.0 and announced with the Android release's
-  banner. The list opens from the title screen.
-- **Prompts seen once stay seen:** "About Option", the Progress Tracker and the "New fun stuff"
-  boards no longer come back at every launch.
-- **Options:** the original's gauges (filled blue) and a Language row with 3.1.0's languages; the
-  Back bar's arrows turn the page; Return to Title asks first.
-- **The Camp:** gene plates open their entries before you equip them, the Status page turns to the
-  equipment and skills, the Emergency Exit works, and the windows slide as the original's.
-- **Also redrawn as 3.1.0 draws them:** the shop, World Select, the save screen, the field map,
-  Scenarios (cards slide), the Instruction Manual (in the message window), the title's resume offer.
-- **Walking:** the original's collision, so ramps climb smoothly and walls push as they should;
-  field shadows and colours as the original's; the field HUD as 3.1.0's.
-- **Puzzle rooms:** the pyrokinesis switches pass their light along as in the original, and touches,
-  swipes and the block arrows work as in 3.1.0.
+- **The Camp's Equip page** slides its windows step by step as 3.1.0's, a worn slot's list opens on
+  what is worn, and gear the partner wears is listed (a jewel with no free copy greyed out).
+- **Held controls light, and act as you lift** your finger, as in 3.1.0, everywhere from the Camp to
+  the World Select; counts step as the original's.
+- Scene actors keep their motion while hidden, actors a scene brings in cast their shadow, the hall's
+  news marks, model colours that left a body see-through, the Options sounds, puzzle taps on the Vita
+  layout, the save question's taps, the title's pieces.
+- **The Vita layout** as the Vita release draws it: the screen's edges, the messages, the title, the
+  pictures, its fonts, no battery icon.
+- **Your own font:** a `.ttf`, `.otf` or `.ttc` in `font/` replaces the system's.
 
-### Controller support
+### Controllers and keyboard
 
-- **The Vita layout's field bar on a controller:** △ opens it, the D-pad moves round its entries,
-  ○ presses, × shuts it.
-- **Puzzle rooms by controller:** the right stick moves a touch pointer and R3 held is the finger,
-  so blocks can be lifted, swiped and tapped without touch.
-- **Skip:** holding X skips a battle's talk too.
+- **As the Vita's:** L / R, ×, the title, the D-pad running, kept battle cursors, lists that repeat,
+  ○ to go on, × answering No everywhere.
+- **Hot-plug:** another connected controller takes over when one is unplugged, and a wireless pad
+  that wakes behind its receiver is picked up again.
+- **F11 or Alt+Enter** toggles windowed / fullscreen.
 
-### Saves
+### Under the hood
 
-- **Opened treasure boxes are kept once:** a box opened again no longer grows the save every time,
-  and saves that already repeat them shrink back.
-- **One save for both scenarios** (`data.dat`), as the original's. Your old `save1.dat` /
-  `save2.dat` are folded into it once.
-- **Resuming** after quitting mid-cutscene no longer drops you on an empty painting.
-
-### Graphics, sound and performance
-
-- **FSR 3.1.6** built in, and **FSR 4** as a new Upscaler on AMD GPUs (Linux and Windows) with AMD's
-  files in `fsr4/`: see the README.
-- **Phones:** the scene fills the screen under a camera hole and into the corners, while menus keep
-  to the safe area. The Android layout puts pieces on the phone's edges as Android 1.1.6 does.
-- **Sound:** the original's mix (voices no longer drowned out by music), Omega's own Vita music
-  tracks (the title theme was silent with a Vita copy alone).
-
-### Setup and Android
-
-- **The first-start setup on Android:** pick your files on the phone; a Vita dump copied into
-  `vita/` is decrypted on the next start (on a PC too).
-- **Android updates install over each other** from this release on (see Good to know).
-
-### Fixes
-
-- A new game from clear data reaches the opening again.
-- Duplicate textures in a model use the original's choice (the "Hmm!?" fix also touches a few
-  effects and models).
-- No green focus frame round the game on Android after using a controller.
-- Many more small layout, timing and sound fixes, found by checking the port against a full
-  recording of the original (Parts 1-15); the details are in `docs/REFERENCE_VIDEO_CHECKS.md`.
+- SDL 3.4.20, the Vulkan SDK 1.4.363.1 and MoltenVK 1.4.2 (macOS and iOS).
+- A log file, `chaosrings.log`, in the profile folder (on iOS, the app's Files folder).
 
 ### Thanks to metastigma
 
-Thanks to [metastigma](https://github.com/metastigma) for their reports, fixes and testing:
+Thanks again to [metastigma](https://github.com/metastigma), whose fork
+([CRO-U-metastigma](https://github.com/metastigma/CRO-U-metastigma)) found or led to a good share of
+this release:
 
-- [issue #1](https://github.com/DuIslingr/CRO-U/issues/1), the broken cutscenes report, which the
-  cutscene fixes above answer;
-- their fork's work exposed opened treasure boxes growing the save, the controller-driven field bar
-  on the Vita layout, the right-stick touch in puzzle rooms, and the X key not skipping a battle's
-  talk;
-- contributed fixes (first shipped in v0.4.5): attackers step in only over their model's own
-  movement window ([9f4a0ed](https://github.com/DuIslingr/CRO-U/commit/9f4a0ed)); the menus update
-  when HD Textures is turned on in settings.ini ([014d019](https://github.com/DuIslingr/CRO-U/commit/014d019));
-  the player stands still as a scene starts and an item window no longer answers the question before
-  it ([eb5da9e](https://github.com/DuIslingr/CRO-U/commit/eb5da9e)); and, found in their fork, the
-  opening battle ends as the story intends instead of in a game over
-  ([825dc4e](https://github.com/DuIslingr/CRO-U/commit/825dc4e)).
+- **Found and worked out by metastigma:** the model colours that left a body see-through
+  ([metastigma/CRO-U-metastigma#24](https://github.com/metastigma/CRO-U-metastigma/pull/24);
+  [4e623f5](https://github.com/DuIslingr/CRO-U/commit/4e623f5)).
+- **Found in their fork:** the puzzle taps on the Vita layout
+  ([008c54a](https://github.com/DuIslingr/CRO-U/commit/008c54a)), the save question's taps
+  ([43af962](https://github.com/DuIslingr/CRO-U/commit/43af962)), the title's pieces
+  ([fe6ad42](https://github.com/DuIslingr/CRO-U/commit/fe6ad42)), the voiced data's action records
+  ([9950d98](https://github.com/DuIslingr/CRO-U/commit/9950d98)), physical genes playing as attacks
+  ([a187062](https://github.com/DuIslingr/CRO-U/commit/a187062)), a gene's cast loop
+  ([de01a67](https://github.com/DuIslingr/CRO-U/commit/de01a67)) and the soft shadow edges
+  ([7495c1c](https://github.com/DuIslingr/CRO-U/commit/7495c1c)).
+- **From reviewing their fork:** the controller hot-plug, after their Windows XInput work
+  ([0571f0f](https://github.com/DuIslingr/CRO-U/commit/0571f0f)); F11 / Alt+Enter, which their fork had
+  first ([81a71a1](https://github.com/DuIslingr/CRO-U/commit/81a71a1)); script-read actors' shadows and
+  the Camp's worn-slot lists ([13bdb62](https://github.com/DuIslingr/CRO-U/commit/13bdb62)); and the
+  Equip page's slides ([945d981](https://github.com/DuIslingr/CRO-U/commit/945d981)).
+- [Issue #2](https://github.com/DuIslingr/CRO-U/issues/2), their Options bars report, was answered by
+  v0.5.0's gauges.
 
 ## Downloads
 
@@ -131,11 +119,13 @@ Thanks to [metastigma](https://github.com/metastigma) for their reports, fixes a
 | `CRO-U-macos-universal.zip` | macOS 11+ (Apple silicon and Intel) |
 | `CRO-U-x86_64.AppImage` / `CRO-U-linux-x86_64.tar.gz` | Linux x86-64 |
 | `CRO-U-android.apk` | Android 7+ |
+| `CRO-U-ios-unsigned.ipa` | iOS / iPadOS 15+ (sideload it) |
 
 ## Getting started
 
 1. Download the file for your system and unzip it.
-2. Start `chaosrings`. If it can't find your copy of the game, it asks you for one and sets it up.
+2. Start `chaosrings`. If it can't find your copy of the game, it asks you for one and sets it up -
+   or drop your `.ipa`, `.xapk` or Vita dump into the matching folder and start it.
 3. Play.
 
 - **Windows:** if SmartScreen warns about an unsigned program, choose *More info*, *Run anyway*.
@@ -143,19 +133,19 @@ Thanks to [metastigma](https://github.com/metastigma) for their reports, fixes a
 - **Linux:** `chmod +x` the AppImage, then run it.
 - **Android:** install the APK. The setup can pick your files on the phone; folders go over USB into
   `Android/data/local.preservation.chaosringsomega/files/`, in an `ios/`, `android/` or `vita/` folder.
+- **iPhone / iPad:** sideload the `.ipa` (AltStore, Sideloadly). The first start's picker finds your
+  files, or copy them into the app's folder in the Files app.
 
 The README's "What you need" section lists which releases of the game work and what each needs.
 
 ## Good to know
 
-- **Android, updating:** from this version on, each release installs over the one before it. Every
-  earlier version was signed with a different key, so coming from one, uninstall it first, one
-  last time. That deletes the game files you copied in and your saves: keep a copy of the game
-  files to copy back.
 - **No game data is included.** You need your own copy; the port reads it at run time.
-- **Tested on:** Linux (played), Windows (under Wine). The macOS and Android builds are made by CI
-  but haven't been run on real hardware yet. Reports are welcome.
+- **Tested on:** Linux (played), Windows (under Wine); the iOS build's screen handling was checked on
+  an iPhone Duo with CR1-U, which shares it. The macOS and Android builds are made by CI. Reports are
+  welcome.
+- **Android, updating:** releases install over each other since v0.5.0.
 - **DLSS** isn't in these builds (NVIDIA's library can't ship with GPL code); you can build it
   yourself (README, Building from source).
-- Licence GPL-2.0-or-later (the macOS app is GPL-3.0 because of MoltenVK). A fan preservation
-  project, not affiliated with Square Enix or Media.Vision.
+- Licence GPL-2.0-or-later (the macOS and iOS apps are GPL-3.0 because of MoltenVK). A fan
+  preservation project, not affiliated with Square Enix or Media.Vision.
