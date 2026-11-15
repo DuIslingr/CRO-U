@@ -241,6 +241,7 @@ struct App {
     bool lockOrientation = false;          // Lock Screen Orientation (an iPad setting; stored)
     cr::MenuPainter menu;
     bool persist = true;                   // settings.ini is written (not by tests and captures)
+    std::string screenLogged;              // the last "screen:" log line's values (logged again when they change)
     // The title: the boot script (j001_t99's EvrStart 0: the logos, the title picture and music,
     // then Util 0's menu - Start / Scenarios / Options)
     bool booting = false;                  // no field behind it; the script ticks on its own
@@ -292,6 +293,7 @@ struct App {
         int upscaleMode = 0;               // kUpscaleModes: 0 native AA (DLAA) .. 4 ultra performance
         int sharpness = 25;                // % (FSR's RCAS pass; 0 = none)
         bool hdTextures = false;           // upscaled replacements from hdDir (what loads next)
+        bool avoidCutout = true;           // phones: the layout kept clear of a camera's notch / punch hole (Options, Display)
         int smoothModels = 0;              // 0 off, 2 / 3: PN-triangle level for characters and monsters
         bool hdModels = false;             // replacement models from modelsDir (glTF; what loads next)
         int anisotropy = 16;               // anisotropic filtering's samples on the mipmapped textures (1 off)
@@ -4416,7 +4418,7 @@ void saveMix(const App& app) {
                               std::to_string(v.renderScale) + "\nmsaa=" + std::to_string(v.msaa) +
                               "\nvsync=" + std::to_string(int(v.vsync)) + "\nframe_limit=" + std::to_string(v.frameLimit) + "\nupscaler=" + std::to_string(v.upscaler) +
                               "\nupscale_mode=" + std::to_string(v.upscaleMode) + "\nsharpness=" +
-                              std::to_string(v.sharpness) + "\nhd_textures=" + std::to_string(int(v.hdTextures)) +
+                              std::to_string(v.sharpness) + "\nhd_textures=" + std::to_string(int(v.hdTextures)) + "\navoid_cutout=" + std::to_string(int(v.avoidCutout)) +
                               "\nsmooth_models=" + std::to_string(v.smoothModels) + "\nhd_models=" + std::to_string(int(v.hdModels)) +
                               "\nanisotropy=" + std::to_string(v.anisotropy) + "\nsharp_textures=" + std::to_string(int(v.sharpTextures)) +
                               "\nlayout=" + std::to_string(v.layout) +
@@ -4554,6 +4556,7 @@ void loadVideo(App& app, const char* text) {
     v.upscaleMode = std::clamp(keyValue(text, "\nupscale_mode=", v.upscaleMode), 0, 4);
     v.sharpness = std::clamp(keyValue(text, "\nsharpness=", v.sharpness), 0, 100);
     v.hdTextures = keyValue(text, "\nhd_textures=", v.hdTextures) != 0;
+    v.avoidCutout = keyValue(text, "\navoid_cutout=", v.avoidCutout) != 0;
     v.smoothModels = keyValue(text, "\nsmooth_models=", v.smoothModels);
     v.hdModels = keyValue(text, "\nhd_models=", v.hdModels) != 0;
     if (v.smoothModels != 2 && v.smoothModels != 3) v.smoothModels = 0;
@@ -4619,6 +4622,11 @@ bool autoPhoneLayout(const App& app) { return app.phoneData || app.vitaOnly || s
 void applyVideo(App& app) {
     App::Video& v = app.video;
     cr::Renderer& r = app.renderer;
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+    // (a phone's or tablet's: no resolution, window or aspect choice - the whole screen at its own pixels, the
+    // picture widening to its shape; a settings file's other values, an older version's, set aside)
+    v.display = 0, v.widescreen = true;
+#endif
     r.setWidescreen(v.widescreen);
     // 2.2.0's / Omega's iPhone screens (3:2): the iPhone's data, or the Vita's alone - its art is the
     // iPhone's Retina sheets (the Vita ran the iPhone code path) - unless the iPad layout is asked for
@@ -5090,6 +5098,14 @@ std::vector<OptRow> optionRows(App& app, int page) {
         break;
     }
     case 2: { // Display
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+        // (a phone's or tablet's: the whole screen at its own resolution and shape, always - applyVideo)
+        pair("Camera Cutout", "Avoid", "Ignore", v.avoidCutout ? 0 : 1, [&app](int i) {
+            app.video.avoidCutout = i == 0;
+            saveMix(app);
+        });
+        rows.back().hint = "Avoid: the menus and the picture kept clear of the camera's notch or punch hole. Ignore: the picture to the screen's edges";
+#else
         static const char* const kDisplay[] = {"Window", "Fullscreen", "Borderless"};
         value("Resolution", v.display == 2 ? "Desktop" : std::to_string(v.width) + " x " + std::to_string(v.height),
               [&app](int dir) { adjustVideo(app, 0, dir ? dir : 1); });
@@ -5097,6 +5113,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
         pair("Aspect", "4:3", "Wide", v.widescreen ? 1 : 0, [&app](int i) {
             if (app.video.widescreen != (i == 1)) adjustVideo(app, 2, 1);
         });
+#endif
         static const char* const kLayout[] = {"Auto", "iPad", "iPhone", "Vita", "Android"};
         value("Layout", kLayout[std::clamp(v.layout, 0, 4)], [&app](int dir) { adjustVideo(app, 14, dir ? dir : 1); });
         rows.back().hint = "The screens' layout: the iPad release's (4:3), the iPhone's (3:2), the Vita's or the Android "
@@ -19634,7 +19651,27 @@ void drawFrame(App& app, bool present = true) {
             const float sx = float(w) / float(ww), sy = float(h) / float(wh);
             l = float(safe.x) * sx, t = float(safe.y) * sy, rr = float(ww - safe.x - safe.w) * sx, b = float(wh - safe.y - safe.h) * sy;
         }
+        if (!app.video.avoidCutout) l = t = rr = b = 0; // (Options: the picture to the screen's edges, under a camera's cutout too)
         r.setSafeInsets(l, t, rr, b);
+    }
+    { // what the system gives the game, and how the game fits itself in it - logged once, and when it changes
+      // (a phone's fold, a rotation, a window's resize: chaosrings.log - iOS's in the Files app)
+        int pw = 0, ph = 0, ww = 0, wh = 0;
+        SDL_GetWindowSize(app.window, &ww, &wh);
+        SDL_GetWindowSizeInPixels(app.window, &pw, &ph);
+        SDL_Rect safe{}, bounds{}, usable{};
+        SDL_GetWindowSafeArea(app.window, &safe);
+        const SDL_DisplayID d = SDL_GetDisplayForWindow(app.window);
+        SDL_GetDisplayBounds(d, &bounds);
+        SDL_GetDisplayUsableBounds(d, &usable);
+        char line[512];
+        SDL_snprintf(line, sizeof line,
+                     "window %dx%d pt, %dx%d px (density %.2f, scale %.2f), display %dx%d at %d,%d (usable %dx%d at %d,%d), safe area %dx%d at %d,%d; "
+                     "layout %s, %s, cutout %s",
+                     ww, wh, pw, ph, SDL_GetWindowPixelDensity(app.window), SDL_GetWindowDisplayScale(app.window), bounds.w, bounds.h, bounds.x, bounds.y,
+                     usable.w, usable.h, usable.x, usable.y, safe.w, safe.h, safe.x, safe.y, r.phoneLayout() ? "iPhone" : "iPad",
+                     app.video.widescreen ? "wide" : "fixed", app.video.avoidCutout ? "avoided" : "ignored");
+        if (app.screenLogged != line) app.screenLogged = line, SDL_Log("screen: %s", line);
     }
     r.beginFrame(w, h);
     // the examine prompt ("!" over what can be checked): placed through the scene's camera, drawn
@@ -29777,14 +29814,19 @@ void output(void* userdata, int category, SDL_LogPriority priority, const char* 
     std::fflush(file);
 }
 void start(int argc, char** argv) {
-#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+#if defined(SDL_PLATFORM_ANDROID)
     (void)argc, (void)argv;
-#else
+#else // (iOS's too: into the app's Documents - the game folder, seen in the Files app and over USB - no console there)
     if (file) return; // (a start run again - after the setup, Look again -: the same log)
     for (int i = 1; i < argc; ++i)
         for (const char* f : {"--capture", "--selftest", "--explore", "--export-textures", "--export-models"})
             if (SDL_strcmp(argv[i], f) == 0) return;
+#ifdef SDL_PLATFORM_IOS
+    const std::vector<std::string> g = cr::gameFolders();
+    const std::string dir = g.empty() ? cr::saveDir() : g.front();
+#else
     const std::string dir = cr::saveDir();
+#endif
     if (dir.empty()) return;
     const std::string now = dir + "chaosrings.log", prev = dir + "chaosrings.prev.log";
     SDL_RemovePath(prev.c_str());
@@ -29808,6 +29850,15 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
 
     auto* app = new App;
     *state = app;
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+    { // the game folder's places made on every start - to be seen and filled over USB, an iPhone's in the Files app
+      // (Info.plist's UIFileSharingEnabled / LSSupportsOpeningDocumentsInPlace share its Documents; Files shows an
+      // app's folder only once there is something in it)
+        const std::vector<std::string> g = cr::gameFolders();
+        if (!g.empty())
+            for (const char* f : {"ios", "android", "vita", "font"}) SDL_CreateDirectory((g.front() + f).c_str());
+    }
+#endif
 
     // A release copied in by hand as it comes - an .ipa into ios/, an .xapk / .apks into android/ -:
     // unpacked there first, with a progress window, so this start finds it as it would the files
@@ -29958,10 +30009,6 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     if (!app->modelsDir.empty() && app->modelsDir.back() != '/') app->modelsDir += '/';
     if (app->dataDir.empty()) {
         const std::vector<std::string> g = cr::gameFolders();
-#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
-        if (!g.empty()) // (the folders made, to be seen over USB - an iPhone's in the Files app)
-            for (const char* f : {"ios", "android", "vita"}) SDL_CreateDirectory((g.front() + f).c_str());
-#endif
         // The first start without a copy: where is it? (platform/setup.hpp - what's chosen copied into
         // the game folder's ios/, android/, vita/: found as on any start - a phone's too)
         static bool setupAsked = false;
