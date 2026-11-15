@@ -16029,12 +16029,18 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     rules.escapeBlocked = app.runner.running() && start.group != 0x298;
     (void)flags;
     rules.setupParty(app.game, app.itemTable, route);
-    rules.cheatHp = app.cheats.hp, rules.cheatMp = app.cheats.mp, rules.cheatOneHit = app.cheats.oneHit; // (Options' Cheats)
+    // (Options' Cheats. A battle the story has you lose - btl_main 0x4b0's 0x289 / 0x28e / 0x2a2 / 0x295, btlord_chk's
+    // 0x28a and scenario 1's 0x2a3 - plays without Infinite HP and One-Hit Kills: its script goes on from the pair's
+    // fall, which Infinite HP would never let come, and a boss the story keeps standing stays so)
+    const bool storyLoss = start.group == 0x289 || start.group == 0x28e || start.group == 0x2a2 || start.group == 0x295 ||
+                           (rules.scenario == 0 && start.group == 0x28a) || (rules.scenario == 1 && start.group == 0x2a3);
+    const bool cheatHp = app.cheats.hp && !storyLoss;
+    rules.cheatHp = cheatHp, rules.cheatMp = app.cheats.mp, rules.cheatOneHit = app.cheats.oneHit && !storyLoss;
     rules.cheatBreak = app.cheats.fullBreak;
     if (rules.cheatBreak) rules.breakStarted = true, rules.breakTarget = rules.breakGauge = 8;
     rules.expScale = app.cheats.exp;
     for (int k = 0; k < 2; ++k) {
-        if (app.cheats.hp && rules.f[size_t(k)].present) rules.f[size_t(k)].hp = rules.f[size_t(k)].hpMax;
+        if (cheatHp && rules.f[size_t(k)].present) rules.f[size_t(k)].hp = rules.f[size_t(k)].hpMax;
         if (app.cheats.mp && rules.f[size_t(k)].present) rules.f[size_t(k)].mp = rules.f[size_t(k)].mpMax;
     }
     // btl_enemy_init_lv: the scenario's level byte (the band the World Select chose)
@@ -22986,9 +22992,15 @@ int storyLossSelfTest(App& app) {
     int problems = 0;
     const cr::GameState keepGame = app.game;
     const int keepChar = app.playerChar;
+    const App::Cheats keepCheats = app.cheats;
     struct Case { int scenario, group, stage, round; bool story; };
+    // (each twice: the second time with Infinite HP and One-Hit Kills on - a story loss must still come, the cheats
+    // left out of it; any other battle keeps them)
+    for (int cheat = 0; cheat < 2; ++cheat)
     for (const Case& c : {Case{0, 654, 19, 1, true}, Case{1, 674, 0, 1, true}, Case{0, 650, 0, 2, true}, Case{0, 650, 0, 1, true},
                           Case{1, 675, 0, 1, true}, Case{0, 651, 11, 1, false}}) {
+        app.cheats = keepCheats;
+        app.cheats.hp = app.cheats.oneHit = cheat == 1;
         app.game = cr::GameState();
         cr::giveStartingItems(app.game, app.itemTable);
         app.game.scenario = c.scenario;
@@ -23004,6 +23016,16 @@ int storyLossSelfTest(App& app) {
             continue;
         }
         b.eventBattle = true; // (as a script's Battle starts it)
+        if (cheat && b.rules.cheatHp == c.story) { // (a story loss without the cheats, any other with them)
+            std::printf("story battle %d with the cheats on: Infinite HP %s - WRONG\n", c.group, b.rules.cheatHp ? "kept" : "dropped");
+            ++problems;
+        }
+        if (cheat && !c.story) { // (that one's defeat can't come with Infinite HP: checked above, not played)
+            endBattle(app, false);
+            app.runner.stop();
+            app.pendingEntry = App::Entry::None;
+            continue;
+        }
         bool lostShown = false;
         int exit = 0;
         for (int f = 0; f < 6000 && b.active; ++f) {
@@ -23020,7 +23042,8 @@ int storyLossSelfTest(App& app) {
         }
         const bool right = c.story ? !lostShown && exit == 1 : lostShown && exit == 2;
         problems += !right;
-        std::printf("story battle %d lost in round %d: %s, way out %d (%s) %s\n", c.group, c.round, lostShown ? "the defeat shown" : "no defeat", exit,
+        std::printf("story battle %d lost in round %d%s: %s, way out %d (%s) %s\n", c.group, c.round, cheat ? " (Infinite HP on)" : "",
+                    lostShown ? "the defeat shown" : "no defeat", exit,
                     exit == 1 ? "the script goes on" : exit == 2 ? "the title" : exit == 3 ? "the Ark" : "none", right ? "ok" : "WRONG");
         if (b.active) endBattle(app, false);
         app.runner.stop();
@@ -23066,10 +23089,12 @@ int storyLossSelfTest(App& app) {
         app.runner.stop();
         app.pendingEntry = App::Entry::None;
     }
-    { // j001_t01's opening (entry 202): from 0xa0d2 (vars 58 .. 60, then Battle 650 at 0xa0f6) the pair
+    for (int cheat = 0; cheat < 2; ++cheat) { // j001_t01's opening (entry 202): from 0xa0d2 (vars 58 .. 60, then Battle 650 at 0xa0f6) the pair
       // defending as it plays out - the Agent's Particle Cannon (430, some 2200 a shot) puts them down in the
       // first round, as the reference video shows -, the battle over after that round without a defeat, then
       // its talk (Gosub 0xa191: Msg 1400 ..) and on to flag 1401 (0xa100) - CRO-U #3
+        app.cheats = keepCheats;
+        app.cheats.hp = app.cheats.oneHit = cheat == 1; // (the second time with Infinite HP on: the same end)
         startNewGame(app, 0); // (Vieg and Olgar as a new game makes them: newPairParty)
         for (int f : {0xff1, 0xff2, 0xff3, 0xff4, 0xff5, 0xfa8, 0xfa9}) app.game.setFlag(f, true);
         showMap(app, 0, 0, 9); // (area 9: j001_t01.evt)
@@ -23113,13 +23138,14 @@ int storyLossSelfTest(App& app) {
         }
         const bool right = started && fought && group == 650 && !lostShown && !wrongWay && rounds == 1 && on;
         problems += !right;
-        std::printf("j001_t01's Battle 650: %s, battle %d over after round %d, %s, %s %s\n", started ? "started" : "NOT STARTED", group,
+        std::printf("j001_t01's Battle 650%s: %s, battle %d over after round %d, %s, %s %s\n", cheat ? " (Infinite HP on)" : "", started ? "started" : "NOT STARTED", group,
                     rounds, lostShown ? "the defeat shown" : "no defeat",
                     on ? "the script went on to flag 1401" : wrongWay ? "the game over" : "flag 1401 NOT reached", right ? "ok" : "WRONG");
         if (app.battle.active) endBattle(app, false);
         app.runner.stop();
         app.pendingEntry = App::Entry::None;
     }
+    app.cheats = keepCheats;
     std::printf("story battles lost: %d problems\n", problems);
     app.game = keepGame;
     app.playerChar = keepChar;
