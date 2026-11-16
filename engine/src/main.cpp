@@ -18784,6 +18784,19 @@ void drawBattleShadows(App& app, const cr::Mat4& vp) {
     drawShadowFans(app, app.battleShadows, app.battle.shadowTris, app.battle.shadowAlpha, vp);
 }
 
+// read_mdl_hd (3.1.0 decomp 2958-2971, the stage read as model 0): its place zeroed, then t0151bt's z
+// 100 less and t0155bt's 10 less - mdl_put draws model 0 there. t0155bt, the ship's deck: the turret's
+// platform 10 back, so a blow at the turret (the pair's spot z 494, the lunge's hips 8 on) lands on the
+// deck in front of its wall, not in it (#6; the Vita and Android releases at the hit)
+cr::Mat4 battleStageWorld(int stage) {
+    cr::Mat4 m;
+    if (stage < 0 || stage >= cr::kNumBattleStages) return m;
+    const std::string file = cr::kBattleStageFile[stage];
+    if (file == "t0151bt.bin") m.m[14] = -100.0f;
+    else if (file == "t0155bt.bin") m.m[14] = -10.0f;
+    return m;
+}
+
 // btl_prc: the whole screen through the formation's camera (btl_main: camera formation - 2;
 // perspective 0.0792 turns = 28.5 degrees vertical, 4:3)
 void drawBattle(App& app, float dt) {
@@ -18846,7 +18859,8 @@ void drawBattle(App& app, float dt) {
     // draw-order queue with the fighters: its meshes of order -300..-100 before them, 100..300 after
     // (the shadows' 0x3de after those)
     const bool stageQueued = b.start.stage == 0xf;
-    drawLoaded(app, b.stage, vp, nullptr, 1.0f, -1.0f, stageQueued ? 1 : 0);
+    const cr::Mat4 stageVp = vp * battleStageWorld(b.start.stage);
+    drawLoaded(app, b.stage, stageVp, nullptr, 1.0f, -1.0f, stageQueued ? 1 : 0);
     b.shadows.clear(), b.shadowTris.clear(), b.shadowAlpha.clear();
     for (size_t ai = 0; ai < b.actors.size(); ++ai) {
         // the actor as a frame between steps shows it: moved, turned, faded and its animation
@@ -18884,7 +18898,7 @@ void drawBattle(App& app, float dt) {
         drawLoaded(app, lm, vp * world, nullptr, a.alpha);
         addBattleShadow(app, a);
     }
-    if (stageQueued) drawLoaded(app, b.stage, vp, nullptr, 1.0f, -1.0f, 2);
+    if (stageQueued) drawLoaded(app, b.stage, stageVp, nullptr, 1.0f, -1.0f, 2);
     drawBattleShadows(app, vp); // (_btl_shadow after mdl_put: draw order 0x3de)
     drawEffects(app, vp, eye, target);
     r.end3D();
