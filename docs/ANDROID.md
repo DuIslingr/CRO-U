@@ -97,7 +97,7 @@ phone's screen rather than in the bar beside the centred one.
 Not everything is centred: some pieces add or subtract the centring offset over the 2D scale
 (gac +0x1e2688 / +0x1e268c over +0x1e2690; ox, oy = (80, 20) tex2d units on a 1280 x 720 phone)
 so they sit on the phone's own edges. The port's Android layout does the same through
-`androidEdgeX` / `androidEdgeY` (engine/src/main.cpp; 0 in the other layouts). Addresses are the
+`androidEdgeX` / `androidEdgeY` (engine/src/app/scene_fx.cpp; 0 in the other layouts). Addresses are the
 library's own (llvm-objdump, symbols.txt; Ghidra's decomp.c names them 0x10000 higher).
 
 | Piece | Android 1.1.6 | Offset | Edge |
