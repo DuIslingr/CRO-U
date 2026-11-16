@@ -90,7 +90,8 @@ def strip_comments(text):
 
 def collect():
     found = {}  # msgid -> [file:line]
-    for root, _, files in os.walk(SRC):
+    for root, dirs, files in os.walk(SRC):
+        dirs.sort()  # (the same order on every machine: the references and the strings' order follow it)
         for f in sorted(files):
             if not f.endswith((".cpp", ".hpp", ".mm", ".h")) or f.startswith("ui_text."):
                 continue
@@ -101,8 +102,11 @@ def collect():
                 msgid = "".join(c_unescape(x) for x in LITERAL.findall(m.group(2)))
                 if not msgid.strip():
                     continue
-                line = text.count("\n", 0, m.start()) + 1
-                found.setdefault(msgid, []).append("%s:%d" % (os.path.relpath(path, ENGINE).replace(os.sep, "/"), line))
+                # (the file alone, as xgettext --add-location=file: an edit that moves lines leaves the catalogs as they are)
+                ref = os.path.relpath(path, ENGINE).replace(os.sep, "/")
+                refs = found.setdefault(msgid, [])
+                if ref not in refs:
+                    refs.append(ref)
     return found
 
 
@@ -205,7 +209,9 @@ def main():
     stale = []
     for f, text in wanted.items():
         path = os.path.join(LANG, f)
-        old = open(path, encoding="utf-8").read() if os.path.exists(path) else None
+        old = open(path, encoding="utf-8", newline="").read() if os.path.exists(path) else None
+        if old is not None:
+            old = old.replace("\r\n", "\n")  # (a Windows checkout's line ends)
         if old != text:
             stale.append(f)
             if not check:
