@@ -1955,6 +1955,28 @@ void readMdlRules(LoadedModel& lm, const std::string& name) {
     }
 }
 
+// read_mdl_hd (3.1.0 decomp 2795-2805, 2936-2955; 1.0.0, Android and the Vita alike) on the battle stage
+// it reads as model 0 (btl_main 0x64, the stage index as its last operand): every Appearance's property bits
+// 1 and 0 cleared (the alpha write mask, lighting - the stages' files have bit 0 clear already, so colour 1
+// or the colour array alone, never the port's lit sum), then, unless the stage is 7 (d0351bt), a textured
+// one's alpha test off for a texture of pixel format 1 or 6 (RGB888, PAL8_RGB8) and on stages 3, 5, 6 and 9
+// (chk_btlflr; mask 0x268 in 3.1.0 - the Vita's build has the format rule alone)
+void readMdlHdRules(LoadedModel& lm, int stage) {
+    cr::Model& m = lm.cpu;
+    for (cr::Material& mt : m.materials) {
+        mt.properties &= ~3u;
+        mt.unlit = 1;
+        if (stage == 7 || mt.textureRef < 0) continue;
+        bool textured = false;
+        for (size_t k = 0; k < m.textureIds.size() && k < m.textures.size(); ++k)
+            if (m.textureIds[k] == mt.textureRef) {
+                textured = true;
+                if (m.textures[k].format == 1 || m.textures[k].format == 6) mt.alphaThreshold = 0;
+            }
+        if (textured && stage >= 0 && stage < 10 && ((0x268 >> stage) & 1)) mt.alphaThreshold = 0;
+    }
+}
+
 // An NPC table model as npc_setup / EvtNpcMdlRead read it (read_mdl), cached by file
 LoadedModel& npcModel(App& app, const std::string& file) {
     auto it = app.npcModels.find(file);
@@ -3886,6 +3908,7 @@ struct ViewerHost : cr::EventHost {
         if (!app.battle.active || stage < 0 || stage >= cr::kNumBattleStages) return;
         app.battle.start.stage = stage;
         loadModelFile(app, cr::kBattleStageFile[stage], app.battle.stage, false);
+        readMdlHdRules(app.battle.stage, stage);
     }
     void messageSkip(bool on) override { app.messageSkip = on; }
     void setLeader(int c) override { // Uty_Chg_char: Set_Prtyno(c) when it isn't already the leader
@@ -16030,6 +16053,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     b.camEase = 1, b.camRoll = 0, b.camSnapped = true;
     b.camWantEye = b.camEye = {488, 12, 555}, b.camWantTarget = b.camTarget = {500, 4, 498};
     loadModelFile(app, cr::kBattleStageFile[start.stage], b.stage, false);
+    readMdlHdRules(b.stage, start.stage);
     auto add = [&](int modelId, const short* place, float yaw, int fighter) -> App::Battle::Actor& {
         App::Battle::Actor a;
         a.modelId = modelId;
@@ -18090,6 +18114,7 @@ void stepSetPiece(App& app) {
     if (f == 22 && b.setPieceStage >= 0 && b.setPieceStage < cr::kNumBattleStages) {
         unloadLoaded(app, b.stage);
         loadModelFile(app, cr::kBattleStageFile[b.setPieceStage], b.stage, false);
+        readMdlHdRules(b.stage, b.setPieceStage);
         b.start.stage = b.rules.stage = b.setPieceStage; // (G+0x8a53d)
         setFlash(app, 255, 0, 1000);
     }
