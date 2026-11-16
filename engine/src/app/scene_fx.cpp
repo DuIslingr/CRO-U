@@ -1934,12 +1934,22 @@ cr::Material fadedMaterial(cr::Material mt, float alpha) {
     return mt;
 }
 
+// A mesh's place in the 3D draw queue: __mceQueue_addQueueDrawMesh (3.1.0 decomp.c 94504, 1.0.0
+// 0x8fa80) keys each mesh (its Appearance's draw order << 1) | (its blending on), and
+// __mceQueue_queueFlush (94140) sorts the whole queue - every figure's meshes together - by that key
+// before drawing any (__mceQueue_qsortDq, 94252). A faded model (mdl_set_alpha) is blended throughout
+int queueKey(const cr::Material& base, float alpha, bool faded) {
+    const bool blended = faded || alpha < 0.999f || base.blended();
+    return base.drawOrder * 2 + (blended ? 1 : 0);
+}
+
 // Draws a model's visible meshes: opaque materials first, then blended ones by draw order.
 // `override`, if given, replaces every material (texture unbound); `alpha` < 1 fades it - `faded`:
 // as mdl_set_alpha / mdl_put leave it (fadedMaterial), else the old way (the alpha multiplied in).
-// `pass` 1 draws those of draw order under 0 alone, 2 those of 0 and over (0 all)
+// `pass` 1 draws those of draw order under 0 alone, 2 those of 0 and over (0 all); `key` other than
+// kAllKeys: only the meshes of that queue key (queueKey)
 void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::Material* override, float alpha, float matTime, int pass,
-                bool faded) {
+                bool faded, int key) {
     const cr::Model& cpu = m.cpu;
     static const cr::Material kDefaultMaterial;
     auto baseOf = [&](size_t i) -> const cr::Material& {
@@ -1973,6 +1983,7 @@ void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::M
     for (size_t i : order) {
         if (i < cpu.meshes.size() && !cpu.meshes[i].visible) continue;
         if (pass && (materialOf(i).drawOrder >= 0) != (pass == 2)) continue;
+        if (key != kAllKeys && queueKey(baseOf(i), alpha, faded) != key) continue;
         if (i < animated.size() && animated[i].blended() && animated[i].diffuse[3] <= 0.004f) continue;
         const cr::GpuMesh& mesh = m.meshes[i];
         const cr::Texture* tex =
@@ -2938,10 +2949,10 @@ void drawFrame(App& app, bool present) {
                 if (app.showProps) drawLoaded(app, app.model, mvp);
                 r.setColorWrite(true);
                 // mdl_put: slot 0 (the props) drawn at once, then every other slot into the draw queue in
-                // slot order - the player's (1, gac + 0x1338) before the NPCs' -, sorted by draw order:
-                // the ship's waves (c152, orders 0..40, blended with depth writes) after the player
-                if (app.havePlayer && playerShown(app)) drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app), -1.0f, 0, app.playerFaded), modelDrawn(app);
-                drawNpcs(app, mvp);
+                // slot order - the player's (1, gac + 0x1338) before the NPCs' -, the whole queue sorted by
+                // draw order: the ship's waves (c152, orders 0..40, blended with depth writes) after the
+                // player and after every NPC's opaque meshes (Vieg on the paddle wheel, map 70's opening)
+                drawFigureQueue(app, mvp);
             }
             drawFieldShadows(app, mvp); // (draw order 990: after the models)
             if (app.puzzle.stage >= 0) puzzle::drawFx(app, mvp);

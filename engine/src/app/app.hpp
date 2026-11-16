@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <atomic>
 #include <bitset>
+#include <climits>
 #include <functional>
 #include <ctime>
 #include <map>
@@ -2271,7 +2272,10 @@ std::vector<cr::WalkBody> walkBodies(const App& app);
 void animateNpcs(App& app, float dt);
 void updateNpcJoints(App& app);
 void drawNpcs(App& app, const cr::Mat4& vp);
-void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::Material* override = nullptr, float alpha = 1.0f, float matTime = -1.0f, int pass = 0, bool faded = false);
+void drawFigureQueue(App& app, const cr::Mat4& vp); // mdl_put's queue: the player and the NPCs, sorted by queueKey
+constexpr int kAllKeys = INT_MIN;
+int queueKey(const cr::Material& base, float alpha, bool faded);
+void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::Material* override = nullptr, float alpha = 1.0f, float matTime = -1.0f, int pass = 0, bool faded = false, int key = kAllKeys);
 void addShadowFan(std::vector<float>& tris, std::vector<uint8_t>& alpha, cr::Vec3 at, float yaw, float rx, float rz, float a);
 void drawShadowFans(App& app, cr::GpuMesh& mesh, const std::vector<float>& tris, const std::vector<uint8_t>& alpha, const cr::Mat4& vp);
 int androidCutinWidth(float wv);

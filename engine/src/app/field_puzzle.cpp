@@ -4313,45 +4313,99 @@ void updateNpcJoints(App& app) {
 }
 
 
+// One NPC: pose it, skin and scroll its meshes of queue key `key` (kAllKeys: all) and draw them
+static void drawNpc(App& app, App::NpcDraw& d, const cr::Mat4& vp, int key) {
+    LoadedModel& lm = app.npcModels[d.model];
+    const cr::Model& m = lm.cpu;
+    const bool matAnim = !lm.packageActions.empty();
+    auto matOf = [&](size_t i) -> const cr::Material* {
+        const int ap = i < m.meshes.size() ? m.meshes[i].appearance : -1;
+        return ap >= 0 && ap < int(m.materials.size()) ? &m.materials[size_t(ap)] : nullptr;
+    };
+    cr::Mat4 world; // (as a frame between the game's steps shows it)
+    float alpha;
+    shownNpc(app, d, world, alpha);
+    static const cr::Material kDefault;
+    auto inPass = [&](size_t i) { return key == kAllKeys || queueKey(matOf(i) ? *matOf(i) : kDefault, alpha, d.faded) == key; };
+    const bool posed = !m.skeleton.nodes.empty() && lm.meshes.size() == m.meshes.size();
+    if (posed || (matAnim && lm.meshes.size() == m.meshes.size())) { // skin this instance; scroll its textures
+        const cr::Action* act = d.action >= 0 && d.action < int(lm.actions.size()) ? &lm.actions[d.action] : nullptr;
+        if (posed) poseWorld(m.skeleton, lm.actions, act, d.time, d.blend, lm.world);
+        for (size_t i = 0; i < m.meshes.size(); ++i) {
+            if (!inPass(i)) continue;
+            float shift[2] = {0, 0}, scale[2] = {1, 1};
+            const bool moves = matAnim && effectUvMotion(lm, matOf(i), d.time, shift, scale);
+            const bool spins = spinsTexture(m, i);
+            if (!posed && !moves && !spins) continue;
+            if (posed) cr::skinMesh(m, m.meshes[i], lm.world, lm.skinned);
+            const std::vector<float>& pos = posed ? lm.skinned : m.meshes[i].positions;
+            if (moves || spins) { // uv * scale + offset (texture unit 0's: the material action's segment 6)
+                lm.uvScratch = m.meshes[i].uvs;
+                for (size_t k = 0; moves && k + 1 < lm.uvScratch.size(); k += 2) {
+                    lm.uvScratch[k] = lm.uvScratch[k] * scale[0] + shift[0];
+                    lm.uvScratch[k + 1] = lm.uvScratch[k + 1] * scale[1] + shift[1];
+                }
+                if (spins) spinUvs(lm.uvScratch, app.texSpin);
+            }
+            app.renderer.updatePositions(lm.meshes[i], pos, moves || spins ? lm.uvScratch : m.meshes[i].uvs, m.meshes[i].colors);
+        }
+    }
+    drawLoaded(app, lm, vp * world, nullptr, alpha, matAnim ? d.time : -1.0f, 0, d.faded, key);
+}
+
 void drawNpcs(App& app, const cr::Mat4& vp) {
     for (auto& d : app.npcDraws) {
         if (d.alpha <= 0.001f) continue;
-        LoadedModel& lm = app.npcModels[d.model];
-        const cr::Model& m = lm.cpu;
-        const bool matAnim = !lm.packageActions.empty();
-        auto matOf = [&](size_t i) -> const cr::Material* {
-            const int ap = i < m.meshes.size() ? m.meshes[i].appearance : -1;
-            return ap >= 0 && ap < int(m.materials.size()) ? &m.materials[size_t(ap)] : nullptr;
-        };
-        const bool posed = !m.skeleton.nodes.empty() && lm.meshes.size() == m.meshes.size();
-        if (posed || (matAnim && lm.meshes.size() == m.meshes.size())) { // skin this instance; scroll its textures
-            const cr::Action* act = d.action >= 0 && d.action < int(lm.actions.size()) ? &lm.actions[d.action] : nullptr;
-            if (posed) poseWorld(m.skeleton, lm.actions, act, d.time, d.blend, lm.world);
-            for (size_t i = 0; i < m.meshes.size(); ++i) {
-                float shift[2] = {0, 0}, scale[2] = {1, 1};
-                const bool moves = matAnim && effectUvMotion(lm, matOf(i), d.time, shift, scale);
-                const bool spins = spinsTexture(m, i);
-                if (!posed && !moves && !spins) continue;
-                if (posed) cr::skinMesh(m, m.meshes[i], lm.world, lm.skinned);
-                const std::vector<float>& pos = posed ? lm.skinned : m.meshes[i].positions;
-                if (moves || spins) { // uv * scale + offset (texture unit 0's: the material action's segment 6)
-                    lm.uvScratch = m.meshes[i].uvs;
-                    for (size_t k = 0; moves && k + 1 < lm.uvScratch.size(); k += 2) {
-                        lm.uvScratch[k] = lm.uvScratch[k] * scale[0] + shift[0];
-                        lm.uvScratch[k + 1] = lm.uvScratch[k + 1] * scale[1] + shift[1];
-                    }
-                    if (spins) spinUvs(lm.uvScratch, app.texSpin);
-                }
-                app.renderer.updatePositions(lm.meshes[i], pos, moves || spins ? lm.uvScratch : m.meshes[i].uvs, m.meshes[i].colors);
-            }
-        }
-        if (matAnim) ++app.matAnimDraws[d.model];
-        cr::Mat4 world; // (as a frame between the game's steps shows it)
-        float alpha;
-        shownNpc(app, d, world, alpha);
-        drawLoaded(app, lm, vp * world, nullptr, alpha, matAnim ? d.time : -1.0f, 0, d.faded);
+        if (!app.npcModels[d.model].packageActions.empty()) ++app.matAnimDraws[d.model];
+        drawNpc(app, d, vp, kAllKeys);
         modelDrawn(app);
     }
+}
+
+// mdl_put's draw queue (3.1.0 _mdl_put, decomp.c 11624: slot 0 drawn at once, the player's slot and
+// then the NPCs' added with mceGraphics3D_addDrawQueueFigure, 11819): FieldScene::draw3D flushes it
+// (16948, flushDrawQueue(.., 1)) after __mceQueue_queueFlush has sorted every queued mesh by its key
+// (queueKey) - not figure by figure. So an NPC's opaque meshes (key 0) go before another's blended
+// ones of draw order 0 and up, whichever slot comes first: the ship's waves (c152, draw orders 0..40,
+// blended with depth writes) no longer hide Vieg on the paddle wheel (map 70's opening). Meshes of
+// one key keep the slot order (the original sorts those by their depth from the camera)
+void drawFigureQueue(App& app, const cr::Mat4& vp) {
+    const bool player = app.havePlayer && playerShown(app);
+    const float playerAlpha = player ? shownPlayerAlpha(app) : 1.0f;
+    std::vector<int> keys;
+    auto addKeys = [&](const LoadedModel& lm, float alpha, bool faded) {
+        static const cr::Material kDefault;
+        for (const cr::Mesh& mesh : lm.cpu.meshes) {
+            const int a = mesh.appearance;
+            keys.push_back(queueKey(a >= 0 && a < int(lm.cpu.materials.size()) ? lm.cpu.materials[size_t(a)] : kDefault, alpha, faded));
+        }
+    };
+    // (modelDrawn's texture spin as each figure saw it when they were drawn one after another)
+    std::vector<float> spinAt(app.npcDraws.size(), app.texSpin);
+    if (player) addKeys(app.player, playerAlpha, app.playerFaded), modelDrawn(app);
+    for (size_t j = 0; j < app.npcDraws.size(); ++j) {
+        App::NpcDraw& d = app.npcDraws[j];
+        if (d.alpha <= 0.001f) continue;
+        cr::Mat4 world;
+        float alpha;
+        shownNpc(app, d, world, alpha);
+        addKeys(app.npcModels[d.model], alpha, d.faded);
+        if (!app.npcModels[d.model].packageActions.empty()) ++app.matAnimDraws[d.model];
+        spinAt[j] = app.texSpin;
+        modelDrawn(app);
+    }
+    const float spinAfter = app.texSpin;
+    std::sort(keys.begin(), keys.end());
+    keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+    for (int key : keys) {
+        if (player) drawLoaded(app, app.player, vp * playerWorld(shownWalker(app)), nullptr, playerAlpha, -1.0f, 0, app.playerFaded, key);
+        for (size_t j = 0; j < app.npcDraws.size(); ++j) {
+            if (app.npcDraws[j].alpha <= 0.001f) continue;
+            app.texSpin = spinAt[j];
+            drawNpc(app, app.npcDraws[j], vp, key);
+        }
+    }
+    app.texSpin = spinAfter;
 }
 
 } // namespace crapp
