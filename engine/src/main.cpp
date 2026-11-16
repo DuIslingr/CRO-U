@@ -651,6 +651,10 @@ struct App {
     // and one pad can come as two (CRO-U #4: a Flydigi Vader 4 Pro listed twice as "Xbox 360 Controller", its
     // input on the second while the first was taken). The one pressed or moved last becomes `pad`
     std::vector<SDL_Gamepad*> morePads;
+    // The self-test's own controllers (its virtual pads, by joystick id): while it runs, no other is opened or taken -
+    // another program's virtual "Xbox 360 Controller" (a session driving an emulator, say) can't take a case over.
+    // Empty: every pad
+    std::vector<SDL_JoystickID> padAllow;
     bool padConfirmEast = true;
     // CRO-U's own (Options, Game: Field Speed, Battle Speed): the field - while the player walks it,
     // nothing over it - and the battles run this many times as fast (1, or 2 .. 5)
@@ -27188,7 +27192,14 @@ int runSelfTest(App& app) {
         desc.naxes = 6, desc.nbuttons = 15;
         desc.axis_mask = (1u << 6) - 1, desc.button_mask = (1u << 15) - 1; // (the gamepad's own order)
         desc.name = "selftest pad";
+        // (an outside pad - attached first, so SDL lists it ahead of the test's own - that no case may take: a
+        // stand-in for another program's virtual controller; the cases' pads in padAllow)
+        SDL_VirtualJoystickDesc foreignDesc = desc;
+        foreignDesc.name = "Xbox 360 Controller";
+        const SDL_JoystickID foreign = SDL_AttachVirtualJoystick(&foreignDesc);
         SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
+        const std::vector<SDL_JoystickID> keepAllow = app.padAllow;
+        app.padAllow = {id};
         SDL_Gamepad* pad = id ? SDL_OpenGamepad(id) : nullptr;
         SDL_Joystick* js = pad ? SDL_GetGamepadJoystick(pad) : nullptr;
         if (!pad) {
@@ -27487,6 +27498,7 @@ int runSelfTest(App& app) {
             // until a new one comes); a pad that comes while the held one is gone (a wireless pad's
             // receiver: a dead handle) taken
             SDL_JoystickID second = SDL_AttachVirtualJoystick(&desc);
+            app.padAllow.push_back(second);
             SDL_Event ev{};
             ev.type = SDL_EVENT_GAMEPAD_REMOVED, ev.gdevice.which = id;
             SDL_AppEvent(&app, &ev); // (app.pad: `pad`, the first)
@@ -27508,6 +27520,7 @@ int runSelfTest(App& app) {
             { // one pad as two (CRO-U #4): both opened as they come; a button on the second makes it the one in use,
               // a stick pushed on the first takes it back, and with the one in use taken out the other goes on
                 const SDL_JoystickID a = SDL_AttachVirtualJoystick(&desc), b = SDL_AttachVirtualJoystick(&desc);
+                app.padAllow.push_back(a), app.padAllow.push_back(b);
                 SDL_Event e{};
                 e.type = SDL_EVENT_GAMEPAD_ADDED, e.gdevice.which = a;
                 SDL_AppEvent(&app, &e);
@@ -27538,11 +27551,37 @@ int runSelfTest(App& app) {
                 app.morePads.clear();
                 SDL_DetachVirtualJoystick(a), SDL_DetachVirtualJoystick(b);
             }
+            { // the outside pad: never opened, never taken by its buttons, never the one handed over to
+                app.pad = nullptr;
+                const SDL_JoystickID c = SDL_AttachVirtualJoystick(&desc);
+                app.padAllow.push_back(c);
+                SDL_Event e{};
+                e.type = SDL_EVENT_GAMEPAD_ADDED, e.gdevice.which = foreign;
+                SDL_AppEvent(&app, &e);
+                const bool notOpened = !app.pad && app.morePads.empty();
+                e.gdevice.which = c;
+                SDL_AppEvent(&app, &e);
+                e = SDL_Event{};
+                e.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN, e.gbutton.which = foreign, e.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH, e.gbutton.down = true;
+                SDL_AppEvent(&app, &e);
+                const bool notTaken = app.pad && SDL_GetGamepadID(app.pad) == c;
+                e = SDL_Event{};
+                e.type = SDL_EVENT_GAMEPAD_REMOVED, e.gdevice.which = c;
+                SDL_AppEvent(&app, &e);
+                const bool notHanded = !app.pad; // (the outside pad still connected: not the one taken)
+                problems += !notOpened + !notTaken + !notHanded;
+                std::printf("controller: an outside pad (another program's) - not opened %s, its button doesn't take over %s, not handed "
+                            "over to %s\n", notOpened ? "yes" : "NO", notTaken ? "yes" : "NO", notHanded ? "yes" : "NO");
+                if (app.pad) SDL_CloseGamepad(app.pad), app.pad = nullptr;
+                SDL_DetachVirtualJoystick(c);
+            }
             app.pad = keepPad;
             app.game = keepGame;
             if (pad) SDL_CloseGamepad(pad);
         }
         if (id) SDL_DetachVirtualJoystick(id);
+        if (foreign) SDL_DetachVirtualJoystick(foreign);
+        app.padAllow = keepAllow;
         mapErrors += problems;
     }
 #if !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_IOS)
@@ -31126,9 +31165,14 @@ bool consumeGraphicsReset(App& app) {
     return false;
 }
 
+bool padAllowed(const App& app, SDL_JoystickID id) {
+    return app.padAllow.empty() || std::find(app.padAllow.begin(), app.padAllow.end(), id) != app.padAllow.end();
+}
+
 // A pad among morePads pressed or moved: it becomes the one in use, the one before kept open with the others
 void takePad(App& app, SDL_JoystickID which) {
     if (app.pad && SDL_GetGamepadID(app.pad) == which) return;
+    if (!padAllowed(app, which)) return;
     for (size_t k = 0; k < app.morePads.size(); ++k)
         if (SDL_GetGamepadID(app.morePads[k]) == which) {
             SDL_Gamepad* now = app.morePads[k];
@@ -31177,6 +31221,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
     }
     case SDL_EVENT_GAMEPAD_ADDED: // (taken while none is in use - or the one held went quiet: a wireless pad's receiver keeps a dead
         // handle); any other opened as well, for its input to come (morePads)
+        if (!padAllowed(app, event->gdevice.which)) break;
         if (!app.pad || !SDL_GamepadConnected(app.pad)) {
             if (SDL_Gamepad* pad = SDL_OpenGamepad(event->gdevice.which)) {
                 if (app.pad) holdSkip(app, kSkipPad, false), SDL_CloseGamepad(app.pad);
@@ -31205,7 +31250,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             if (!app.pad)
                 if (SDL_JoystickID* ids = SDL_GetGamepads(&count)) {
                     for (int k = 0; k < count && !app.pad; ++k)
-                        if (ids[k] != event->gdevice.which) app.pad = SDL_OpenGamepad(ids[k]);
+                        if (ids[k] != event->gdevice.which && padAllowed(app, ids[k])) app.pad = SDL_OpenGamepad(ids[k]);
                     SDL_free(ids);
                 }
             if (app.pad) SDL_Log("controller: %s", SDL_GetGamepadName(app.pad));
