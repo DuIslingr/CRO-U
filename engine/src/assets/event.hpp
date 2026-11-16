@@ -133,6 +133,19 @@ struct MessageInfo {
 constexpr int kLanguages = 8; // text sections: ja, en, fr, de, es, zh-Hans, zh-Hant, ko (1.0.1: ja, en)
 extern const char* const kLanguageName[kLanguages];
 
+// A fan translation as a language of its own (CR1-U's bfbdfbf): its copies of the scripts' files - a
+// rePatch's cro.psarc (the Vita's files with the English text replaced, each file its size), or the
+// files themselves loose in a folder (sys.evt, the areas' .evt) - their English read as this text
+// slot; the release's own English stays. The scripts run from the game's files; only the messages
+// come from the translation's, and a message its copy lacks (the Vita's j001_t99 differs from iOS's in
+// a few dozen) is the game's own English. Set before the files load (setFanText); nullptr: none.
+constexpr int kFanLanguage = kLanguages;
+using FanReader = std::function<bool(const std::string& name, std::vector<uint8_t>& out)>;
+void setFanText(FanReader reader);
+bool fanTextSet();
+// the translation's language by its text ("ru" for Cyrillic; else ""), from its sys.evt's English
+std::string fanLanguageCode(const std::vector<uint8_t>& sysEvt);
+
 class EventFile {
 public:
     bool load(const std::string& dataDir, int area, std::string* error = nullptr);
@@ -164,6 +177,7 @@ public:
 
 private:
     std::vector<uint8_t> data_;
+    std::vector<uint8_t> fan_; // the fan translation's copy of the file (kFanLanguage), empty: none
     int area_ = -1;
     uint32_t sec_[7] = {};
 };
@@ -173,7 +187,9 @@ private:
 class SystemText {
 public:
     bool load(const std::string& dataDir);
-    bool hasLanguage(int language) const; // its section exists (header u32[language] != 0)
+    bool hasLanguage(int language) const; // its section exists (header u32[language] != 0; kFanLanguage: the translation's sys.evt)
+    const std::vector<uint8_t>& bytes() const { return data_; }
+    const std::vector<uint8_t>& fanBytes() const { return fan_; }
     // `text` supplies the strings of the string-insert code (3 n); the menus put the item's
     // name in string 9
     bool message(int id, int language, const std::function<int(int)>& var,
@@ -182,6 +198,7 @@ public:
 
 private:
     std::vector<uint8_t> data_;
+    std::vector<uint8_t> fan_;
 };
 
 // Area of `map` given the current area: the current one if it covers the map, else the first.

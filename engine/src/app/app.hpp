@@ -300,6 +300,17 @@ struct App {
     int hdModelsLoaded = 0;                // since startup
     int language = 1;                      // text language (cr::kLanguageName): English by default
     std::string uiLang = "auto";           // the port's own text (platform/ui_text.hpp): "auto" (the text language's) or a code
+    // A fan translation as a language of its own (cr::kFanLanguage; #11): `language` stays English's (its
+    // layout, its font), the messages from the translation's own files and its art over the game's
+    struct FanSource {
+        cr::PsarcArchive archive;                            // its cro.psarc (a rePatch's)
+        std::unordered_map<std::string, std::string> files;  // or a folder of the files themselves: base name (lower case) -> path
+        std::string where, code, name;                       // where it is; its language ("ru"); that in itself ("Русский")
+        bool isOpen() const { return archive.isOpen() || !files.empty(); }
+        bool read(const std::string& name, std::vector<uint8_t>& out) const;
+    };
+    FanSource fan;
+    bool fanText = false;                  // the fan translation is the text language (settings.ini's fan_text=)
     cr::Font font;                         // system font for the game's text (all languages)
     struct VoiceCue { int at = 0, clip = -1; }; // PrcMsg 0x1e at `at` characters of the page (clip -1: 0xffff, keep)
     std::vector<std::vector<VoiceCue>> dialogueVoices; // per page: the voice clips it starts, in typing order
@@ -1965,6 +1976,19 @@ bool languageUsable(const App& app, int language);
 // first start's setup), the language settings.ini names - the system's on a first start; then uiLang's
 void startUiText(App& app);
 void applyUiLanguage(App& app);
+// The text slot the messages are read in: cr::kFanLanguage while the fan translation is chosen, else `language`
+int textLanguage(const App& app);
+// The Options' language choices: 0..7 the game's languages, 8 the fan translation (English's slot, its text)
+int languageChoice(const App& app);
+bool choiceUsable(const App& app, int choice);
+std::string languageChoiceName(const App& app, int choice);
+void setLanguageChoice(App& app, int choice); // (applyLanguage, its art, saved)
+// The fan translation (#11): in translation/ of a game folder or the profile folder, or at `path` - a
+// folder of its files (sys.evt, the areas' .evt, its .gxt art; translation/<code>/), or its cro.psarc.
+// Opened, its text set (cr::setFanText) before the scripts' files load
+bool openFanTranslation(App& app, const std::string& path);
+// The art it redrew - the message window's, window_char's names, the titles' - from the right source again
+void refreshFanArt(App& app);
 bool multilingualData(const App& app);
 bool cjkLanguage(int language);
 void applyLanguage(App& app);

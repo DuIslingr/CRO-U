@@ -876,7 +876,7 @@ std::string shopMessage(const App& app) {
     const int item = s.list[size_t(s.listCursor)];
     std::vector<std::vector<std::string>> pages;
     if (!app.systemText.message(
-            s.message, app.language, nullptr, pages, nullptr,
+            s.message, textLanguage(app), nullptr, pages, nullptr,
             [&](int n) { return n == 9 ? itemName(app, item) : std::string(); }) ||
         pages.empty() || pages[0].empty())
         return std::string();
@@ -920,7 +920,7 @@ void drawHelpWindow(App& app, cr::MenuPainter& m, int item, float a, float dx, f
     m.picture(17, 144 + dx, 8 + dy, a);
     m.picture(18, 144 + dx, -4 + dy, a);
     std::vector<std::vector<std::string>> help;
-    if (!app.systemText.message(cr::itemHelpId(item), app.language, nullptr, help) || help.empty()) return;
+    if (!app.systemText.message(cr::itemHelpId(item), textLanguage(app), nullptr, help) || help.empty()) return;
     const int n = std::min(3, int(help[0].size()));
     static const int kTop[4] = {0, 24, 18, 10};
     // (MuComFontDisp style 1: black, edged white - Part 3 403 s, a dark 2 px core with light either side)
@@ -1199,7 +1199,7 @@ void drawShop(App& app) {
         m.text(shopMessage(app), 24, 234, false, 1, kFont);
         std::vector<std::vector<std::string>> have;
         if (s.phase == App::Shop::Count &&
-            app.systemText.message(57046, app.language, [&](int) { return ownedCount(app, item); }, have) && !have.empty() &&
+            app.systemText.message(57046, textLanguage(app), [&](int) { return ownedCount(app, item); }, have) && !have.empty() &&
             !have[0].empty())
             m.text(have[0][0], 24, 250, false, 1, kFont);
     } else if (list && shopEquipment(app)) { // (the Vita's at 235: 43 right)
@@ -4739,7 +4739,7 @@ void collectionClick(App& app, float mx, float my) { // BackButtonProc(1)
 // A manual message's title: its first non-empty line (the messages open with an empty one)
 std::string manualTitle(const App& app, int id) {
     std::vector<std::vector<std::string>> pages;
-    if (!app.systemText.message(id, app.language, nullptr, pages)) return std::string();
+    if (!app.systemText.message(id, textLanguage(app), nullptr, pages)) return std::string();
     for (const auto& pg : pages)
         for (const std::string& l : pg)
             if (!l.empty()) return l;
@@ -4758,7 +4758,7 @@ std::vector<int> manualTopics(const App& app) { // the items
 std::vector<std::string> manualPage(const App& app, int id) { // the lines after the title
     std::vector<std::vector<std::string>> pages;
     std::vector<std::string> lines;
-    if (!app.systemText.message(id, app.language, nullptr, pages)) return lines;
+    if (!app.systemText.message(id, textLanguage(app), nullptr, pages)) return lines;
     for (const auto& pg : pages)
         for (const std::string& l : pg) lines.push_back(l);
     while (!lines.empty() && lines.front().empty()) lines.erase(lines.begin());
@@ -4797,7 +4797,7 @@ void manualShow(App& app, int id) {
     mm.pic = App::TutoTex();
     mm.id = id;
     mm.pages.clear();
-    if (!app.systemText.message(id, app.language, nullptr, mm.pages) || mm.pages.empty())
+    if (!app.systemText.message(id, textLanguage(app), nullptr, mm.pages) || mm.pages.empty())
         mm.pages = {{"[message " + std::to_string(id) + "]"}};
     mm.page = 0, mm.typed = 0;
     mm.win = App::MsgWin();

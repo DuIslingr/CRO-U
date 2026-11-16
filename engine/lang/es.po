@@ -8,469 +8,477 @@ msgstr ""
 "X-Language-Name: Español\n"
 "Last-Translator: Claude (machine translation, unreviewed)\n"
 
-#: src/app/app.hpp:1286
+#: src/app/app.hpp:1297
 msgid "Native AA"
 msgstr "AA nativo"
 
-#: src/app/app.hpp:1286
+#: src/app/app.hpp:1297
 msgid "Quality"
 msgstr "Calidad"
 
-#: src/app/app.hpp:1286
+#: src/app/app.hpp:1297
 msgid "Balanced"
 msgstr "Equilibrado"
 
-#: src/app/app.hpp:1286
+#: src/app/app.hpp:1297
 msgid "Performance"
 msgstr "Rendimiento"
 
-#: src/app/app.hpp:1286
+#: src/app/app.hpp:1297
 msgid "Ultra Perf."
 msgstr "Ultra rend."
 
-#: src/app/app.hpp:1287 src/app/scene_fx.cpp:803 src/app/scene_fx.cpp:1094 src/app/scene_fx.cpp:1200
-#: src/app/scene_fx.cpp:1206 src/app/scene_fx.cpp:1256 src/app/scene_fx.cpp:1264
+#: src/app/app.hpp:1298 src/app/scene_fx.cpp:803 src/app/scene_fx.cpp:1106 src/app/scene_fx.cpp:1212
+#: src/app/scene_fx.cpp:1218 src/app/scene_fx.cpp:1268 src/app/scene_fx.cpp:1276
 msgid "Off"
 msgstr "Desactivado"
 
-#: src/app/scene_fx.cpp:1011
-msgid "Text Language"
-msgstr "Idioma del texto"
-
-#: src/app/scene_fx.cpp:1025
-msgid "Auto ({0})"
-msgstr "Auto ({0})"
-
-#: src/app/scene_fx.cpp:1027
+#: src/app/explore.cpp:3997 src/app/explore.cpp:4005 src/app/scene_fx.cpp:1039
 msgid "Menu Language"
 msgstr "Idioma de los menús"
 
+#: src/app/field_puzzle.cpp:552
+msgid "{0} (fan translation)"
+msgstr "{0} (traducción de fans)"
+
+#: src/app/field_puzzle.cpp:552
+msgid "Fan translation"
+msgstr "Traducción de fans"
+
+#: src/app/scene_fx.cpp:1024
+msgid "Text Language"
+msgstr "Idioma del texto"
+
 #: src/app/scene_fx.cpp:1037
+msgid "Auto ({0})"
+msgstr "Auto ({0})"
+
+#: src/app/scene_fx.cpp:1049
 msgid ""
 "The language of the port's own text - these options and its messages; Auto: the text language's"
 msgstr ""
 "Idioma de los textos propios del port: estas opciones y sus mensajes. Auto: el del idioma del texto"
 
-#: src/app/scene_fx.cpp:1042
+#: src/app/scene_fx.cpp:1054
 msgid "Control Hints"
 msgstr "Ayuda de controles"
 
-#: src/app/scene_fx.cpp:1043
+#: src/app/scene_fx.cpp:1055
 msgid ""
 "Show the control hints and status overlay. Off hides the WASD help; F3 is a shortcut."
 msgstr ""
 "Muestra la ayuda de controles y el estado en pantalla. Si no, se oculta la ayuda WASD; F3 la alterna."
 
-#: src/app/scene_fx.cpp:1044
+#: src/app/scene_fx.cpp:1056
 msgid "Import Vita Saves"
 msgstr "Importar partidas Vita"
 
-#: src/app/scene_fx.cpp:1044
+#: src/app/scene_fx.cpp:1056
 msgid "Choose Folder"
 msgstr "Examinar"
 
-#: src/app/scene_fx.cpp:1048
+#: src/app/scene_fx.cpp:1060
 msgid ""
 "Choose your decrypted Vita save export. Existing saves will be backed up."
 msgstr ""
 "Elige la exportación descifrada de las partidas de Vita. Se hará una copia de seguridad de las existentes."
 
-#: src/app/scene_fx.cpp:1049
+#: src/app/scene_fx.cpp:1061
 msgid "Import saves from the title screen's Options."
 msgstr "Importa las partidas desde las Opciones de la pantalla de título."
 
-#: src/app/scene_fx.cpp:1051 src/app/scene_fx.cpp:1072
+#: src/app/scene_fx.cpp:1063 src/app/scene_fx.cpp:1084
 msgid "None"
 msgstr "Ninguno"
 
-#: src/app/scene_fx.cpp:1058 src/app/scene_fx.cpp:1079
+#: src/app/scene_fx.cpp:1070 src/app/scene_fx.cpp:1091
 msgid "The game's data"
 msgstr "Datos del juego"
 
-#: src/app/scene_fx.cpp:1059 src/app/scene_fx.cpp:1080
+#: src/app/scene_fx.cpp:1071 src/app/scene_fx.cpp:1092
 msgid "{0} (next start)"
 msgstr "{0} (al reiniciar)"
 
-#: src/app/scene_fx.cpp:1060 src/app/scene_fx.cpp:1081
+#: src/app/scene_fx.cpp:1072 src/app/scene_fx.cpp:1093
 msgid "{0} (not found)"
 msgstr "{0} (no encontrado)"
 
-#: src/app/scene_fx.cpp:1061
+#: src/app/scene_fx.cpp:1073
 msgid "Vita Assets"
 msgstr "Recursos de Vita"
 
-#: src/app/scene_fx.cpp:1067
+#: src/app/scene_fx.cpp:1079
 msgid "Running from the Vita copy alone: {0}"
 msgstr "Funcionando solo con la copia de Vita: {0}"
 
-#: src/app/scene_fx.cpp:1069
+#: src/app/scene_fx.cpp:1081
 msgid ""
 "Enter: your Vita copy's PCSG00499 folder - its textures, voices, music and scripts; Left / Right: none"
 msgstr ""
 "Enter: carpeta PCSG00499 de tu copia de Vita (texturas, voces, música y scripts); Izquierda / Derecha: ninguno"
 
-#: src/app/scene_fx.cpp:1082
+#: src/app/scene_fx.cpp:1094
 msgid "Android Assets"
 msgstr "Recursos de Android"
 
-#: src/app/scene_fx.cpp:1088
+#: src/app/scene_fx.cpp:1100
 msgid "Running from the Android release alone: {0}"
 msgstr "Funcionando solo con la versión de Android: {0}"
 
-#: src/app/scene_fx.cpp:1090
+#: src/app/scene_fx.cpp:1102
 msgid ""
 "Enter: a folder with your Android copy's main.*.obb and its APK - its textures and the art only it has; Left / Right: none"
 msgstr ""
 "Enter: carpeta con el main.*.obb y el APK de tu copia de Android (texturas y arte exclusivo); Izq. / Der.: ninguno"
 
-#: src/app/scene_fx.cpp:1100
+#: src/app/scene_fx.cpp:1112
 msgid "Field Speed"
 msgstr "Velocidad al explorar"
 
-#: src/app/scene_fx.cpp:1100
+#: src/app/scene_fx.cpp:1112
 msgid ""
 "Walking the field 2 .. 5 times as fast - the scenes, talk and menus as they are"
 msgstr ""
 "Desplazamiento de 2 a 5 veces más rápido; escenas, diálogos y menús sin cambios"
 
-#: src/app/scene_fx.cpp:1101
+#: src/app/scene_fx.cpp:1113
 msgid "Battle Speed"
 msgstr "Velocidad de combate"
 
-#: src/app/scene_fx.cpp:1101
+#: src/app/scene_fx.cpp:1113
 msgid "The battles 2 .. 5 times as fast"
 msgstr "Combates de 2 a 5 veces más rápidos"
 
-#: src/app/scene_fx.cpp:1103
+#: src/app/scene_fx.cpp:1115
 msgid "Swap ○ and ×"
 msgstr "Intercambiar ○ y ×"
 
-#: src/app/scene_fx.cpp:1112
+#: src/app/scene_fx.cpp:1124
 msgid "Controller: {0}."
 msgstr "Mando: {0}."
 
-#: src/app/scene_fx.cpp:1112
+#: src/app/scene_fx.cpp:1124
 msgid "With a controller:"
 msgstr "Con mando:"
 
-#: src/app/scene_fx.cpp:1113
+#: src/app/scene_fx.cpp:1125
 msgid ""
 "○ (the right button) confirms, × (the bottom one) goes back - as on the Vita"
 msgstr ""
 "○ (botón derecho) confirma, × (el inferior) vuelve atrás, como en Vita"
 
-#: src/app/scene_fx.cpp:1114
+#: src/app/scene_fx.cpp:1126
 msgid "× (the bottom button) confirms, ○ (the right one) goes back"
 msgstr "× (botón inferior) confirma, ○ (el derecho) vuelve atrás"
 
-#: src/app/scene_fx.cpp:1133
+#: src/app/scene_fx.cpp:1145
 msgid "Master Volume"
 msgstr "Volumen general"
 
-#: src/app/scene_fx.cpp:1136
+#: src/app/scene_fx.cpp:1148
 msgid "Voice Volume"
 msgstr "Volumen de voces"
 
-#: src/app/scene_fx.cpp:1139
+#: src/app/scene_fx.cpp:1151
 msgid "Sound Test"
 msgstr "Prueba de sonido"
 
-#: src/app/scene_fx.cpp:1150
+#: src/app/scene_fx.cpp:1162
 msgid "Camera Cutout"
 msgstr "Muesca de cámara"
 
-#: src/app/scene_fx.cpp:1150
+#: src/app/scene_fx.cpp:1162
 msgid "Avoid"
 msgstr "Evitar"
 
-#: src/app/scene_fx.cpp:1150
+#: src/app/scene_fx.cpp:1162
 msgid "Ignore"
 msgstr "Ignorar"
 
-#: src/app/scene_fx.cpp:1154
+#: src/app/scene_fx.cpp:1166
 msgid ""
 "Avoid: the menus and buttons kept clear of the camera's notch or punch hole (the picture fills the screen either way). Ignore: they reach the edges too"
 msgstr ""
 "Evitar: menús y botones lejos de la muesca o el orificio de la cámara (la imagen llena la pantalla igual). Ignorar: llegan a los bordes"
 
-#: src/app/scene_fx.cpp:1156
+#: src/app/scene_fx.cpp:1168
 msgid "Window"
 msgstr "Ventana"
 
-#: src/app/scene_fx.cpp:1156
+#: src/app/scene_fx.cpp:1168
 msgid "Fullscreen"
 msgstr "Completa"
 
-#: src/app/scene_fx.cpp:1156
+#: src/app/scene_fx.cpp:1168
 msgid "Borderless"
 msgstr "Sin bordes"
 
-#: src/app/scene_fx.cpp:1157
+#: src/app/scene_fx.cpp:1169
 msgid "Resolution"
 msgstr "Resolución"
 
-#: src/app/scene_fx.cpp:1157
+#: src/app/scene_fx.cpp:1169
 msgid "Desktop"
 msgstr "Escritorio"
 
-#: src/app/scene_fx.cpp:1160
+#: src/app/scene_fx.cpp:1172
 msgid "Aspect"
 msgstr "Proporción"
 
-#: src/app/scene_fx.cpp:1160
+#: src/app/scene_fx.cpp:1172
 msgid "Wide"
 msgstr "Panorámico"
 
-#: src/app/scene_fx.cpp:1164
+#: src/app/scene_fx.cpp:1176
 msgid "Auto"
 msgstr "Auto"
 
-#: src/app/scene_fx.cpp:1165
+#: src/app/scene_fx.cpp:1177
 msgid "Layout"
 msgstr "Disposición"
 
-#: src/app/scene_fx.cpp:1166
+#: src/app/scene_fx.cpp:1178
 msgid ""
 "The screens' layout: the iPad release's (4:3), the iPhone's (3:2), the Vita's or the Android release's (16:9, its screens centred); Auto follows the data"
 msgstr ""
 "Disposición de pantallas: versión iPad (4:3), iPhone (3:2), Vita o Android (16:9, pantallas centradas); Auto sigue los datos"
 
-#: src/app/scene_fx.cpp:1168
+#: src/app/scene_fx.cpp:1180
 msgid "Original"
 msgstr "Original"
 
-#: src/app/scene_fx.cpp:1168
+#: src/app/scene_fx.cpp:1180
 msgid "Fill"
 msgstr "Rellenar"
 
-#: src/app/scene_fx.cpp:1169
+#: src/app/scene_fx.cpp:1181
 msgid "Painted Rooms"
 msgstr "Fondos pintados"
 
-#: src/app/scene_fx.cpp:1170
+#: src/app/scene_fx.cpp:1182
 msgid "VSync"
 msgstr "VSync"
 
-#: src/app/scene_fx.cpp:1171
+#: src/app/scene_fx.cpp:1183
 msgid "Frame Rate"
 msgstr "Tasa de fotogramas"
 
-#: src/app/scene_fx.cpp:1171
+#: src/app/scene_fx.cpp:1183
 msgid "Unlimited"
 msgstr "Ilimitada"
 
-#: src/app/scene_fx.cpp:1173
+#: src/app/scene_fx.cpp:1185
 msgid ""
 "Frames drawn a second at most; the game runs at its own 20 a second, shown moving between them"
 msgstr ""
 "Máximo de fotogramas por segundo; el juego va a sus 20 por segundo, con el movimiento interpolado entre ellos"
 
-#: src/app/scene_fx.cpp:1175
+#: src/app/scene_fx.cpp:1187
 msgid "Original Presentation"
 msgstr "Presentación original"
 
-#: src/app/scene_fx.cpp:1176
+#: src/app/scene_fx.cpp:1188
 msgid "Every display and graphics option back to the original's"
 msgstr "Devuelve todas las opciones de pantalla y gráficos a las del original"
 
-#: src/app/scene_fx.cpp:1182
+#: src/app/scene_fx.cpp:1194
 msgid "HD Textures"
 msgstr "Texturas HD"
 
-#: src/app/scene_fx.cpp:1188
+#: src/app/scene_fx.cpp:1200
 msgid ""
 "waifu2x / Real-ESRGAN upscales from textures/hd (tools/hd_textures.py); from the next room on"
 msgstr ""
 "Texturas escaladas con waifu2x / Real-ESRGAN de textures/hd (tools/hd_textures.py); desde la siguiente sala"
 
-#: src/app/scene_fx.cpp:1189
+#: src/app/scene_fx.cpp:1201
 msgid "None in textures/hd yet: --export-textures, then tools/hd_textures.py"
 msgstr ""
 "Aún no hay nada en textures/hd: --export-textures y luego tools/hd_textures.py"
 
-#: src/app/scene_fx.cpp:1191
+#: src/app/scene_fx.cpp:1203
 msgid "HD Models"
 msgstr "Modelos HD"
 
-#: src/app/scene_fx.cpp:1197
+#: src/app/scene_fx.cpp:1209
 msgid ""
 "Replacement models (glTF) from models/hd, in place of the game's; from the next room on"
 msgstr ""
 "Modelos de reemplazo (glTF) de models/hd en lugar de los del juego; desde la siguiente sala"
 
-#: src/app/scene_fx.cpp:1198
+#: src/app/scene_fx.cpp:1210
 msgid ""
 "None in models/hd yet: --export-models, edit in Blender, save as models/hd/<name>.glb"
 msgstr ""
 "Aún no hay nada en models/hd: --export-models, edita en Blender y guarda como models/hd/<name>.glb"
 
-#: src/app/scene_fx.cpp:1200 src/app/scene_fx.cpp:1211
+#: src/app/scene_fx.cpp:1212 src/app/scene_fx.cpp:1223
 msgid "Smooth"
 msgstr "Suave"
 
-#: src/app/scene_fx.cpp:1200
+#: src/app/scene_fx.cpp:1212
 msgid "Smoother"
 msgstr "Más suave"
 
-#: src/app/scene_fx.cpp:1201
+#: src/app/scene_fx.cpp:1213
 msgid "Smooth Models"
 msgstr "Suavizar modelos"
 
-#: src/app/scene_fx.cpp:1202
+#: src/app/scene_fx.cpp:1214
 msgid ""
 "Rounder models (4x / 9x triangles), hard edges kept; from the next room on"
 msgstr ""
 "Modelos más redondeados (4x / 9x triángulos), con las aristas vivas; desde la siguiente sala"
 
-#: src/app/scene_fx.cpp:1203
+#: src/app/scene_fx.cpp:1215
 msgid ""
 "Rounds the models' silhouettes - characters, monsters, props, stages (PN triangles)"
 msgstr ""
 "Redondea las siluetas de los modelos: personajes, monstruos, objetos, escenarios (triángulos PN)"
 
-#: src/app/scene_fx.cpp:1206
+#: src/app/scene_fx.cpp:1218
 msgid "Anisotropic Filtering"
 msgstr "Filtrado anisótropo"
 
-#: src/app/scene_fx.cpp:1209
+#: src/app/scene_fx.cpp:1221
 msgid "Textures stay sharp on floors and walls seen at an angle"
 msgstr "Texturas nítidas en suelos y paredes vistos en ángulo"
 
-#: src/app/scene_fx.cpp:1209
+#: src/app/scene_fx.cpp:1221
 msgid "Not on this GPU"
 msgstr "No disponible en esta GPU"
 
-#: src/app/scene_fx.cpp:1211
+#: src/app/scene_fx.cpp:1223
 msgid "Texture Filtering"
 msgstr "Filtrado de texturas"
 
-#: src/app/scene_fx.cpp:1211
+#: src/app/scene_fx.cpp:1223
 msgid "Sharp"
 msgstr "Nítido"
 
-#: src/app/scene_fx.cpp:1214
+#: src/app/scene_fx.cpp:1226
 msgid ""
 "Sharp: the world's textures magnified by the nearest texel (square pixels up close)"
 msgstr ""
 "Nítido: texturas del mundo ampliadas con el téxel más cercano (píxeles cuadrados de cerca)"
 
-#: src/app/scene_fx.cpp:1219
+#: src/app/scene_fx.cpp:1231
 msgid "Infinite HP"
 msgstr "HP infinitos"
 
-#: src/app/scene_fx.cpp:1220
+#: src/app/scene_fx.cpp:1232
 msgid "The pair's HP never drops: the damage still shows, nobody falls"
 msgstr "Los HP del dúo nunca bajan: el daño se sigue mostrando, nadie cae"
 
-#: src/app/scene_fx.cpp:1221
+#: src/app/scene_fx.cpp:1233
 msgid "Infinite MP"
 msgstr "MP infinitos"
 
-#: src/app/scene_fx.cpp:1222
+#: src/app/scene_fx.cpp:1234
 msgid "Genes cost no MP; the pair's MP stays full"
 msgstr "Los genes no gastan MP; los MP del dúo siguen al máximo"
 
-#: src/app/scene_fx.cpp:1223
+#: src/app/scene_fx.cpp:1235
 msgid "Max Oz"
 msgstr "Oz al máximo"
 
-#: src/app/scene_fx.cpp:1224
+#: src/app/scene_fx.cpp:1236
 msgid "The Oz held at the most (9,999,999)"
 msgstr "Oz en posesión al máximo (9.999.999)"
 
-#: src/app/scene_fx.cpp:1226
+#: src/app/scene_fx.cpp:1238
 msgid "EXP Multiplier"
 msgstr "Multiplicador de EXP"
 
-#: src/app/scene_fx.cpp:1233
+#: src/app/scene_fx.cpp:1245
 msgid "The EXP a won battle gives, multiplied"
 msgstr "La EXP de cada combate ganado, multiplicada"
 
-#: src/app/scene_fx.cpp:1234
+#: src/app/scene_fx.cpp:1246
 msgid "Always First Strike"
 msgstr "Siempre atacar primero"
 
-#: src/app/scene_fx.cpp:1235
+#: src/app/scene_fx.cpp:1247
 msgid ""
 "Every random encounter starts with the party's first strike - never an ambush"
 msgstr ""
 "Cada encuentro aleatorio empieza con un ataque preventivo del dúo, nunca con una emboscada"
 
-#: src/app/scene_fx.cpp:1236
+#: src/app/scene_fx.cpp:1248
 msgid "No Random Battles"
 msgstr "Sin combates al azar"
 
-#: src/app/scene_fx.cpp:1237
+#: src/app/scene_fx.cpp:1249
 msgid "No random encounters on the field (the story's battles still come)"
 msgstr ""
 "Sin encuentros aleatorios al explorar (los combates de la historia siguen ocurriendo)"
 
-#: src/app/scene_fx.cpp:1238
+#: src/app/scene_fx.cpp:1250
 msgid "One-Hit Kills"
 msgstr "Muerte de un golpe"
 
-#: src/app/scene_fx.cpp:1239
+#: src/app/scene_fx.cpp:1251
 msgid "Any blow, gene or ability of the pair's that hurts an enemy fells it"
 msgstr ""
 "Cualquier golpe, gen o habilidad del dúo que dañe a un enemigo lo derriba"
 
-#: src/app/scene_fx.cpp:1240
+#: src/app/scene_fx.cpp:1252
 msgid "Full Break Gauge"
 msgstr "Medidor de ventaja lleno"
 
-#: src/app/scene_fx.cpp:1241
+#: src/app/scene_fx.cpp:1253
 msgid ""
 "The Break gauge the pair's and full from the first turn - it never changes hands"
 msgstr ""
 "El medidor de ventaja es del dúo y está lleno desde el primer turno; nunca cambia de bando"
 
-#: src/app/scene_fx.cpp:1248
+#: src/app/scene_fx.cpp:1260
 msgid "{0} is off here: {1}"
 msgstr "{0} no disponible aquí: {1}"
 
-#: src/app/scene_fx.cpp:1250
+#: src/app/scene_fx.cpp:1262
 msgid "Render Scale"
 msgstr "Escala de renderizado"
 
-#: src/app/scene_fx.cpp:1254
+#: src/app/scene_fx.cpp:1266
 msgid "The frame at this size, then scaled to the window"
 msgstr "La imagen a este tamaño, luego escalada a la ventana"
 
-#: src/app/scene_fx.cpp:1254 src/app/scene_fx.cpp:1260
+#: src/app/scene_fx.cpp:1266 src/app/scene_fx.cpp:1272
 msgid "Needs the Vulkan renderer"
 msgstr "Requiere el renderizador Vulkan"
 
-#: src/app/scene_fx.cpp:1256
+#: src/app/scene_fx.cpp:1268
 msgid "Anti-aliasing"
 msgstr "Antialiasing"
 
-#: src/app/scene_fx.cpp:1261
+#: src/app/scene_fx.cpp:1273
 msgid "Temporal: jittered frames accumulated (MSAA is off meanwhile)"
 msgstr ""
 "Temporal: fotogramas desplazados y acumulados (el MSAA queda desactivado)"
 
-#: src/app/scene_fx.cpp:1262
+#: src/app/scene_fx.cpp:1274
 msgid "MSAA, or FSR Native AA / DLAA at full resolution"
 msgstr "MSAA, o FSR AA nativo / DLAA a resolución completa"
 
-#: src/app/scene_fx.cpp:1264
+#: src/app/scene_fx.cpp:1276
 msgid "Upscaler"
 msgstr "Escalado"
 
-#: src/app/scene_fx.cpp:1268
+#: src/app/scene_fx.cpp:1280
 msgid "The scene renders smaller and is reconstructed; the menus stay sharp"
 msgstr ""
 "La escena se renderiza más pequeña y se reconstruye; los menús siguen nítidos"
 
-#: src/app/scene_fx.cpp:1270
+#: src/app/scene_fx.cpp:1282
 msgid "Upscale Mode"
 msgstr "Modo de escalado"
 
-#: src/app/scene_fx.cpp:1281
+#: src/app/scene_fx.cpp:1293
 msgid "Sharpness"
 msgstr "Nitidez"
 
-#: src/app/scene_fx.cpp:1285
+#: src/app/scene_fx.cpp:1297
 msgid "FSR's sharpening pass (RCAS); DLSS has none"
 msgstr "Pase de nitidez de FSR (RCAS); DLSS no lo tiene"
 
@@ -482,7 +490,7 @@ msgstr "Juego"
 msgid "Sound"
 msgstr "Sonido"
 
-#: src/app/scene_fx.cpp:910 src/app/scene_fx.cpp:1159
+#: src/app/scene_fx.cpp:910 src/app/scene_fx.cpp:1171
 msgid "Display"
 msgstr "Pantalla"
 

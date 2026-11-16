@@ -92,6 +92,30 @@ static cr::SetupGame crSetupGame() {
             if (SDL_GetPathInfo((p + rel).c_str(), nullptr)) return true;
         return false;
     };
+    // A fan translation (#11): a rePatch's PCSG00499/ with the whole cro.psarc (its English replaced), or the
+    // files themselves (sys.evt, the areas' .evt) - a language of its own beside the release's
+    // (openFanTranslation), never asked for in the setup: its .7z / .rar / .zip dropped into translation/
+    // is unpacked there (translation/<code>/)
+    static const char* const kFanFiles[] = {"CRO/resources/cro.psarc", "resources/cro.psarc", "cro.psarc", "sys.evt",
+                                           "CRO/resources/sys.evt", "resources/sys.evt"};
+    setup.patchOk = [](const std::string& p) {
+        for (const char* rel : kFanFiles)
+            if (SDL_GetPathInfo((p + rel).c_str(), nullptr)) return true;
+        return false;
+    };
+    setup.untranslated = [](const std::string&) { return false; };
+    setup.patchName = [](const std::string& p) {
+        for (const char* rel : kFanFiles) {
+            std::vector<uint8_t> sys;
+            const std::string f = p + rel;
+            if (SDL_strstr(rel, ".psarc")) {
+                cr::PsarcArchive a;
+                if (!a.open(f) || !a.read("sys.evt", sys)) continue;
+            } else if (!cr::readFile(f, sys)) continue;
+            return cr::fanLanguageCode(sys);
+        }
+        return std::string();
+    };
     return setup;
 }
 
@@ -438,6 +462,20 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     else if (app->androidOnly) // its files, as they are named
         for (const std::string& n : app->android.names()) collectAssets(app, nullptr, n.c_str());
     else SDL_EnumerateDirectory(app->dataDir.c_str(), collectAssets, app);
+    { // a fan translation in translation/ (one dropped there as its archive first unpacked): a language of its own (#11)
+        const char* given = nullptr;
+        bool quiet = false; // (a capture's, a test's: logged, no messages)
+        for (int i = 1; i < argc; ++i) {
+            if (i + 1 < argc && SDL_strcmp(argv[i], "--translation") == 0) given = argv[i + 1];
+            for (const char* f : {"--capture", "--selftest", "--explore", "--export-textures", "--export-models"})
+                if (SDL_strcmp(argv[i], f) == 0) quiet = true;
+        }
+        if (!given) given = SDL_getenv("CR_TRANSLATION");
+        if (!given || !*given)
+            for (const std::string& place : cr::gameFolders())
+                if (cr::installDroppedPatch(crSetupGame(), place, quiet)) break;
+        openFanTranslation(*app, given ? given : "");
+    }
     app->systemText.load(app->dataDir);
     // The game's text in every language: a system font (CR_FONT overrides), else the 8x8 font
     if (cr::loadSystemFont(app->font)) SDL_Log("font: %s%s", app->font.path().c_str(), cr::isOwnFont(app->font.path()) ? " (font/)" : "");
@@ -452,7 +490,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     if (const char* env = SDL_getenv("CR_LANGUAGE")) languageArg = SDL_atoi(env);
     for (int i = 1; i + 1 < argc; ++i)
         if (SDL_strcmp(argv[i], "--language") == 0) languageArg = SDL_atoi(argv[i + 1]);
-    if (languageArg >= 0) app->language = languageArg;
+    if (languageArg >= 0) app->fanText = languageArg == cr::kLanguages, app->language = app->fanText ? 1 : languageArg; // (8: the fan translation)
     applyLanguage(*app);
     const bool hdTexturesAtFirstUpload = app->video.hdTextures; // (the UI atlases', reloaded after loadMix if it changes)
     {
@@ -722,8 +760,9 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
             app->cutinTex = app->renderer.upload(ci);
         }
     }
-    if (languageArg >= 0) { // the command line wins over settings.ini
-        app->language = languageArg;
+    if (languageArg >= 0) { // the command line wins over settings.ini (8: the fan translation's)
+        app->fanText = languageArg == cr::kLanguages;
+        app->language = app->fanText ? 1 : languageArg;
         applyLanguage(*app);
     }
     showTexture(*app, 0);

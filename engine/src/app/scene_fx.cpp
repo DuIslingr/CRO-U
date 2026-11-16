@@ -927,6 +927,24 @@ void saveImportAnswer(App& app, bool yes) {
 
 
 
+void refreshFanArt(App& app) {
+    if (!app.rendererReady) return;
+    cr::Image wi;
+    if (loadImage(app, "window.mct", wi, &app.androidWindow)) { // (as HD Textures' switch does)
+        app.renderer.destroy(app.windowTex);
+        app.windowTex = app.renderer.upload(wi);
+        noteWindowAtlas(app, wi);
+        app.parchSplitFor = ~0u; // (the phone parchment split from it again)
+    }
+    cr::Image ci;
+    if (loadImage(app, "window_cutin.mct", ci)) {
+        app.renderer.destroy(app.cutinTex);
+        app.cutinTex = app.renderer.upload(ci);
+    }
+    app.renderer.destroy(app.charSheet), app.charSheet = cr::Texture(), app.charSheetTried = false; // (the rest as they next load)
+    for (cr::Texture& t : app.titleArt) app.renderer.destroy(t), t = cr::Texture();
+}
+
 std::vector<OptRow> optionRows(App& app, int page) {
     std::vector<OptRow> rows;
     auto gauge = [&](const std::string& label, int* v, int sound) {
@@ -980,18 +998,18 @@ std::vector<OptRow> optionRows(App& app, int page) {
     case 0: { // Game
         if (languageSheet(app)) { // 3.1.0 (__menuu_OptionPrc 5): one Language row, its arrows through the eight
             // languages (left: 0 -> 7), the name window_char's (88 x 24 at u = language x 88)
-            value(sysLabel(app, 58082, "Language"), cr::kLanguageName[app.language], [&app](int dir) {
-                for (int k = 1; k <= cr::kLanguages; ++k) { // (only those the data has)
-                    const int l = ((app.language + (dir < 0 ? -1 : 1) * k) % cr::kLanguages + cr::kLanguages) % cr::kLanguages;
-                    if (languageUsable(app, l)) {
-                        app.language = l;
+            // (then a fan translation's - #11 -, by its name: window_char has no cell for it)
+            value(sysLabel(app, 58082, "Language"), languageChoiceName(app, languageChoice(app)), [&app](int dir) {
+                const int n = cr::kLanguages + 1;
+                for (int k = 1; k <= n; ++k) { // (only those the data has)
+                    const int c = ((languageChoice(app) + (dir < 0 ? -1 : 1) * k) % n + n) % n;
+                    if (choiceUsable(app, c)) {
+                        setLanguageChoice(app, c);
                         break;
                     }
                 }
-                applyLanguage(app);
-                saveMix(app);
             });
-            rows.back().valueTex = &app.charSheet;
+            if (!app.fanText) rows.back().valueTex = &app.charSheet;
             const float uv[4] = {88.0f * float(app.language), 0, 88, 24};
             std::memcpy(rows.back().valueUv, uv, sizeof uv);
         } else {
@@ -1000,24 +1018,18 @@ std::vector<OptRow> optionRows(App& app, int page) {
         lang.kind = OptControl::Pair;
         lang.words[0] = 37; // Japanese
         lang.words[1] = 38; // English
-        lang.selected = app.language == 0 ? 0 : app.language == 1 ? 1 : -1;
-        lang.act = [&app](int i) {
-            if (!languageUsable(app, i)) return;
-            app.language = i;
-            applyLanguage(app);
-            saveMix(app);
-        };
+        lang.selected = app.fanText ? -1 : app.language == 0 ? 0 : app.language == 1 ? 1 : -1;
+        lang.act = [&app](int i) { setLanguageChoice(app, i); };
         rows.push_back(lang);
-        value(tr("Text Language"), cr::kLanguageName[app.language], [&app](int dir) {
-            for (int k = 1; k <= cr::kLanguages; ++k) {
-                const int l = ((app.language + (dir ? dir : 1) * k) % cr::kLanguages + cr::kLanguages) % cr::kLanguages;
-                if (languageUsable(app, l)) {
-                    app.language = l;
+        value(tr("Text Language"), languageChoiceName(app, languageChoice(app)), [&app](int dir) {
+            const int n = cr::kLanguages + 1;
+            for (int k = 1; k <= n; ++k) {
+                const int c = ((languageChoice(app) + (dir ? dir : 1) * k) % n + n) % n;
+                if (choiceUsable(app, c)) {
+                    setLanguageChoice(app, c);
                     break;
                 }
             }
-            applyLanguage(app);
-            saveMix(app);
         });
         }
         { // the port's own text (platform/ui_text.hpp): Auto (the text language's), English, then each catalog's
@@ -1543,7 +1555,7 @@ void drawOptions(App& app, float, float) {
     }
     if (app.resetAsk) { // OptionPrc 9 / 10: the message board (57078, then 57079), Yes / No at (336, 104 / 160)
         std::vector<std::vector<std::string>> pages;
-        app.systemText.message(app.resetAsk == 1 ? 57078 : app.resetAsk == 2 ? 57079 : 57060, app.language, nullptr, pages, nullptr);
+        app.systemText.message(app.resetAsk == 1 ? 57078 : app.resetAsk == 2 ? 57079 : 57060, textLanguage(app), nullptr, pages, nullptr);
         r.setOrigin(0); // (the rows' window goes while it asks: WinDispOff(5))
         r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 0.75f);
         r.setOrigin(r.uiX());
@@ -2569,7 +2581,7 @@ int partyLevel(const App& app) { // fldencount_encount: the scenario pair's two 
 // A system text's first line (sys.evt ids >= 51000), empty if none; `name` fills string 0
 std::string sysText(const App& app, int id, const std::string& name) {
     std::vector<std::vector<std::string>> pages;
-    if (app.systemText.message(id, app.language, nullptr, pages, nullptr,
+    if (app.systemText.message(id, textLanguage(app), nullptr, pages, nullptr,
                                [&](int n) { return n == 0 || n == 9 ? name : std::string(); }) &&
         !pages.empty() && !pages[0].empty())
         return pages[0][0];
@@ -3219,7 +3231,7 @@ void drawFrame(App& app, bool present) {
     if (app.mode == Mode::Maps && app.dialogue.empty() && app.heldPage && app.choiceFlag < 0) { // (a page that ended itself)
         std::string speaker;
         std::vector<std::vector<std::string>> name;
-        if (app.lastPageInfo.nameId >= 0 && app.systemText.message(app.lastPageInfo.nameId, app.language, nullptr, name) &&
+        if (app.lastPageInfo.nameId >= 0 && app.systemText.message(app.lastPageInfo.nameId, textLanguage(app), nullptr, name) &&
             !name.empty() && !name[0].empty())
             speaker = name[0][0];
         drawMessageBox(app, app.lastPage, speaker, false, "");
@@ -3229,7 +3241,7 @@ void drawFrame(App& app, bool present) {
         std::string speaker; // PrcMsg 0x15: the name plate
         if (pi < app.dialogueInfo.size() && app.dialogueInfo[pi].nameId >= 0) {
             std::vector<std::vector<std::string>> name;
-            if (app.systemText.message(app.dialogueInfo[pi].nameId, app.language, nullptr, name) && !name.empty() &&
+            if (app.systemText.message(app.dialogueInfo[pi].nameId, textLanguage(app), nullptr, name) && !name.empty() &&
                 !name[0].empty())
                 speaker = name[0][0];
         }

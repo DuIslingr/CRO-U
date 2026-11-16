@@ -93,6 +93,7 @@ Inside it, one folder per release you have (the downloads come with these folder
 ├── vita/PCSG00499/                        the installed title (CRO/resources/cro.psarc, CRO/sound/*.psarc)
 ├── fsr4/                                  optional: AMD's FSR 4 files (see Settings)
 ├── font/                                  optional: your own font (see Settings)
+├── translation/                           optional: a fan translation of the text (see Settings)
 └── textures/  models/                     optional: your HD textures and models
 ```
 
@@ -198,6 +199,24 @@ Everything is in **Options** (START, or V). Settings and saves live in the profi
 
 **Language:** chosen in Options. The 3.1.0, Android and Vita data carry eight languages; the 1.0.0
 data has Japanese and English.
+
+**Menu Language:** the port's own text: its options, the first start's setup and the Vita save import.
+- It comes in Japanese, French, German, Spanish, Chinese (simplified and traditional), Korean and
+  Russian (`engine/lang/`).
+- Auto, the default, follows the text language.
+
+**Fan translation:** a translation of the game's text, in `translation/` in the game folder. It doesn't
+replace anything: it's a language of its own after the game's eight, e.g. "Русский (fan translation)"
+in Options > Game > Language, and English stays. The scripts run from the game's own files; only the
+text, and any art the translation redrew, are read from it. It can be:
+- the translated files themselves, as extracted from the Vita's `cro.psarc` - `sys.evt` and the areas'
+  `.evt` files (plus any redrawn `.gxt`) - in a folder named by its language: `translation/ru/`;
+- a rePatch folder with the whole translated `cro.psarc` (`translation/ru/PCSG00499/CRO/resources/cro.psarc`);
+- the `.7z`, `.rar` or `.zip` either comes in, dropped into `translation/`: unpacked into its own folder on
+  the next start.
+
+A message the translation lacks shows in English. `--translation <folder or file>` / `CR_TRANSLATION`
+picks one elsewhere; `--language 8` starts in it.
 
 **Achievements:** the original's 32 achievements are earned as in 3.1.0 and announced with the
 Android release's banner. The list opens from the title screen's achievements button (or A).

@@ -1653,25 +1653,31 @@ int fieldRenderSelfTest(App& app) {
     }
     // Options (3.1.0's data): one Language row, its arrows through the languages the data has
     if (languageSheet(app)) {
-        app.language = 1;
+        app.language = 1, app.fanText = false;
         std::vector<OptRow> rows = optionRows(app, 0);
         bool ok = rows.size() > 1 && rows[0].kind == OptControl::Value && rows[0].valueTex && rows[1].label != "Text Language";
+        // (then a fan translation's, #11: a ninth choice, by its name)
+        const bool fan = choiceUsable(app, cr::kLanguages);
         std::set<int> seen;
-        for (int k = 0; ok && k < cr::kLanguages; ++k) {
-            optionRows(app, 0)[0].act(1);
-            seen.insert(app.language);
-        }
-        int usable = 0;
+        int usable = fan;
         for (int l = 0; l < cr::kLanguages; ++l) usable += languageUsable(app, l);
-        ok = ok && app.language == 1 && int(seen.size()) == usable;
+        for (int k = 0; ok && k < usable; ++k) {
+            optionRows(app, 0)[0].act(1);
+            seen.insert(languageChoice(app));
+        }
+        ok = ok && app.language == 1 && !app.fanText && int(seen.size()) == usable;
         app.language = 0;
         optionRows(app, 0)[0].act(-1);
-        const int back = app.language;
-        ok = ok && (languageUsable(app, 7) ? back == 7 : back != 0);
+        const int back = languageChoice(app);
+        ok = ok && (fan ? back == cr::kLanguages && app.fanText && !optionRows(app, 0)[0].valueTex
+                        : languageUsable(app, 7) ? back == 7 : back != 0);
+        if (app.fanText) setLanguageChoice(app, 7);
         rows = optionRows(app, 0);
         ok = ok && rows[0].valueUv[0] == 88.0f * float(app.language);
         check(ok, "the Language row (3.1.0)");
-        std::printf("field render: the Language row cycles %zu languages, left from Japanese to %s\n", seen.size(), cr::kLanguageName[back]);
+        std::printf("field render: the Language row cycles %zu languages, left from Japanese to %s\n", seen.size(),
+                    languageChoiceName(app, back).c_str());
+        app.fanText = false;
     } else {
         const std::vector<OptRow> rows = optionRows(app, 0);
         check(rows.size() > 1 && rows[0].kind == OptControl::Pair && rows[0].words[0] == 37 && rows[1].label == "Text Language",
@@ -7484,7 +7490,7 @@ int runSelfTest(App& app) {
             for (int id = 6700; id < 6800; ++id) {
                 std::vector<std::vector<std::string>> pg;
                 cr::MessageInfo mi;
-                if (app.events.message(id, app.language, [](int) { return 0; }, pg, &mi) && mi.pauses.size() >= 3 && mi.closeAfter > 0) {
+                if (app.events.message(id, textLanguage(app), [](int) { return 0; }, pg, &mi) && mi.pauses.size() >= 3 && mi.closeAfter > 0) {
                     typedId = id;
                     break;
                 }

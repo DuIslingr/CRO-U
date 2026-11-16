@@ -1,6 +1,11 @@
 #include "app/app.hpp"
 #include "platform/ui_text.hpp"
 
+#include <cctype>
+#include <filesystem>
+#include <system_error>
+#include <tuple>
+
 namespace crapp {
 
 // _mdl_put: a texture of MCT id 999 turns about the texture's origin - mceAppearance_setRotateEuler
@@ -202,6 +207,12 @@ bool loadOriginalImage(App& app, const std::string& mct, cr::Image& img, bool* f
         if (names[k].empty()) continue;
         const std::string name = names[k] + ".mct";
         const bool redrawn = std::any_of(std::begin(kVitaRedrawn), std::end(kVitaRedrawn), [&](const char* n) { return name == n; });
+        // the fan translation's own art while it is the language (its window, names, titles: Vita sheets, as the
+        // Vita copy's - those redrawn for the Vita's screen alone with the Vita copy as the game)
+        if (app.fanText && app.fan.isOpen() && (!redrawn || app.vitaOnly) && app.fan.read(names[k] + ".gxt", data) && cr::decodeGxt(data, img)) {
+            if (k + 1 < names.size()) ++(k == 0 ? app.ipadImages : app.hdImages);
+            return true;
+        }
         if (app.vita.isOpen() && (!redrawn || app.vitaOnly) && app.vita.read(names[k] + ".gxt", data) && cr::decodeGxt(data, img)) {
             ++app.vitaTextures;
             if (k + 1 < names.size()) ++(k == 0 ? app.ipadImages : app.hdImages);
@@ -718,6 +729,101 @@ std::string userDir() {
 }
 std::string settingsPath() { return userDir() + "settings.ini"; }
 
+bool App::FanSource::read(const std::string& name, std::vector<uint8_t>& out) const {
+    if (archive.isOpen()) return archive.read(name, out);
+    std::string key = name;
+    for (char& c : key) c = char(std::tolower(static_cast<unsigned char>(c)));
+    const auto it = files.find(key);
+    return it != files.end() && cr::readFile(it->second, out);
+}
+
+namespace {
+// a language code a translation's folder is named by (translation/ru/, translation/pt-BR/), else ""
+std::string folderCode(const std::filesystem::path& p) {
+    const std::string n = p.filename().u8string();
+    if (n.size() < 2 || n.size() > 7 || !std::islower(static_cast<unsigned char>(n[0])) || !std::islower(static_cast<unsigned char>(n[1]))) return {};
+    for (char c : n)
+        if (!std::isalpha(static_cast<unsigned char>(c)) && c != '-' && c != '_') return {};
+    return n.size() == 2 || n[2] == '-' || n[2] == '_' ? n : std::string();
+}
+} // namespace
+
+bool openFanTranslation(App& app, const std::string& path) {
+    app.fan = App::FanSource();
+    cr::setFanText(nullptr);
+    std::vector<std::string> roots;
+    if (!path.empty()) roots.push_back(path);
+    else {
+        for (const std::string& g : cr::gameFolders()) roots.push_back(g + "translation");
+        roots.push_back(cr::saveDir() + "translation");
+    }
+    // the shallowest sys.evt (a folder of the files) or cro.psarc (a rePatch's, translation/ru/CRO/resources/
+    // as the setup unpacks one) up to five folders down; a folder of loose files before an archive at the same depth
+    std::string found;
+    bool loose = false;
+    for (const std::string& root : roots) {
+        std::error_code ec;
+        const std::filesystem::path r = std::filesystem::u8path(root);
+        if (std::filesystem::is_regular_file(r, ec)) {
+            found = root, loose = r.filename() == "sys.evt";
+            break;
+        }
+        std::vector<std::tuple<int, int, std::string>> hits; // (depth, archive?, path)
+        std::filesystem::recursive_directory_iterator it(r, std::filesystem::directory_options::skip_permission_denied, ec), end;
+        for (; it != end && !ec; it.increment(ec)) {
+            if (it.depth() >= 5) it.disable_recursion_pending();
+            const std::string f = it->path().filename().u8string();
+            if ((f == "sys.evt" || f == "cro.psarc") && it->is_regular_file(ec)) hits.push_back({it.depth(), f == "cro.psarc", it->path().u8string()});
+        }
+        std::sort(hits.begin(), hits.end());
+        if (!hits.empty()) {
+            found = std::get<2>(hits.front()), loose = !std::get<1>(hits.front());
+            break;
+        }
+    }
+    if (found.empty()) return false;
+    App::FanSource& f = app.fan;
+    std::error_code ec;
+    std::vector<uint8_t> sys;
+    if (loose) { // every file of the folder sys.evt is in (and below it): its .evt, its .gxt art
+        const std::filesystem::path dir = std::filesystem::u8path(found).parent_path();
+        std::filesystem::recursive_directory_iterator it(dir, std::filesystem::directory_options::skip_permission_denied, ec), end;
+        for (; it != end && !ec; it.increment(ec)) {
+            if (it.depth() >= 4) it.disable_recursion_pending();
+            if (!it->is_regular_file(ec)) continue;
+            std::string key = it->path().filename().u8string();
+            for (char& c : key) c = char(std::tolower(static_cast<unsigned char>(c)));
+            f.files.emplace(key, it->path().u8string()); // (the shallowest of a name: directory order is breadth-first enough here)
+        }
+    } else {
+        std::string error;
+        if (!f.archive.open(found, &error)) {
+            SDL_Log("translation: %s can't be read (%s)", found.c_str(), error.c_str());
+            app.fan = App::FanSource();
+            return false;
+        }
+    }
+    if (!f.read("sys.evt", sys) || sys.size() <= 8) {
+        SDL_Log("translation: %s has no sys.evt", found.c_str());
+        app.fan = App::FanSource();
+        return false;
+    }
+    f.where = found;
+    // its language: the folder it is in (translation/<code>/...), else its text's (Cyrillic: Russian)
+    for (std::filesystem::path p = std::filesystem::u8path(found).parent_path(); !p.empty() && p.has_filename(); p = p.parent_path()) {
+        if (p.filename() == "translation") break;
+        if (const std::string c = folderCode(p); !c.empty()) f.code = c;
+    }
+    if (f.code.empty()) f.code = cr::fanLanguageCode(sys);
+    f.name = f.code.empty() ? std::string() : uitext::languageName(f.code);
+    if (f.name.empty()) f.name = f.code;
+    const App::FanSource* src = &app.fan;
+    cr::setFanText([src](const std::string& name, std::vector<uint8_t>& out) { return src->read(name, out); });
+    SDL_Log("translation: %s (%s) - %s in %s; Options, Language (English stays)", f.name.empty() ? "?" : f.name.c_str(),
+            f.code.empty() ? "?" : f.code.c_str(), loose ? "its files" : "a cro.psarc", found.c_str());
+    return true;
+}
+
 void startUiText(App& app) {
     for (const std::string& g : cr::gameFolders()) uitext::addFolder(g + "lang/");
     uitext::addFolder(userDir() + "lang/");
@@ -737,7 +843,9 @@ void startUiText(App& app) {
 }
 
 void applyUiLanguage(App& app) {
-    std::string want = app.uiLang == "auto" ? uitext::codeForTextLanguage(app.language) : app.uiLang;
+    std::string want = app.uiLang != "auto" ? app.uiLang
+                       : app.fanText && !app.fan.code.empty() ? app.fan.code // (a fan translation's language: its menus too, if there's a catalog)
+                                                               : uitext::codeForTextLanguage(app.language);
     if (const char* forced = SDL_getenv("CR_UI_LANG"); forced && *forced) want = forced; // (tests, captures)
     if (!uitext::setLanguage(want)) uitext::setLanguage("en");
 }
@@ -755,6 +863,7 @@ void loadMix(App& app) {
         if (const char* at = SDL_strstr(text, "language=")) app.language = std::clamp(SDL_atoi(at + 9), 0, cr::kLanguages - 1);
         if (const char* at = SDL_strstr(text, "ui_lang=")) app.uiLang = std::string(at + 8, std::strcspn(at + 8, "\r\n"));
         if (app.uiLang.empty()) app.uiLang = "auto";
+        if (const char* at = SDL_strstr(text, "fan_text=")) app.fanText = SDL_atoi(at + 9) != 0 && app.language == 1; // (applyLanguage: while the translation is there)
         // the system config flags (system.dat's +0x87604 on Android): the achievements earned
         if (const char* at = SDL_strstr(text, "achievements=")) app.ach.flags.fromHex(std::string(at + 13, SDL_strnlen(at + 13, 32)));
         app.seenFlags.clear();
@@ -822,7 +931,7 @@ void saveMix(const App& app) {
          std::to_string(ch.exp) + "," + std::to_string(int(ch.fullBreak)) + "\n";
     std::string seen;
     for (int f : app.seenFlags) seen += (seen.empty() ? "" : ",") + std::to_string(f);
-    const std::string all = t + "language=" + std::to_string(app.language) + "\nui_lang=" + app.uiLang + "\nvoice_entries=" + list + "\nseen_flags=" + seen + "\n" + video +
+    const std::string all = t + "language=" + std::to_string(app.language) + "\nui_lang=" + app.uiLang + "\nfan_text=" + std::to_string(int(app.fanText)) + "\nvoice_entries=" + list + "\nseen_flags=" + seen + "\n" + video +
                             "achievements=" + app.ach.flags.hex() + "\n";
     std::string error;
     if (!crstorage::replaceFile(settingsPath(), all, &error)) SDL_Log("settings: %s", error.c_str());

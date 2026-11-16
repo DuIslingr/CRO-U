@@ -2319,7 +2319,7 @@ void startAnalyze(App& app) {
     App::Battle& b = app.battle;
     auto line = [&](int id, int value, const std::string& text) {
         std::vector<std::vector<std::string>> pages;
-        if (!app.systemText.message(id, app.language, [&](int) { return value; }, pages, nullptr,
+        if (!app.systemText.message(id, textLanguage(app), [&](int) { return value; }, pages, nullptr,
                                     [&](int) { return text; }) || pages.empty() || pages[0].empty())
             return std::string();
         std::string s = pages[0][0];
@@ -2400,7 +2400,7 @@ void showHits(App& app) {
             if (App::Battle::Actor* u = battleActor(app, b.turn.actors[0])) name = u->name;
         std::vector<std::vector<std::string>> pages;
         const int value = b.turn.messageValue;
-        if (app.systemText.message(b.turn.message, app.language, [&](int) { return value; }, pages, nullptr,
+        if (app.systemText.message(b.turn.message, textLanguage(app), [&](int) { return value; }, pages, nullptr,
                                    [&](int) { return name; }) &&
             !pages.empty() && !pages[0].empty())
             setBanner(app, pages[0][0], btlui::kMessageFrames);
@@ -3920,7 +3920,7 @@ void drawBattleResults(App& app, cr::MenuPainter& m, float a) {
     std::vector<std::vector<std::string>> pages;
     const int value = rs.value;
     if (away <= 0.0f &&
-        app.systemText.message(rs.message, app.language, [&](int) { return value; }, pages, nullptr,
+        app.systemText.message(rs.message, textLanguage(app), [&](int) { return value; }, pages, nullptr,
                                [&](int) { return rs.name; }) &&
         !pages.empty())
         for (size_t i = 0; i < pages[0].size() && i < 4; ++i) m.text(pages[0][i], 24, 234 + by + 16.0f * float(i), false, a, 14);

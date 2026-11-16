@@ -542,6 +542,26 @@ bool languageUsable(const App& app, int language) {
     return (language >= 1 && language <= 4) || app.font.loaded();
 }
 
+int textLanguage(const App& app) { return app.fanText && app.language == 1 ? cr::kFanLanguage : app.language; }
+int languageChoice(const App& app) { return app.fanText ? cr::kLanguages : app.language; }
+bool choiceUsable(const App& app, int choice) {
+    if (choice == cr::kLanguages) return app.fan.isOpen() && app.systemText.hasLanguage(cr::kFanLanguage) && languageUsable(app, 1);
+    return languageUsable(app, choice);
+}
+std::string languageChoiceName(const App& app, int choice) {
+    if (choice == cr::kLanguages) return trf("{0} (fan translation)", {app.fan.name.empty() ? std::string(tr("Fan translation")) : app.fan.name});
+    return cr::kLanguageName[std::clamp(choice, 0, cr::kLanguages - 1)];
+}
+void setLanguageChoice(App& app, int choice) {
+    if (!choiceUsable(app, choice)) return;
+    const bool fan = choice == cr::kLanguages, artChanges = fan != app.fanText;
+    app.fanText = fan;
+    app.language = fan ? 1 : choice;
+    applyLanguage(app);
+    if (artChanges) refreshFanArt(app);
+    saveMix(app);
+}
+
 // 3.1.0's data: eight text sections (1.0.0 has Japanese and English only)
 bool multilingualData(const App& app) { return app.systemText.hasLanguage(2); }
 // _MuComFontSet (3.1.0 @0x3d058): the language is Japanese, Chinese or Korean
@@ -552,6 +572,7 @@ bool cjkLanguage(int language) { return language == 0 || language >= 5; }
 // menus' text (_MuComFont*Regist) is 14 pt, in 3.1.0 13 for the Latin languages.
 void applyLanguage(App& app) {
     if (!languageUsable(app, app.language)) app.language = 1;
+    if (app.fanText && (app.language != 1 || !choiceUsable(app, cr::kLanguages))) app.fanText = false;
     applyUiLanguage(app); // ("auto": the port's own text follows)
     static const char* const kRegion[cr::kLanguages] = {"JP", "JP", "JP", "JP", "JP", "SC", "TC", "KR"};
     // Your own font (font/ in the game folder - cr::ownFont): over the Vita copy's faces and the system's (CR_FONT over
@@ -618,7 +639,7 @@ void applyLanguage(App& app) {
 
 std::string itemName(const App& app, int item) {
     std::vector<std::vector<std::string>> name;
-    if (app.systemText.message(cr::itemNameId(item), app.language, nullptr, name) && !name.empty() && !name[0].empty())
+    if (app.systemText.message(cr::itemNameId(item), textLanguage(app), nullptr, name) && !name.empty() && !name[0].empty())
         return name[0][0];
     return "item " + std::to_string(item);
 }
@@ -852,8 +873,8 @@ void showMessages(App& app, const std::vector<int>& ids) {
         std::vector<std::vector<std::string>> pages;
         cr::MessageInfo info;
         auto var = [&](int v) { auto it = app.game.vars.find(v); return it == app.game.vars.end() ? 0 : it->second; };
-        if (app.events.message(id, app.language, var, pages, &info) ||
-            app.systemText.message(id, app.language, var, pages, &info))
+        if (app.events.message(id, textLanguage(app), var, pages, &info) ||
+            app.systemText.message(id, textLanguage(app), var, pages, &info))
             app.dialogue.insert(app.dialogue.end(), pages.begin(), pages.end());
         else
             pages = {{"[message " + std::to_string(id) + "]"}}, app.dialogue.push_back(pages[0]);
@@ -2418,7 +2439,7 @@ void drawMapScreen(App& app) {
         if (ms.page > 0) { // the legend: picture 19 / 21 at (316, 296), its line at (336, 296)
             outPicture(m, t, ms.page == 1 ? 19 : 21, 316, 296, a);
             std::vector<std::vector<std::string>> pages;
-            if (app.systemText.message(kText[ms.page - 1], app.language,
+            if (app.systemText.message(kText[ms.page - 1], textLanguage(app),
                                        [&](int n) { auto it = app.game.vars.find(n); return it == app.game.vars.end() ? 0 : int(it->second); },
                                        pages) &&
                 !pages.empty() && !pages[0].empty())

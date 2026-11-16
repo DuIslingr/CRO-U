@@ -13,6 +13,11 @@ namespace cr {
 
 namespace {
 
+FanReader& fanReader() {
+    static FanReader r;
+    return r;
+}
+
 constexpr size_t kStageEntrySize = 52; // records before the stage record, terminated by 0xFFFF
 
 template <typename T>
@@ -133,7 +138,26 @@ bool EventFile::load(const std::string& dataDir, int area, std::string* error) {
         }
     data_ = std::move(f);
     area_ = area;
+    fan_.clear();
+    if (fanReader() && (!fanReader()(kAreaEventFile[area], fan_) || fan_.size() < 0x30)) fan_.clear();
     return true;
+}
+
+void setFanText(FanReader reader) { fanReader() = std::move(reader); }
+bool fanTextSet() { return bool(fanReader()); }
+
+std::string fanLanguageCode(const std::vector<uint8_t>& f) {
+    uint32_t table = 0;
+    if (!rd(f, 4, table) || table == 0 || table >= f.size()) return {};
+    size_t end = f.size(); // (English's section alone: up to the next language's - Japanese and Korean have a few Cyrillic letters)
+    for (int l = 0; l < kLanguages; ++l)
+        if (uint32_t t = 0; rd(f, 4 * size_t(l), t) && t > table && t < end) end = t;
+    size_t cyrillic = 0;
+    for (size_t i = table & ~size_t(1); i + 1 < end && cyrillic < 64; i += 2) {
+        const unsigned c = unsigned(f[i] | f[i + 1] << 8);
+        cyrillic += c >= 0x410 && c <= 0x44f;
+    }
+    return cyrillic >= 64 ? "ru" : "";
 }
 
 uint32_t EventFile::scriptEntry(int n) const {
@@ -391,6 +415,13 @@ bool EventFile::message(int id, int language, const std::function<int(int)>& var
     uint32_t table = 0, msg = 0;
     // +0x28: one text section per language (0 Japanese, 1 English, 2 French, 3 German, 4 Spanish,
     // 5 / 6 Chinese simplified / traditional, 7 Korean); 1.0.1 has only the first two
+    if (language == kFanLanguage) { // the translation's copy's English, else the game's own
+        if (fan_.size() >= 0x30 && rd(fan_, 0x28 + 4, table) && table && id >= 1000 && id < 51000 &&
+            lookupMessage(fan_, table, id - 1000, 200, msg) && decodeMessage(fan_, msg, var, pages, info))
+            return true;
+        pages.clear();
+        language = 1;
+    }
     if (!loaded() || id < 1000 || id >= 51000 || language < 0 || language >= kLanguages ||
         !rd(data_, 0x28 + 4 * size_t(language), table))
         return false;
@@ -405,16 +436,28 @@ const char* const kLanguageName[kLanguages] = {"Japanese", "English", "French", 
 
 bool SystemText::hasLanguage(int language) const {
     uint32_t t = 0;
+    if (language == kFanLanguage) return rd(fan_, 4, t) && t != 0 && t < fan_.size();
     return language >= 0 && language < kLanguages && rd(data_, 4 * size_t(language), t) && t != 0 && t < data_.size();
 }
 
-bool SystemText::load(const std::string& dataDir) { return readFile(dataDir + "sys.evt", data_) && data_.size() > 8; }
+bool SystemText::load(const std::string& dataDir) {
+    fan_.clear();
+    if (fanReader() && (!fanReader()("sys.evt", fan_) || fan_.size() <= 8)) fan_.clear();
+    return readFile(dataDir + "sys.evt", data_) && data_.size() > 8;
+}
 
 bool SystemText::message(int id, int language, const std::function<int(int)>& var,
                          std::vector<std::vector<std::string>>& pages, MessageInfo* info,
                          const std::function<std::string(int)>& text) const {
     pages.clear();
     uint32_t table = 0, msg = 0;
+    if (language == kFanLanguage) { // the translation's English, else the game's own
+        if (id >= 51000 && fan_.size() > 8 && rd(fan_, 4, table) && table && lookupMessage(fan_, table, id - 51000, 1000, msg) &&
+            decodeMessage(fan_, msg, var, pages, info, text))
+            return true;
+        pages.clear();
+        language = 1;
+    }
     if (data_.empty() || id < 51000 || language < 0 || language >= kLanguages || !rd(data_, 4 * size_t(language), table))
         return false;
     if (table == 0 && language != 1) return message(id, 1, var, pages, info, text);
