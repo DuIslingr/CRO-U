@@ -21577,16 +21577,30 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
     }
 }
 
+// A read-back frame to a .bmp, opaque. The frame's alpha is no picture: the window shows the colour alone
+// (the swapchain composites opaque), and what the scene leaves there is whatever its draws wrote - an
+// opaque mesh writes its texture's alpha (d0553bt's star sky, a PAL8_RGBA8 picture with alpha ~0, leaves 0
+// behind the arches), where the original never writes it (read_mdl_hd clears property bit 1, the alpha
+// write mask). Kept, a viewer showed those parts as see-through - white - though the screen shows them black
+bool saveFrameBmp(const std::vector<uint8_t>& px, int w, int h, const char* path) {
+    SDL_Surface* surf = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_RGBA32);
+    if (!surf) return false;
+    for (int y = 0; y < h; ++y) {
+        uint8_t* row = static_cast<uint8_t*>(surf->pixels) + size_t(y) * surf->pitch;
+        std::memcpy(row, &px[size_t(y) * w * 4], size_t(w) * 4);
+        for (int x = 0; x < w; ++x) row[x * 4 + 3] = 255;
+    }
+    const bool ok = SDL_SaveBMP(surf, path);
+    SDL_DestroySurface(surf);
+    return ok;
+}
+
 // The last drawn frame to a .bmp (self-test looks)
 void saveFrame(App& app, const char* path) {
     int sw = 0, sh = 0;
     std::vector<uint8_t> px;
     if (!app.renderer.readPixels(px, sw, sh)) return;
-    SDL_Surface* surf = SDL_CreateSurface(sw, sh, SDL_PIXELFORMAT_RGBA32);
-    for (int y = 0; y < sh; ++y)
-        std::memcpy(static_cast<uint8_t*>(surf->pixels) + size_t(y) * surf->pitch, &px[size_t(y) * sw * 4], size_t(sw) * 4);
-    SDL_SaveBMP(surf, path);
-    SDL_DestroySurface(surf);
+    saveFrameBmp(px, sw, sh, path);
 }
 
 // Achievements (game/achievements.hpp): each condition earns exactly its achievement, once; the
@@ -30010,15 +30024,11 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         drawFrame(app, false);
         int fw = 0, fh = 0;
         std::vector<uint8_t> fp;
-        if (every && f % everyN == 0 && app.renderer.readPixels(fp, fw, fh))
-            if (SDL_Surface* fs = SDL_CreateSurface(fw, fh, SDL_PIXELFORMAT_RGBA32)) {
-                for (int y = 0; y < fh; ++y)
-                    std::memcpy(static_cast<uint8_t*>(fs->pixels) + size_t(y) * fs->pitch, &fp[size_t(y) * fw * 4], size_t(fw) * 4);
-                char name[32];
-                SDL_snprintf(name, sizeof name, "/s%04d.bmp", f);
-                SDL_SaveBMP(fs, (std::string(every) + name).c_str());
-                SDL_DestroySurface(fs);
-            }
+        if (every && f % everyN == 0 && app.renderer.readPixels(fp, fw, fh)) {
+            char name[32];
+            SDL_snprintf(name, sizeof name, "/s%04d.bmp", f);
+            saveFrameBmp(fp, fw, fh, (std::string(every) + name).c_str());
+        }
     }
     app.lastTicks = app.captureSettleMoving && app.captureSettle ? SDL_GetTicksNS() - frame : 0;
     drawFrame(app, false);
@@ -30028,11 +30038,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         std::printf("FAILED to read the frame back\n");
         return 1;
     }
-    SDL_Surface* surf = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_RGBA32);
-    for (int y = 0; y < h; ++y)
-        std::memcpy(static_cast<uint8_t*>(surf->pixels) + size_t(y) * surf->pitch, &px[size_t(y) * w * 4], size_t(w) * 4);
-    const bool ok = SDL_SaveBMP(surf, outPath);
-    SDL_DestroySurface(surf);
+    const bool ok = saveFrameBmp(px, w, h, outPath);
     std::printf("%s %s -> %s (%dx%d)\n", ok ? "captured" : "FAILED", mapName, outPath, w, h);
     if (app.hdModelsLoaded) std::printf("hd models: %d replaced (%s)\n", app.hdModelsLoaded, app.modelsDir.c_str());
     if (app.battle.active) std::printf("battle: %d steps (speed %d)\n", app.battle.frames, app.battleSpeed);
