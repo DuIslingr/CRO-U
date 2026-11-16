@@ -3988,8 +3988,29 @@ int runSelfTest(App& app) {
         app.game.setFlag(0x43, true); // ("About Option" read)
         openOptions(app, 0);
         const std::vector<OptRow> titlePage = optionRows(app, 0);
-        problems += titlePage.size() != size_t(13 - languageSheet(app)) || // (3.1.0: one Language row)
+        problems += titlePage.size() != size_t(14 - languageSheet(app)) || // (3.1.0: one Language row)
                     titlePage.back().label != sysLabel(app, 58122, "Reset Data");
+        { // Menu Language (platform/ui_text): Auto first; a step right names English or a catalog, and the port's text follows
+            const std::string keepLang = app.uiLang;
+            int at = -1;
+            for (size_t i = 0; i < titlePage.size(); ++i)
+                if (titlePage[i].label == tr("Menu Language")) at = int(i);
+            bool ok = at >= 0 && app.uiLang == "auto";
+            if (at >= 0) {
+                std::vector<OptRow> rows = titlePage;
+                rows[size_t(at)].act(1);
+                ok = ok && app.uiLang != "auto" && uitext::language() == (app.uiLang == "en" ? "en" : app.uiLang);
+                rows[size_t(at)].act(1);
+                ok = ok && uitext::language() == app.uiLang;
+                const bool translated = std::string(tr("Menu Language")) != "Menu Language";
+                std::printf("menu language: row %d, Auto -> %s -> %s, %zu languages, the label %s: %s\n", at, "en", app.uiLang.c_str(),
+                            uitext::languages().size(), translated ? "translated" : "English", ok && translated ? "ok" : "WRONG");
+                ok = ok && translated;
+            }
+            problems += !ok;
+            app.uiLang = keepLang;
+            applyUiLanguage(app);
+        }
         { // Reset Data: asked twice; No keeps the saves, Yes to both removes them (in a test folder)
             const std::string keepDir = app.saveDirOverride;
             app.saveDirOverride = userDir() + "selftest-reset/";
@@ -4046,8 +4067,8 @@ int runSelfTest(App& app) {
         app.game.setFlag(0x43, true);
         openOptions(app, 0);
         std::vector<OptRow> gamePage = optionRows(app, 0);
-        problems += gamePage.size() != size_t(13 - languageSheet(app)) || gamePage.back().label != sysLabel(app, 58123, "Return to Title") || !gamePage.back().enabled;
-        if (gamePage.size() == size_t(13 - languageSheet(app)) && gamePage.back().act) gamePage.back().act(0);
+        problems += gamePage.size() != size_t(14 - languageSheet(app)) || gamePage.back().label != sysLabel(app, 58123, "Return to Title") || !gamePage.back().enabled;
+        if (gamePage.size() == size_t(14 - languageSheet(app)) && gamePage.back().act) gamePage.back().act(0);
         problems += app.resetAsk != 3; // "return to the title?"
         resetAnswer(app, true);
         for (int f = 0; f < 14 && app.titleReturnIn > 0; ++f) stepEvents(app); // (twelve frames of black)

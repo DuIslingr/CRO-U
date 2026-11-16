@@ -1,4 +1,5 @@
 #include "app/app.hpp"
+#include "platform/ui_text.hpp"
 
 namespace crapp {
 
@@ -717,6 +718,30 @@ std::string userDir() {
 }
 std::string settingsPath() { return userDir() + "settings.ini"; }
 
+void startUiText(App& app) {
+    for (const std::string& g : cr::gameFolders()) uitext::addFolder(g + "lang/");
+    uitext::addFolder(userDir() + "lang/");
+    size_t size = 0;
+    char* text = static_cast<char*>(SDL_LoadFile(settingsPath().c_str(), &size));
+    if (!text) { // a first start: the system's language
+        const char* forced = SDL_getenv("CR_UI_LANG"); // (tests)
+        uitext::setLanguage(forced && *forced ? std::string(forced) : uitext::systemLanguage());
+        SDL_Log("interface text: %s (%s)", uitext::language().c_str(), forced && *forced ? "CR_UI_LANG" : "the system's");
+        return;
+    }
+    if (const char* at = SDL_strstr(text, "language=")) app.language = std::clamp(SDL_atoi(at + 9), 0, cr::kLanguages - 1);
+    if (const char* at = SDL_strstr(text, "ui_lang=")) app.uiLang = std::string(at + 8, std::strcspn(at + 8, "\r\n"));
+    if (app.uiLang.empty()) app.uiLang = "auto";
+    SDL_free(text);
+    applyUiLanguage(app);
+}
+
+void applyUiLanguage(App& app) {
+    std::string want = app.uiLang == "auto" ? uitext::codeForTextLanguage(app.language) : app.uiLang;
+    if (const char* forced = SDL_getenv("CR_UI_LANG"); forced && *forced) want = forced; // (tests, captures)
+    if (!uitext::setLanguage(want)) uitext::setLanguage("en");
+}
+
 
 
 void loadMix(App& app) {
@@ -728,6 +753,8 @@ void loadMix(App& app) {
         for (int i = 0; i < 4; ++i)
             if (const char* at = SDL_strstr(text, keys[i])) *fields[i] = std::clamp(SDL_atoi(at + SDL_strlen(keys[i])), 0, 100);
         if (const char* at = SDL_strstr(text, "language=")) app.language = std::clamp(SDL_atoi(at + 9), 0, cr::kLanguages - 1);
+        if (const char* at = SDL_strstr(text, "ui_lang=")) app.uiLang = std::string(at + 8, std::strcspn(at + 8, "\r\n"));
+        if (app.uiLang.empty()) app.uiLang = "auto";
         // the system config flags (system.dat's +0x87604 on Android): the achievements earned
         if (const char* at = SDL_strstr(text, "achievements=")) app.ach.flags.fromHex(std::string(at + 13, SDL_strnlen(at + 13, 32)));
         app.seenFlags.clear();
@@ -795,10 +822,11 @@ void saveMix(const App& app) {
          std::to_string(ch.exp) + "," + std::to_string(int(ch.fullBreak)) + "\n";
     std::string seen;
     for (int f : app.seenFlags) seen += (seen.empty() ? "" : ",") + std::to_string(f);
-    const std::string all = t + "language=" + std::to_string(app.language) + "\nvoice_entries=" + list + "\nseen_flags=" + seen + "\n" + video +
+    const std::string all = t + "language=" + std::to_string(app.language) + "\nui_lang=" + app.uiLang + "\nvoice_entries=" + list + "\nseen_flags=" + seen + "\n" + video +
                             "achievements=" + app.ach.flags.hex() + "\n";
     std::string error;
     if (!crstorage::replaceFile(settingsPath(), all, &error)) SDL_Log("settings: %s", error.c_str());
 }
 
 } // namespace crapp
+

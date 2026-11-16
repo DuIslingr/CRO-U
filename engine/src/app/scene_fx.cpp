@@ -800,7 +800,7 @@ std::string aaName(const App::Video& v) {
     if (v.upscaler == 1) return v.upscaleMode == 0 ? "FSR Native AA" : "FSR 3.1";
     if (v.upscaler == 2) return v.upscaleMode == 0 ? "DLAA" : "DLSS";
     if (v.upscaler == 3) return v.upscaleMode == 0 ? "MetalFX AA" : "MetalFX";
-    return v.msaa <= 1 ? std::string("Off") : std::to_string(v.msaa) + "x MSAA";
+    return v.msaa <= 1 ? std::string(tr("Off")) : std::to_string(v.msaa) + "x MSAA";
 }
 
 void adjustVideo(App& app, int row, int dir) {
@@ -907,7 +907,7 @@ void adjustVideo(App& app, int row, int dir) {
 
 
 
-const char* const kOptionPageName[kOptionPages] = {"Game", "Sound", "Display", "Detail", "Cheats", "Graphics"};
+const char* const kOptionPageName[kOptionPages] = {N_("Game"), N_("Sound"), N_("Display"), N_("Detail"), N_("Cheats"), N_("Graphics")};
 
 std::string sysLabel(const App& app, int id, const char* fallback) {
     const std::string t = sysText(app, id);
@@ -1008,7 +1008,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
             saveMix(app);
         };
         rows.push_back(lang);
-        value("Text Language", cr::kLanguageName[app.language], [&app](int dir) {
+        value(tr("Text Language"), cr::kLanguageName[app.language], [&app](int dir) {
             for (int k = 1; k <= cr::kLanguages; ++k) {
                 const int l = ((app.language + (dir ? dir : 1) * k) % cr::kLanguages + cr::kLanguages) % cr::kLanguages;
                 if (languageUsable(app, l)) {
@@ -1020,71 +1020,87 @@ std::vector<OptRow> optionRows(App& app, int page) {
             saveMix(app);
         });
         }
+        { // the port's own text (platform/ui_text.hpp): Auto (the text language's), English, then each catalog's
+            const std::vector<uitext::Language> langs = uitext::languages();
+            const std::string shown = app.uiLang == "auto" ? trf("Auto ({0})", {uitext::languageName(uitext::language())})
+                                                           : uitext::languageName(app.uiLang);
+            value(tr("Menu Language"), shown.empty() ? app.uiLang : shown, [&app, langs](int dir) {
+                int at = -1; // -1 Auto, else an index into langs
+                for (size_t i = 0; i < langs.size(); ++i)
+                    if (langs[i].code == app.uiLang) at = int(i);
+                const int n = int(langs.size()) + 1;
+                at = ((at + 1 + (dir ? dir : 1)) % n + n) % n - 1;
+                app.uiLang = at < 0 ? "auto" : langs[size_t(at)].code;
+                applyUiLanguage(app);
+                saveMix(app);
+            });
+            rows.back().hint = tr("The language of the port's own text - these options and its messages; Auto: the text language's");
+        }
         onOff(sysLabel(app, 58108, "Environment Effects"), &app.environmentEffects, nullptr);
         onOff(sysLabel(app, 58109, "Lock Screen Orientation"), &app.lockOrientation,
               [&app] { applyOrientation(app, app.lockOrientation); });
-        onOff("Control Hints", &app.showHud, nullptr);
-        rows.back().hint = "Show the control hints and status overlay. Off hides the WASD help; F3 is a shortcut.";
-        value("Import Vita Saves", "Choose Folder", [&app](int dir) {
+        onOff(tr("Control Hints"), &app.showHud, nullptr);
+        rows.back().hint = tr("Show the control hints and status overlay. Off hides the WASD help; F3 is a shortcut.");
+        value(tr("Import Vita Saves"), tr("Choose Folder"), [&app](int dir) {
             if (dir == 0 && app.optionsFromTitle) app.saveImport.begin("omega", app.window);
         });
         rows.back().enabled = app.optionsFromTitle;
-        rows.back().hint = app.optionsFromTitle ? "Choose your decrypted Vita save export. Existing saves will be backed up."
-                                               : "Import saves from the title screen's Options.";
+        rows.back().hint = app.optionsFromTitle ? tr("Choose your decrypted Vita save export. Existing saves will be backed up.")
+                                               : tr("Import saves from the title screen's Options.");
         { // the Vita copy to take assets from (a folder dialog; Left / Right: none)
-            std::string shown = "None";
+            std::string shown = tr("None");
             if (!app.vitaPath.empty()) {
                 std::string p = app.vitaPath;
                 while (p.size() > 1 && p.back() == '/') p.pop_back();
                 shown = p.substr(p.rfind('/') + 1);
                 if (shown.size() > 18) shown = shown.substr(0, 17) + "~";
             }
-            if (app.vitaOnly) shown = "The game's data";
-            else if (app.vitaPath != app.vitaLoaded) shown += " (next start)";
-            else if (!app.vitaPath.empty() && !app.vita.isOpen()) shown += " (not found)";
-            value("Vita Assets", shown, [&app](int dir) {
+            if (app.vitaOnly) shown = tr("The game's data");
+            else if (app.vitaPath != app.vitaLoaded) shown = trf("{0} (next start)", {shown});
+            else if (!app.vitaPath.empty() && !app.vita.isOpen()) shown = trf("{0} (not found)", {shown});
+            value(tr("Vita Assets"), shown, [&app](int dir) {
                 if (app.vitaOnly) return; // (it is the whole game here)
                 if (dir == 0) chooseVitaFolder(app);
                 else if (!app.vitaPath.empty()) app.vitaPath.clear(), app.vitaNote.clear(), saveMix(app);
             });
             rows.back().enabled = !app.vitaOnly && !app.androidOnly;
-            rows.back().hint = app.vitaOnly ? "Running from the Vita copy alone: " + app.vitaRoot
+            rows.back().hint = app.vitaOnly ? trf("Running from the Vita copy alone: {0}", {app.vitaRoot})
                                : !app.vitaNote.empty() ? app.vitaNote
-                               : "Enter: your Vita copy's PCSG00499 folder - its textures, voices, music and scripts; Left / Right: none";
+                               : tr("Enter: your Vita copy's PCSG00499 folder - its textures, voices, music and scripts; Left / Right: none");
         }
         { // the Android copy to take assets from (a folder holding its main.*.obb and APK; Left / Right: none)
-            std::string shown = "None";
+            std::string shown = tr("None");
             if (!app.androidPath.empty()) {
                 std::string p = app.androidPath;
                 while (p.size() > 1 && p.back() == '/') p.pop_back();
                 shown = p.substr(p.rfind('/') + 1);
                 if (shown.size() > 18) shown = shown.substr(0, 17) + "~";
             }
-            if (app.androidOnly) shown = "The game's data";
-            else if (app.androidPath != app.androidLoaded) shown += " (next start)";
-            else if (!app.androidPath.empty() && !app.android.isOpen()) shown += " (not found)";
-            value("Android Assets", shown, [&app](int dir) {
+            if (app.androidOnly) shown = tr("The game's data");
+            else if (app.androidPath != app.androidLoaded) shown = trf("{0} (next start)", {shown});
+            else if (!app.androidPath.empty() && !app.android.isOpen()) shown = trf("{0} (not found)", {shown});
+            value(tr("Android Assets"), shown, [&app](int dir) {
                 if (app.androidOnly) return; // (it is the whole game here)
                 if (dir == 0) chooseAndroidFolder(app);
                 else if (!app.androidPath.empty()) app.androidPath.clear(), app.androidNote.clear(), saveMix(app);
             });
             rows.back().enabled = !app.vitaOnly && !app.androidOnly;
-            rows.back().hint = app.androidOnly ? "Running from the Android release alone: " + app.android.path()
+            rows.back().hint = app.androidOnly ? trf("Running from the Android release alone: {0}", {app.android.path()})
                                : !app.androidNote.empty() ? app.androidNote
-                               : "Enter: a folder with your Android copy's main.*.obb and its APK - its textures and the art "
-                                 "only it has; Left / Right: none";
+                               : tr("Enter: a folder with your Android copy's main.*.obb and its APK - its textures and the art "
+                                    "only it has; Left / Right: none");
         }
         const auto speed = [&](const char* label, int* x, const char* what) { // (Off, 2x .. 5x)
-            value(label, *x > 1 ? std::to_string(*x) + "x" : std::string("Off"), [&app, x](int dir) {
+            value(label, *x > 1 ? std::to_string(*x) + "x" : std::string(tr("Off")), [&app, x](int dir) {
                 *x = (*x - 1 + (dir ? dir : 1) + 5) % 5 + 1;
                 saveMix(app);
             });
             rows.back().hint = what;
         };
-        speed("Field Speed", &app.fieldSpeed, "Walking the field 2 .. 5 times as fast - the scenes, talk and menus as they are");
-        speed("Battle Speed", &app.battleSpeed, "The battles 2 .. 5 times as fast");
+        speed(tr("Field Speed"), &app.fieldSpeed, tr("Walking the field 2 .. 5 times as fast - the scenes, talk and menus as they are"));
+        speed(tr("Battle Speed"), &app.battleSpeed, tr("The battles 2 .. 5 times as fast"));
         OptRow swap; // the controller's ○ (east) / × (south): Off as on the Vita, ○ confirms
-        swap.label = "Swap \u25cb and \u00d7";
+        swap.label = tr("Swap \u25cb and \u00d7");
         swap.kind = OptControl::Pair;
         swap.words[0] = 33; // On
         swap.words[1] = 34; // Off
@@ -1093,9 +1109,9 @@ std::vector<OptRow> optionRows(App& app, int page) {
             app.padConfirmEast = i == 1;
             saveMix(app);
         };
-        swap.hint = std::string(app.pad ? std::string("Controller: ") + SDL_GetGamepadName(app.pad) + ". " : "With a controller: ") +
-                    (app.padConfirmEast ? "\u25cb (the right button) confirms, \u00d7 (the bottom one) goes back - as on the Vita"
-                                        : "\u00d7 (the bottom button) confirms, \u25cb (the right one) goes back");
+        swap.hint = (app.pad ? trf("Controller: {0}.", {SDL_GetGamepadName(app.pad) ? SDL_GetGamepadName(app.pad) : ""}) + " " : std::string(tr("With a controller:")) + " ") +
+                    (app.padConfirmEast ? tr("\u25cb (the right button) confirms, \u00d7 (the bottom one) goes back - as on the Vita")
+                                        : tr("\u00d7 (the bottom button) confirms, \u25cb (the right one) goes back"));
         rows.push_back(swap);
         OptRow manual; // the topics and their pages (MuScrList + MsgUty)
         manual.label = sysLabel(app, 58081, "Instruction Manual");
@@ -1114,13 +1130,13 @@ std::vector<OptRow> optionRows(App& app, int page) {
         break;
     }
     case 1: { // Sound
-        gauge("Master Volume", &app.mix.master, int(se::kVolume));
+        gauge(tr("Master Volume"), &app.mix.master, int(se::kVolume));
         gauge(sysLabel(app, 58085, "BGM"), &app.mix.music, -1);
         gauge(sysLabel(app, 58086, "Sound Effects"), &app.mix.effects, int(se::kVolume));
-        gauge("Voice Volume", &app.mix.voice, -2); // (-2: __MuOptionSetInfo plays battle clip 0x2b1 at the new level)
+        gauge(tr("Voice Volume"), &app.mix.voice, -2); // (-2: __MuOptionSetInfo plays battle clip 0x2b1 at the new level)
         char test[32];
         SDL_snprintf(test, sizeof test, "%03d", app.soundTestEntry);
-        value("Sound Test", test, [&app](int dir) {
+        value(tr("Sound Test"), test, [&app](int dir) {
             const int n = std::max(1, app.sound.entries());
             if (dir == 0) app.sound.play(uint32_t(app.soundTestEntry));
             else app.soundTestEntry = ((app.soundTestEntry + dir) % n + n) % n;
@@ -1131,127 +1147,127 @@ std::vector<OptRow> optionRows(App& app, int page) {
     case 2: { // Display
 #if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
         // (a phone's or tablet's: the whole screen at its own resolution and shape, always - applyVideo)
-        pair("Camera Cutout", "Avoid", "Ignore", v.avoidCutout ? 0 : 1, [&app](int i) {
+        pair(tr("Camera Cutout"), tr("Avoid"), tr("Ignore"), v.avoidCutout ? 0 : 1, [&app](int i) {
             app.video.avoidCutout = i == 0;
             saveMix(app);
         });
-        rows.back().hint = "Avoid: the menus and buttons kept clear of the camera's notch or punch hole (the picture fills the screen either way). Ignore: they reach the edges too";
+        rows.back().hint = tr("Avoid: the menus and buttons kept clear of the camera's notch or punch hole (the picture fills the screen either way). Ignore: they reach the edges too");
 #else
-        static const char* const kDisplay[] = {"Window", "Fullscreen", "Borderless"};
-        value("Resolution", v.display == 2 ? "Desktop" : std::to_string(v.width) + " x " + std::to_string(v.height),
+        static const char* const kDisplay[] = {N_("Window"), N_("Fullscreen"), N_("Borderless")};
+        value(tr("Resolution"), v.display == 2 ? tr("Desktop") : std::to_string(v.width) + " x " + std::to_string(v.height),
               [&app](int dir) { adjustVideo(app, 0, dir ? dir : 1); });
-        value("Display", kDisplay[v.display], [&app](int dir) { adjustVideo(app, 1, dir ? dir : 1); });
-        pair("Aspect", "4:3", "Wide", v.widescreen ? 1 : 0, [&app](int i) {
+        value(tr("Display"), tr(kDisplay[v.display]), [&app](int dir) { adjustVideo(app, 1, dir ? dir : 1); });
+        pair(tr("Aspect"), "4:3", tr("Wide"), v.widescreen ? 1 : 0, [&app](int i) {
             if (app.video.widescreen != (i == 1)) adjustVideo(app, 2, 1);
         });
 #endif
-        static const char* const kLayout[] = {"Auto", "iPad", "iPhone", "Vita", "Android"};
-        value("Layout", kLayout[std::clamp(v.layout, 0, 4)], [&app](int dir) { adjustVideo(app, 14, dir ? dir : 1); });
-        rows.back().hint = "The screens' layout: the iPad release's (4:3), the iPhone's (3:2), the Vita's or the Android "
-                           "release's (16:9, its screens centred); Auto follows the data";
-        static const char* const kPaintings[] = {"Original", "Fill"};
-        value("Painted Rooms", kPaintings[std::clamp(v.paintings, 0, 1)], [&app](int dir) { adjustVideo(app, 3, dir ? dir : 1); });
-        onOff("VSync", &v.vsync, [&app] { applyVideo(app); });
-        value("Frame Rate", v.frameLimit ? std::to_string(v.frameLimit) : std::string("Unlimited"),
+        static const char* const kLayout[] = {N_("Auto"), "iPad", "iPhone", "Vita", "Android"};
+        value(tr("Layout"), tr(kLayout[std::clamp(v.layout, 0, 4)]), [&app](int dir) { adjustVideo(app, 14, dir ? dir : 1); });
+        rows.back().hint = tr("The screens' layout: the iPad release's (4:3), the iPhone's (3:2), the Vita's or the Android "
+                              "release's (16:9, its screens centred); Auto follows the data");
+        static const char* const kPaintings[] = {N_("Original"), N_("Fill")};
+        value(tr("Painted Rooms"), tr(kPaintings[std::clamp(v.paintings, 0, 1)]), [&app](int dir) { adjustVideo(app, 3, dir ? dir : 1); });
+        onOff(tr("VSync"), &v.vsync, [&app] { applyVideo(app); });
+        value(tr("Frame Rate"), v.frameLimit ? std::to_string(v.frameLimit) : std::string(tr("Unlimited")),
               [&app](int dir) { adjustVideo(app, 15, dir ? dir : 1); });
-        rows.back().hint = "Frames drawn a second at most; the game runs at its own 20 a second, shown moving between them";
+        rows.back().hint = tr("Frames drawn a second at most; the game runs at its own 20 a second, shown moving between them");
         OptRow restore;
-        restore.label = "Original Presentation";
-        restore.hint = "Every display and graphics option back to the original's";
+        restore.label = tr("Original Presentation");
+        restore.hint = tr("Every display and graphics option back to the original's");
         restore.act = [&app](int) { adjustVideo(app, 7, 0); };
         rows.push_back(restore);
         break;
     }
     case 3: { // Detail: the textures and the models
-        onOff("HD Textures", &v.hdTextures, nullptr);
+        onOff(tr("HD Textures"), &v.hdTextures, nullptr);
         rows.back().act = [&app](int i) {
             if (app.video.hdTextures != (i == 0)) adjustVideo(app, 12, 1);
         };
         {
             const bool have = !app.hdDir.empty() && SDL_GetPathInfo(app.hdDir.c_str(), nullptr);
-            rows.back().hint = have ? "waifu2x / Real-ESRGAN upscales from textures/hd (tools/hd_textures.py); from the next room on"
-                                    : "None in textures/hd yet: --export-textures, then tools/hd_textures.py";
+            rows.back().hint = have ? tr("waifu2x / Real-ESRGAN upscales from textures/hd (tools/hd_textures.py); from the next room on")
+                                    : tr("None in textures/hd yet: --export-textures, then tools/hd_textures.py");
         }
-        onOff("HD Models", &v.hdModels, nullptr);
+        onOff(tr("HD Models"), &v.hdModels, nullptr);
         rows.back().act = [&app](int i) {
             if (app.video.hdModels != (i == 0)) adjustVideo(app, 18, 1);
         };
         {
             const bool have = !app.modelsDir.empty() && SDL_GetPathInfo(app.modelsDir.c_str(), nullptr);
-            rows.back().hint = have ? "Replacement models (glTF) from models/hd, in place of the game's; from the next room on"
-                                    : "None in models/hd yet: --export-models, edit in Blender, save as models/hd/<name>.glb";
+            rows.back().hint = have ? tr("Replacement models (glTF) from models/hd, in place of the game's; from the next room on")
+                                    : tr("None in models/hd yet: --export-models, edit in Blender, save as models/hd/<name>.glb");
         }
-        static const char* const kSmooth[] = {"Off", "", "Smooth", "Smoother"};
-        value("Smooth Models", kSmooth[v.smoothModels], [&app](int dir) { adjustVideo(app, 13, dir ? dir : 1); });
-        rows.back().hint = v.smoothModels ? "Rounder models (4x / 9x triangles), hard edges kept; from the next room on"
-                                          : "Rounds the models' silhouettes - characters, monsters, props, stages (PN triangles)";
+        static const char* const kSmooth[] = {N_("Off"), "", N_("Smooth"), N_("Smoother")};
+        value(tr("Smooth Models"), tr(kSmooth[v.smoothModels]), [&app](int dir) { adjustVideo(app, 13, dir ? dir : 1); });
+        rows.back().hint = v.smoothModels ? tr("Rounder models (4x / 9x triangles), hard edges kept; from the next room on")
+                                          : tr("Rounds the models' silhouettes - characters, monsters, props, stages (PN triangles)");
         {
             const int most = std::max(app.renderer.maxAnisotropy(), 1);
-            value("Anisotropic Filtering", v.anisotropy > 1 && most > 1 ? std::to_string(std::min(v.anisotropy, most)) + "x" : std::string("Off"),
+            value(tr("Anisotropic Filtering"), v.anisotropy > 1 && most > 1 ? std::to_string(std::min(v.anisotropy, most)) + "x" : std::string(tr("Off")),
                   [&app](int dir) { adjustVideo(app, 16, dir ? dir : 1); });
             rows.back().enabled = most > 1;
-            rows.back().hint = most > 1 ? "Textures stay sharp on floors and walls seen at an angle" : "Not on this GPU";
+            rows.back().hint = most > 1 ? tr("Textures stay sharp on floors and walls seen at an angle") : tr("Not on this GPU");
         }
-        pair("Texture Filtering", "Smooth", "Sharp", v.sharpTextures ? 1 : 0, [&app](int i) {
+        pair(tr("Texture Filtering"), tr("Smooth"), tr("Sharp"), v.sharpTextures ? 1 : 0, [&app](int i) {
             if (app.video.sharpTextures != (i == 1)) adjustVideo(app, 17, 1);
         });
-        rows.back().hint = "Sharp: the world's textures magnified by the nearest texel (square pixels up close)";
+        rows.back().hint = tr("Sharp: the world's textures magnified by the nearest texel (square pixels up close)");
         break;
     }
     case 4: { // Cheats (the port's own): the user's - "Infinite HP and MP. Infinite Maxed out Money, xp multipliers. always advantage"
         App::Cheats& ch = app.cheats;
-        onOff("Infinite HP", &ch.hp, nullptr);
-        rows.back().hint = "The pair's HP never drops: the damage still shows, nobody falls";
-        onOff("Infinite MP", &ch.mp, nullptr);
-        rows.back().hint = "Genes cost no MP; the pair's MP stays full";
-        onOff("Max Oz", &ch.oz, nullptr);
-        rows.back().hint = "The Oz held at the most (9,999,999)";
+        onOff(tr("Infinite HP"), &ch.hp, nullptr);
+        rows.back().hint = tr("The pair's HP never drops: the damage still shows, nobody falls");
+        onOff(tr("Infinite MP"), &ch.mp, nullptr);
+        rows.back().hint = tr("Genes cost no MP; the pair's MP stays full");
+        onOff(tr("Max Oz"), &ch.oz, nullptr);
+        rows.back().hint = tr("The Oz held at the most (9,999,999)");
         static const int kExp[] = {1, 2, 3, 5, 10};
-        value("EXP Multiplier", std::to_string(ch.exp) + "x", [&app](int dir) {
+        value(tr("EXP Multiplier"), std::to_string(ch.exp) + "x", [&app](int dir) {
             int i = 0;
             for (int k = 0; k < 5; ++k)
                 if (kExp[k] == app.cheats.exp) i = k;
             app.cheats.exp = kExp[(i + (dir ? dir : 1) + 5) % 5];
             saveMix(app);
         });
-        rows.back().hint = "The EXP a won battle gives, multiplied";
-        onOff("Always First Strike", &ch.firstStrike, nullptr);
-        rows.back().hint = "Every random encounter starts with the party's first strike - never an ambush";
-        onOff("No Random Battles", &ch.noEncounters, nullptr);
-        rows.back().hint = "No random encounters on the field (the story's battles still come)";
-        onOff("One-Hit Kills", &ch.oneHit, nullptr);
-        rows.back().hint = "Any blow, gene or ability of the pair's that hurts an enemy fells it";
-        onOff("Full Break Gauge", &ch.fullBreak, nullptr);
-        rows.back().hint = "The Break gauge the pair's and full from the first turn - it never changes hands";
+        rows.back().hint = tr("The EXP a won battle gives, multiplied");
+        onOff(tr("Always First Strike"), &ch.firstStrike, nullptr);
+        rows.back().hint = tr("Every random encounter starts with the party's first strike - never an ambush");
+        onOff(tr("No Random Battles"), &ch.noEncounters, nullptr);
+        rows.back().hint = tr("No random encounters on the field (the story's battles still come)");
+        onOff(tr("One-Hit Kills"), &ch.oneHit, nullptr);
+        rows.back().hint = tr("Any blow, gene or ability of the pair's that hurts an enemy fells it");
+        onOff(tr("Full Break Gauge"), &ch.fullBreak, nullptr);
+        rows.back().hint = tr("The Break gauge the pair's and full from the first turn - it never changes hands");
         break;
     }
     default: { // Graphics: what the Vulkan renderer adds
         const bool scalable = app.renderer.scalable();
         const std::string why = app.renderer.upscalerProblem(kUpscaler[std::clamp(v.upscaler, 0, kUpscalers - 1)]);
         auto unavailable = [&](OptRow& r) {
-            if (v.upscaler && !why.empty()) r.hint = std::string(kUpscalerName[v.upscaler]) + " is off here: " + why;
+            if (v.upscaler && !why.empty()) r.hint = trf("{0} is off here: {1}", {kUpscalerName[v.upscaler], tr(why)});
         };
-        value("Render Scale", scalable ? std::to_string(v.renderScale) + "%" : "100%", [&app](int dir) {
+        value(tr("Render Scale"), scalable ? std::to_string(v.renderScale) + "%" : "100%", [&app](int dir) {
             if (app.renderer.scalable()) adjustVideo(app, 4, dir ? dir : 1);
         });
         rows.back().enabled = scalable;
-        rows.back().hint = scalable ? "The frame at this size, then scaled to the window" : "Needs the Vulkan renderer";
+        rows.back().hint = scalable ? tr("The frame at this size, then scaled to the window") : tr("Needs the Vulkan renderer");
         const std::string na = v.upscaler && !why.empty() ? " n/a" : ""; // chosen, but can't run here
-        value("Anti-aliasing", scalable ? aaName(v) + na : "Off", [&app](int dir) {
+        value(tr("Anti-aliasing"), scalable ? aaName(v) + na : tr("Off"), [&app](int dir) {
             if (app.renderer.scalable()) adjustVideo(app, 8, dir ? dir : 1);
         });
         rows.back().enabled = scalable;
-        rows.back().hint = !scalable ? "Needs the Vulkan renderer"
-                           : v.upscaler ? "Temporal: jittered frames accumulated (MSAA is off meanwhile)"
-                                        : "MSAA, or FSR Native AA / DLAA at full resolution";
+        rows.back().hint = !scalable ? tr("Needs the Vulkan renderer")
+                           : v.upscaler ? tr("Temporal: jittered frames accumulated (MSAA is off meanwhile)")
+                                        : tr("MSAA, or FSR Native AA / DLAA at full resolution");
         unavailable(rows.back());
-        value("Upscaler", scalable ? kUpscalerName[v.upscaler] + na : "Off", [&app](int dir) {
+        value(tr("Upscaler"), scalable ? tr(kUpscalerName[v.upscaler]) + na : tr("Off"), [&app](int dir) {
             if (app.renderer.scalable()) adjustVideo(app, 9, dir ? dir : 1);
         });
         rows.back().enabled = scalable;
-        rows.back().hint = "The scene renders smaller and is reconstructed; the menus stay sharp";
+        rows.back().hint = tr("The scene renders smaller and is reconstructed; the menus stay sharp");
         unavailable(rows.back());
-        value("Upscale Mode", v.upscaler == 2 && v.upscaleMode == 0 ? "DLAA" : kUpscaleModes[v.upscaleMode].name,
+        value(tr("Upscale Mode"), v.upscaler == 2 && v.upscaleMode == 0 ? "DLAA" : tr(kUpscaleModes[v.upscaleMode].name),
               [&app](int dir) {
                   if (app.video.upscaler) adjustVideo(app, 10, dir ? dir : 1);
               });
@@ -1262,11 +1278,11 @@ std::vector<OptRow> optionRows(App& app, int page) {
             SDL_snprintf(h, sizeof h, "The scene at %d%% of the frame per side", int(100.0f / ratio + 0.5f));
             rows.back().hint = h;
         }
-        value("Sharpness", std::to_string(v.sharpness) + "%", [&app](int dir) {
+        value(tr("Sharpness"), std::to_string(v.sharpness) + "%", [&app](int dir) {
             if (app.video.upscaler == 1 || app.video.upscaler == 4) adjustVideo(app, 11, dir ? dir : 1);
         });
         rows.back().enabled = scalable && (v.upscaler == 1 || v.upscaler == 4);
-        rows.back().hint = "FSR's sharpening pass (RCAS); DLSS has none";
+        rows.back().hint = tr("FSR's sharpening pass (RCAS); DLSS has none");
         break;
     }
     }
@@ -1439,6 +1455,8 @@ void drawOptions(App& app, float, float) {
     cr::MenuPainter& m = app.menu;
     if (optionsAbout(app)) return; // (OptionPrc 0..2: the message window alone - drawManual)
     m.begin(r, app.windowTex, &app.font);
+    // (a translation the font can't draw - a menu language other than the text's - shown in English)
+    uitext::setCoverage([&app](const std::string& s) { return app.font.covers(s); }, app.font.generation());
     const PhoneFit phoneFit(app, m); // the iPhone layout: its screen's menu coordinates
     // Behind the menu: the scene under the menu mask (drawFrame's drawMenuMask)
     r.setOrigin(r.uiX());
@@ -1452,12 +1470,12 @@ void drawOptions(App& app, float, float) {
     { // (the port's: a darker panel under the page's name, the rows and the help line - readable
       // over any scene - and the help's lines)
         const float shade[4] = {0, 0, 0, 0.5f * a}, fade[4] = {0, 0, 0, 0.2f * a};
-        const float nameW = m.textWidth(kOptionPageName[app.optionsPage], 16);
+        const float nameW = m.textWidth(tr(kOptionPageName[app.optionsPage]), 16);
         m.quad(228, 10, nameW + 16, 24, shade, shade);
         m.quad(12, kOptRowTop - 8, 250, optRowY(shown) + 42 - kOptRowTop, shade, shade);
         m.quad(262, kOptRowTop - 8, 238, optRowY(shown) + 42 - kOptRowTop, shade, fade);
     }
-    m.text(kOptionPageName[app.optionsPage], 236, 14, false, a, 16);
+    m.text(tr(kOptionPageName[app.optionsPage]), 236, 14, false, a, 16);
     for (int i = app.optionsScroll; i < n && i < app.optionsScroll + kOptVisible; ++i) {
         const OptRow& row = rows[size_t(i)];
         const float y = optRowY(i - app.optionsScroll), mid = y + 12;

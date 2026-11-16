@@ -552,6 +552,7 @@ bool cjkLanguage(int language) { return language == 0 || language >= 5; }
 // menus' text (_MuComFont*Regist) is 14 pt, in 3.1.0 13 for the Latin languages.
 void applyLanguage(App& app) {
     if (!languageUsable(app, app.language)) app.language = 1;
+    applyUiLanguage(app); // ("auto": the port's own text follows)
     static const char* const kRegion[cr::kLanguages] = {"JP", "JP", "JP", "JP", "JP", "SC", "TC", "KR"};
     // Your own font (font/ in the game folder - cr::ownFont): over the Vita copy's faces and the system's (CR_FONT over
     // it) - for Japanese, Chinese and Korean the first with their glyphs, else the first; in Noto Sans CJK's line box,

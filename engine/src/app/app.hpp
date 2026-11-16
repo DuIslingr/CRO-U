@@ -59,6 +59,7 @@
 #include "platform/input_cancel.hpp"
 #include "platform/atomic_file.hpp"
 #include "platform/lifecycle_clock.hpp"
+#include "platform/ui_text.hpp"
 #include "scene/pose.hpp"
 
 #ifndef SDL_MAIN_USE_CALLBACKS
@@ -70,6 +71,9 @@ extern "C" SDL_AppResult SDLCALL SDL_AppEvent(void* appstate, SDL_Event* event);
 #endif
 
 namespace crapp {
+
+using uitext::tr; // the port's own text in the player's language (platform/ui_text.hpp)
+using uitext::trf;
 
 enum class Mode { Textures, Models, Maps };
 
@@ -295,6 +299,7 @@ struct App {
     std::string modelsDir;                 // replacement models: models/hd/ in the game folder, or CR_HD_MODELS
     int hdModelsLoaded = 0;                // since startup
     int language = 1;                      // text language (cr::kLanguageName): English by default
+    std::string uiLang = "auto";           // the port's own text (platform/ui_text.hpp): "auto" (the text language's) or a code
     cr::Font font;                         // system font for the game's text (all languages)
     struct VoiceCue { int at = 0, clip = -1; }; // PrcMsg 0x1e at `at` characters of the page (clip -1: 0xffff, keep)
     std::vector<std::vector<VoiceCue>> dialogueVoices; // per page: the voice clips it starts, in typing order
@@ -1278,8 +1283,8 @@ struct UpscaleMode {
     float ratio;
 };
 constexpr UpscaleMode kUpscaleModes[] = {
-    {"Native AA", 1.0f}, {"Quality", 1.5f}, {"Balanced", 1.7f}, {"Performance", 2.0f}, {"Ultra Perf.", 3.0f}};
-constexpr const char* kUpscalerName[] = {"Off", "FSR 3.1", "DLSS", "MetalFX", "FSR 4"};
+    {N_("Native AA"), 1.0f}, {N_("Quality"), 1.5f}, {N_("Balanced"), 1.7f}, {N_("Performance"), 2.0f}, {N_("Ultra Perf."), 3.0f}};
+constexpr const char* kUpscalerName[] = {N_("Off"), "FSR 3.1", "DLSS", "MetalFX", "FSR 4"};
 constexpr cr::Upscaler kUpscaler[] = {cr::Upscaler::Off, cr::Upscaler::Fsr3, cr::Upscaler::Dlss, cr::Upscaler::MetalFx, cr::Upscaler::Fsr4};
 constexpr int kUpscalers = 5;
 // (MetalFX is Apple's own, FSR 4 - AMD's DLLs in fsr4/ - Linux's and Windows': the options step over the other's slot)
@@ -1956,6 +1961,10 @@ void stepExamineWindows(App& app);
 const cr::FieldNpc* interactTarget(const App& app);
 bool interact(App& app, bool instant = false);
 bool languageUsable(const App& app, int language);
+// The port's own text (platform/ui_text.hpp): its catalogs' folders and, before the settings are read (the
+// first start's setup), the language settings.ini names - the system's on a first start; then uiLang's
+void startUiText(App& app);
+void applyUiLanguage(App& app);
 bool multilingualData(const App& app);
 bool cjkLanguage(int language);
 void applyLanguage(App& app);
