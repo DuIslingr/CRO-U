@@ -286,6 +286,7 @@ struct App {
         int sharpness = 25;                // % (FSR's RCAS pass; 0 = none)
         bool hdTextures = false;           // upscaled replacements from hdDir (what loads next)
         bool avoidCutout = true;           // phones: the layout kept clear of a camera's notch / punch hole (Options, Display)
+        bool cutoutBars = false;           // ... and the picture too: boxed inside the safe area, black bars over the cutout
         int smoothModels = 0;              // 0 off, 2 / 3: PN-triangle level for characters and monsters
         bool hdModels = false;             // replacement models from modelsDir (glTF; what loads next)
         int anisotropy = 16;               // anisotropic filtering's samples on the mipmapped textures (1 off)

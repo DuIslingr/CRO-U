@@ -181,6 +181,8 @@ public:
     // a phone's or tablet's: widescreen goes narrower than the layout's own shape (down to 4:3) - the picture fills
     // the screen, the interface is drawn smaller where it doesn't fit (applyVideo; CR_PHONE_FILL for tests)
     void setFillScreen(bool on) { fillScreen_ = on; }
+    // Options' Camera Cutout, Black Bars: the whole logical screen inside the safe area (bars beside it), not only the interface
+    void setCutoutBars(bool on) { cutoutBars_ = on; }
     float interfaceShrink() const { return uiShrink_; } // (1 unless a camera's cutout reaches into the interface)
 
 private:
@@ -192,6 +194,7 @@ private:
     float uiShrink_ = 1;
     bool pictureLayer_ = false;
     bool fillScreen_ = false;
+    bool cutoutBars_ = false;
     void interfaceRect(float& x, float& y, float& w, float& h) const;
 
     std::unique_ptr<RenderDevice> dev_;

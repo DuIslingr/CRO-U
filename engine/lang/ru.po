@@ -8,32 +8,32 @@ msgstr ""
 "X-Language-Name: Русский\n"
 "Last-Translator: metastigma (the Options' strings, CRO-U-metastigma PR #51); Claude (the rest, machine translation, unreviewed)\n"
 
-#: src/app/app.hpp:1297
+#: src/app/app.hpp:1298
 msgid "Native AA"
 msgstr "Нативный AA"
 
-#: src/app/app.hpp:1297
+#: src/app/app.hpp:1298
 msgid "Quality"
 msgstr "Качество"
 
-#: src/app/app.hpp:1297
+#: src/app/app.hpp:1298
 msgid "Balanced"
 msgstr "Баланс"
 
-#: src/app/app.hpp:1297
+#: src/app/app.hpp:1298
 msgid "Performance"
 msgstr "Производительность"
 
-#: src/app/app.hpp:1297
+#: src/app/app.hpp:1298
 msgid "Ultra Perf."
 msgstr "Ультра-произв."
 
-#: src/app/app.hpp:1298 src/app/scene_fx.cpp:803 src/app/scene_fx.cpp:1106 src/app/scene_fx.cpp:1212
-#: src/app/scene_fx.cpp:1218 src/app/scene_fx.cpp:1268 src/app/scene_fx.cpp:1276
+#: src/app/app.hpp:1299 src/app/scene_fx.cpp:843 src/app/scene_fx.cpp:1146 src/app/scene_fx.cpp:1258
+#: src/app/scene_fx.cpp:1264 src/app/scene_fx.cpp:1314 src/app/scene_fx.cpp:1322
 msgid "Off"
 msgstr "Выкл."
 
-#: src/app/explore.cpp:3997 src/app/explore.cpp:4005 src/app/scene_fx.cpp:1039
+#: src/app/explore.cpp:4003 src/app/explore.cpp:4011 src/app/scene_fx.cpp:1079
 msgid "Menu Language"
 msgstr "Язык интерфейса"
 
@@ -45,463 +45,467 @@ msgstr "{0} (фанатский перевод)"
 msgid "Fan translation"
 msgstr "Фанатский перевод"
 
-#: src/app/scene_fx.cpp:1024
+#: src/app/scene_fx.cpp:1064
 msgid "Text Language"
 msgstr "Язык игровых текстов"
 
-#: src/app/scene_fx.cpp:1037
+#: src/app/scene_fx.cpp:1077
 msgid "Auto ({0})"
 msgstr "Авто ({0})"
 
-#: src/app/scene_fx.cpp:1049
+#: src/app/scene_fx.cpp:1089
 msgid ""
 "The language of the port's own text - these options and its messages; Auto: the text language's"
 msgstr ""
 "Язык собственных текстов порта — этих настроек и его сообщений; «Авто»: как язык игровых текстов"
 
-#: src/app/scene_fx.cpp:1054
+#: src/app/scene_fx.cpp:1094
 msgid "Control Hints"
 msgstr "Подсказки управления"
 
-#: src/app/scene_fx.cpp:1055
+#: src/app/scene_fx.cpp:1095
 msgid ""
 "Show the control hints and status overlay. Off hides the WASD help; F3 is a shortcut."
 msgstr ""
 "Показывать подсказки управления и строку состояния. «Выкл.» скрывает справку WASD; F3 переключает их отображение."
 
-#: src/app/scene_fx.cpp:1056
+#: src/app/scene_fx.cpp:1096
 msgid "Import Vita Saves"
 msgstr "Импорт сохранений Vita"
 
-#: src/app/scene_fx.cpp:1056
+#: src/app/scene_fx.cpp:1096
 msgid "Choose Folder"
 msgstr "Выбрать папку"
 
-#: src/app/scene_fx.cpp:1060
+#: src/app/scene_fx.cpp:1100
 msgid ""
 "Choose your decrypted Vita save export. Existing saves will be backed up."
 msgstr ""
 "Выберите папку с расшифрованными сохранениями Vita. Для существующих сохранений будет создана резервная копия."
 
-#: src/app/scene_fx.cpp:1061
+#: src/app/scene_fx.cpp:1101
 msgid "Import saves from the title screen's Options."
 msgstr "Импорт сохранений доступен в настройках на главном экране."
 
-#: src/app/scene_fx.cpp:1063 src/app/scene_fx.cpp:1084
+#: src/app/scene_fx.cpp:1103 src/app/scene_fx.cpp:1124
 msgid "None"
 msgstr "Нет"
 
-#: src/app/scene_fx.cpp:1070 src/app/scene_fx.cpp:1091
+#: src/app/scene_fx.cpp:1110 src/app/scene_fx.cpp:1131
 msgid "The game's data"
 msgstr "Данные игры"
 
-#: src/app/scene_fx.cpp:1071 src/app/scene_fx.cpp:1092
+#: src/app/scene_fx.cpp:1111 src/app/scene_fx.cpp:1132
 msgid "{0} (next start)"
 msgstr "{0} (после перезапуска)"
 
-#: src/app/scene_fx.cpp:1072 src/app/scene_fx.cpp:1093
+#: src/app/scene_fx.cpp:1112 src/app/scene_fx.cpp:1133
 msgid "{0} (not found)"
 msgstr "{0} (не найдено)"
 
-#: src/app/scene_fx.cpp:1073
+#: src/app/scene_fx.cpp:1113
 msgid "Vita Assets"
 msgstr "Ресурсы Vita"
 
-#: src/app/scene_fx.cpp:1079
+#: src/app/scene_fx.cpp:1119
 msgid "Running from the Vita copy alone: {0}"
 msgstr "Игра запущена только из копии Vita: {0}"
 
-#: src/app/scene_fx.cpp:1081
+#: src/app/scene_fx.cpp:1121
 msgid ""
 "Enter: your Vita copy's PCSG00499 folder - its textures, voices, music and scripts; Left / Right: none"
 msgstr ""
 "Enter: папка PCSG00499 копии Vita — её текстуры, голоса, музыка и скрипты; влево / вправо: нет"
 
-#: src/app/scene_fx.cpp:1094
+#: src/app/scene_fx.cpp:1134
 msgid "Android Assets"
 msgstr "Ресурсы Android"
 
-#: src/app/scene_fx.cpp:1100
+#: src/app/scene_fx.cpp:1140
 msgid "Running from the Android release alone: {0}"
 msgstr "Игра запущена только из копии Android: {0}"
 
-#: src/app/scene_fx.cpp:1102
+#: src/app/scene_fx.cpp:1142
 msgid ""
 "Enter: a folder with your Android copy's main.*.obb and its APK - its textures and the art only it has; Left / Right: none"
 msgstr ""
 "Enter: папка с main.*.obb и APK копии Android — её текстуры и графика, которой больше нигде нет; влево / вправо: нет"
 
-#: src/app/scene_fx.cpp:1112
+#: src/app/scene_fx.cpp:1152
 msgid "Field Speed"
 msgstr "Скорость передвижения"
 
-#: src/app/scene_fx.cpp:1112
+#: src/app/scene_fx.cpp:1152
 msgid ""
 "Walking the field 2 .. 5 times as fast - the scenes, talk and menus as they are"
 msgstr ""
 "Передвижение по локации в 2–5 раз быстрее; сцены, диалоги и меню идут в обычном темпе"
 
-#: src/app/scene_fx.cpp:1113
+#: src/app/scene_fx.cpp:1153
 msgid "Battle Speed"
 msgstr "Скорость боя"
 
-#: src/app/scene_fx.cpp:1113
+#: src/app/scene_fx.cpp:1153
 msgid "The battles 2 .. 5 times as fast"
 msgstr "Сражения проходят в 2–5 раз быстрее"
 
-#: src/app/scene_fx.cpp:1115
+#: src/app/scene_fx.cpp:1155
 msgid "Swap ○ and ×"
 msgstr "Поменять местами ○ и ×"
 
-#: src/app/scene_fx.cpp:1124
+#: src/app/scene_fx.cpp:1164
 msgid "Controller: {0}."
 msgstr "Геймпад: {0}."
 
-#: src/app/scene_fx.cpp:1124
+#: src/app/scene_fx.cpp:1164
 msgid "With a controller:"
 msgstr "При использовании геймпада:"
 
-#: src/app/scene_fx.cpp:1125
+#: src/app/scene_fx.cpp:1165
 msgid ""
 "○ (the right button) confirms, × (the bottom one) goes back - as on the Vita"
 msgstr ""
 "○ (правая кнопка) подтверждает, × (нижняя) возвращает назад — как на Vita"
 
-#: src/app/scene_fx.cpp:1126
+#: src/app/scene_fx.cpp:1166
 msgid "× (the bottom button) confirms, ○ (the right one) goes back"
 msgstr "× (нижняя кнопка) подтверждает, ○ (правая) возвращает назад"
 
-#: src/app/scene_fx.cpp:1145
+#: src/app/scene_fx.cpp:1185
 msgid "Master Volume"
 msgstr "Общая громкость"
 
-#: src/app/scene_fx.cpp:1148
+#: src/app/scene_fx.cpp:1188
 msgid "Voice Volume"
 msgstr "Громкость голосов"
 
-#: src/app/scene_fx.cpp:1151
+#: src/app/scene_fx.cpp:1191
 msgid "Sound Test"
 msgstr "Проверка звука"
 
-#: src/app/scene_fx.cpp:1162
-msgid "Camera Cutout"
-msgstr "Вырез камеры"
-
-#: src/app/scene_fx.cpp:1162
+#: src/app/scene_fx.cpp:1203
 msgid "Avoid"
 msgstr "Обходить"
 
-#: src/app/scene_fx.cpp:1162
+#: src/app/scene_fx.cpp:1203
+msgid "Black Bars"
+msgstr "Чёрные полосы"
+
+#: src/app/scene_fx.cpp:1203
 msgid "Ignore"
 msgstr "Игнорировать"
 
-#: src/app/scene_fx.cpp:1166
-msgid ""
-"Avoid: the menus and buttons kept clear of the camera's notch or punch hole (the picture fills the screen either way). Ignore: they reach the edges too"
-msgstr ""
-"«Обходить»: меню и кнопки не заходят на вырез камеры (картинка в любом случае на весь экран). «Игнорировать»: доходят до краёв"
+#: src/app/scene_fx.cpp:1205
+msgid "Camera Cutout"
+msgstr "Вырез камеры"
 
-#: src/app/scene_fx.cpp:1168
+#: src/app/scene_fx.cpp:1211
+msgid ""
+"Avoid: the menus and buttons clear of the camera's notch or punch hole, the picture full. Black Bars: the whole picture clear of it. Ignore: everything to the edges"
+msgstr ""
+"Обходить: меню и кнопки в стороне от выреза камеры, картинка во весь экран. Чёрные полосы: вся картинка в стороне. Игнорировать: всё до краёв"
+
+#: src/app/scene_fx.cpp:1214
 msgid "Window"
 msgstr "Окно"
 
-#: src/app/scene_fx.cpp:1168
+#: src/app/scene_fx.cpp:1214
 msgid "Fullscreen"
 msgstr "Полный экран"
 
-#: src/app/scene_fx.cpp:1168
+#: src/app/scene_fx.cpp:1214
 msgid "Borderless"
 msgstr "Без рамки"
 
-#: src/app/scene_fx.cpp:1169
+#: src/app/scene_fx.cpp:1215
 msgid "Resolution"
 msgstr "Разрешение"
 
-#: src/app/scene_fx.cpp:1169
+#: src/app/scene_fx.cpp:1215
 msgid "Desktop"
 msgstr "Как на рабочем столе"
 
-#: src/app/scene_fx.cpp:1172
+#: src/app/scene_fx.cpp:1218
 msgid "Aspect"
 msgstr "Соотношение сторон"
 
-#: src/app/scene_fx.cpp:1172
+#: src/app/scene_fx.cpp:1218
 msgid "Wide"
 msgstr "Широкий"
 
-#: src/app/scene_fx.cpp:1176
+#: src/app/scene_fx.cpp:1222
 msgid "Auto"
 msgstr "Авто"
 
-#: src/app/scene_fx.cpp:1177
+#: src/app/scene_fx.cpp:1223
 msgid "Layout"
 msgstr "Макет экрана"
 
-#: src/app/scene_fx.cpp:1178
+#: src/app/scene_fx.cpp:1224
 msgid ""
 "The screens' layout: the iPad release's (4:3), the iPhone's (3:2), the Vita's or the Android release's (16:9, its screens centred); Auto follows the data"
 msgstr ""
 "Макет экрана: iPad (4:3), iPhone (3:2), Vita или Android (16:9, по центру). «Авто» выбирает макет по используемым данным игры"
 
-#: src/app/scene_fx.cpp:1180
+#: src/app/scene_fx.cpp:1226
 msgid "Original"
 msgstr "Оригинал"
 
-#: src/app/scene_fx.cpp:1180
+#: src/app/scene_fx.cpp:1226
 msgid "Fill"
 msgstr "На весь экран"
 
-#: src/app/scene_fx.cpp:1181
+#: src/app/scene_fx.cpp:1227
 msgid "Painted Rooms"
 msgstr "Фоны локаций"
 
-#: src/app/scene_fx.cpp:1182
+#: src/app/scene_fx.cpp:1228
 msgid "VSync"
 msgstr "VSync"
 
-#: src/app/scene_fx.cpp:1183
+#: src/app/scene_fx.cpp:1229
 msgid "Frame Rate"
 msgstr "Ограничение кадров"
 
-#: src/app/scene_fx.cpp:1183
+#: src/app/scene_fx.cpp:1229
 msgid "Unlimited"
 msgstr "Без ограничений"
 
-#: src/app/scene_fx.cpp:1185
+#: src/app/scene_fx.cpp:1231
 msgid ""
 "Frames drawn a second at most; the game runs at its own 20 a second, shown moving between them"
 msgstr ""
 "Максимальная частота кадров. Логика игры обновляется 20 раз в секунду, движение между обновлениями плавное"
 
-#: src/app/scene_fx.cpp:1187
+#: src/app/scene_fx.cpp:1233
 msgid "Original Presentation"
 msgstr "Исходный вид"
 
-#: src/app/scene_fx.cpp:1188
+#: src/app/scene_fx.cpp:1234
 msgid "Every display and graphics option back to the original's"
 msgstr "Вернуть все параметры экрана и графики к исходным значениям"
 
-#: src/app/scene_fx.cpp:1194
+#: src/app/scene_fx.cpp:1240
 msgid "HD Textures"
 msgstr "Текстуры HD"
 
-#: src/app/scene_fx.cpp:1200
+#: src/app/scene_fx.cpp:1246
 msgid ""
 "waifu2x / Real-ESRGAN upscales from textures/hd (tools/hd_textures.py); from the next room on"
 msgstr ""
 "Увеличенные текстуры (waifu2x / Real-ESRGAN) из textures/hd (tools/hd_textures.py); со следующей локации"
 
-#: src/app/scene_fx.cpp:1201
+#: src/app/scene_fx.cpp:1247
 msgid "None in textures/hd yet: --export-textures, then tools/hd_textures.py"
 msgstr ""
 "В textures/hd пока нет замен: --export-textures, затем tools/hd_textures.py"
 
-#: src/app/scene_fx.cpp:1203
+#: src/app/scene_fx.cpp:1249
 msgid "HD Models"
 msgstr "Модели HD"
 
-#: src/app/scene_fx.cpp:1209
+#: src/app/scene_fx.cpp:1255
 msgid ""
 "Replacement models (glTF) from models/hd, in place of the game's; from the next room on"
 msgstr "Модели glTF из models/hd заменяют оригинальные; со следующей локации"
 
-#: src/app/scene_fx.cpp:1210
+#: src/app/scene_fx.cpp:1256
 msgid ""
 "None in models/hd yet: --export-models, edit in Blender, save as models/hd/<name>.glb"
 msgstr ""
 "В models/hd пока нет моделей: выполните --export-models, отредактируйте в Blender, сохраните как models/hd/<name>.glb"
 
-#: src/app/scene_fx.cpp:1212 src/app/scene_fx.cpp:1223
+#: src/app/scene_fx.cpp:1258 src/app/scene_fx.cpp:1269
 msgid "Smooth"
 msgstr "Сглаженная"
 
-#: src/app/scene_fx.cpp:1212
+#: src/app/scene_fx.cpp:1258
 msgid "Smoother"
 msgstr "Усиленная"
 
-#: src/app/scene_fx.cpp:1213
+#: src/app/scene_fx.cpp:1259
 msgid "Smooth Models"
 msgstr "Сглаживание моделей"
 
-#: src/app/scene_fx.cpp:1214
+#: src/app/scene_fx.cpp:1260
 msgid ""
 "Rounder models (4x / 9x triangles), hard edges kept; from the next room on"
 msgstr ""
 "Сглаживает геометрию моделей (в 4 или 9 раз больше треугольников), сохраняя жёсткие грани; со следующей локации"
 
-#: src/app/scene_fx.cpp:1215
+#: src/app/scene_fx.cpp:1261
 msgid ""
 "Rounds the models' silhouettes - characters, monsters, props, stages (PN triangles)"
 msgstr ""
 "Скругляет силуэты персонажей, монстров, предметов и локаций с помощью PN-треугольников"
 
-#: src/app/scene_fx.cpp:1218
+#: src/app/scene_fx.cpp:1264
 msgid "Anisotropic Filtering"
 msgstr "Анизотропная фильтрация"
 
-#: src/app/scene_fx.cpp:1221
+#: src/app/scene_fx.cpp:1267
 msgid "Textures stay sharp on floors and walls seen at an angle"
 msgstr "Сохраняет чёткость текстур пола и стен при взгляде под углом"
 
-#: src/app/scene_fx.cpp:1221
+#: src/app/scene_fx.cpp:1267
 msgid "Not on this GPU"
 msgstr "Не поддерживается этой видеокартой"
 
-#: src/app/scene_fx.cpp:1223
+#: src/app/scene_fx.cpp:1269
 msgid "Texture Filtering"
 msgstr "Фильтрация текстур"
 
-#: src/app/scene_fx.cpp:1223
+#: src/app/scene_fx.cpp:1269
 msgid "Sharp"
 msgstr "Чёткая"
 
-#: src/app/scene_fx.cpp:1226
+#: src/app/scene_fx.cpp:1272
 msgid ""
 "Sharp: the world's textures magnified by the nearest texel (square pixels up close)"
 msgstr ""
 "«Чёткая»: при увеличении текстур мира берётся ближайший тексель (вблизи пиксели квадратные)"
 
-#: src/app/scene_fx.cpp:1231
+#: src/app/scene_fx.cpp:1277
 msgid "Infinite HP"
 msgstr "Бесконечное здоровье"
 
-#: src/app/scene_fx.cpp:1232
+#: src/app/scene_fx.cpp:1278
 msgid "The pair's HP never drops: the damage still shows, nobody falls"
 msgstr ""
 "Здоровье пары не уменьшается: урон отображается, но никто из персонажей не выбывает"
 
-#: src/app/scene_fx.cpp:1233
+#: src/app/scene_fx.cpp:1279
 msgid "Infinite MP"
 msgstr "Бесконечная магия"
 
-#: src/app/scene_fx.cpp:1234
+#: src/app/scene_fx.cpp:1280
 msgid "Genes cost no MP; the pair's MP stays full"
 msgstr "Гены не расходуют MP: запас магии пары всегда полный"
 
-#: src/app/scene_fx.cpp:1235
+#: src/app/scene_fx.cpp:1281
 msgid "Max Oz"
 msgstr "Максимум Oz"
 
-#: src/app/scene_fx.cpp:1236
+#: src/app/scene_fx.cpp:1282
 msgid "The Oz held at the most (9,999,999)"
 msgstr "Количество Oz поддерживается на максимуме (9 999 999)"
 
-#: src/app/scene_fx.cpp:1238
+#: src/app/scene_fx.cpp:1284
 msgid "EXP Multiplier"
 msgstr "Множитель опыта"
 
-#: src/app/scene_fx.cpp:1245
+#: src/app/scene_fx.cpp:1291
 msgid "The EXP a won battle gives, multiplied"
 msgstr "Умножает количество опыта, получаемого за победу в бою"
 
-#: src/app/scene_fx.cpp:1246
+#: src/app/scene_fx.cpp:1292
 msgid "Always First Strike"
 msgstr "Всегда первый удар"
 
-#: src/app/scene_fx.cpp:1247
+#: src/app/scene_fx.cpp:1293
 msgid ""
 "Every random encounter starts with the party's first strike - never an ambush"
 msgstr "В случайных боях группа всегда атакует первой и не попадает в засаду"
 
-#: src/app/scene_fx.cpp:1248
+#: src/app/scene_fx.cpp:1294
 msgid "No Random Battles"
 msgstr "Без случайных боёв"
 
-#: src/app/scene_fx.cpp:1249
+#: src/app/scene_fx.cpp:1295
 msgid "No random encounters on the field (the story's battles still come)"
 msgstr "Отключает случайные бои на локациях; сюжетные сражения остаются"
 
-#: src/app/scene_fx.cpp:1250
+#: src/app/scene_fx.cpp:1296
 msgid "One-Hit Kills"
 msgstr "Убийство одним ударом"
 
-#: src/app/scene_fx.cpp:1251
+#: src/app/scene_fx.cpp:1297
 msgid "Any blow, gene or ability of the pair's that hurts an enemy fells it"
 msgstr ""
 "Любая атака, ген или умение пары, наносящие урон врагу, побеждают его одним ударом"
 
-#: src/app/scene_fx.cpp:1252
+#: src/app/scene_fx.cpp:1298
 msgid "Full Break Gauge"
 msgstr "Полная шкала прорыва"
 
-#: src/app/scene_fx.cpp:1253
+#: src/app/scene_fx.cpp:1299
 msgid ""
 "The Break gauge the pair's and full from the first turn - it never changes hands"
 msgstr ""
 "Шкала прорыва пары заполнена с первого хода и никогда не переходит к противнику"
 
-#: src/app/scene_fx.cpp:1260
+#: src/app/scene_fx.cpp:1306
 msgid "{0} is off here: {1}"
 msgstr "{0} недоступен в этой конфигурации: {1}"
 
-#: src/app/scene_fx.cpp:1262
+#: src/app/scene_fx.cpp:1308
 msgid "Render Scale"
 msgstr "Масштаб рендеринга"
 
-#: src/app/scene_fx.cpp:1266
+#: src/app/scene_fx.cpp:1312
 msgid "The frame at this size, then scaled to the window"
 msgstr ""
 "Кадр рендерится в этом разрешении, затем масштабируется до размера окна"
 
-#: src/app/scene_fx.cpp:1266 src/app/scene_fx.cpp:1272
+#: src/app/scene_fx.cpp:1312 src/app/scene_fx.cpp:1318
 msgid "Needs the Vulkan renderer"
 msgstr "Требуется рендерер Vulkan"
 
-#: src/app/scene_fx.cpp:1268
+#: src/app/scene_fx.cpp:1314
 msgid "Anti-aliasing"
 msgstr "Сглаживание"
 
-#: src/app/scene_fx.cpp:1273
+#: src/app/scene_fx.cpp:1319
 msgid "Temporal: jittered frames accumulated (MSAA is off meanwhile)"
 msgstr ""
 "Временное: накапливаются кадры со смещением субпиксельной выборки (MSAA на это время отключается)"
 
-#: src/app/scene_fx.cpp:1274
+#: src/app/scene_fx.cpp:1320
 msgid "MSAA, or FSR Native AA / DLAA at full resolution"
 msgstr "MSAA или FSR Native AA / DLAA в полном разрешении"
 
-#: src/app/scene_fx.cpp:1276
+#: src/app/scene_fx.cpp:1322
 msgid "Upscaler"
 msgstr "Масштабирование"
 
-#: src/app/scene_fx.cpp:1280
+#: src/app/scene_fx.cpp:1326
 msgid "The scene renders smaller and is reconstructed; the menus stay sharp"
 msgstr ""
 "Сцена рендерится в меньшем разрешении и восстанавливается; меню остаются чёткими"
 
-#: src/app/scene_fx.cpp:1282
+#: src/app/scene_fx.cpp:1328
 msgid "Upscale Mode"
 msgstr "Режим масштабирования"
 
-#: src/app/scene_fx.cpp:1293
+#: src/app/scene_fx.cpp:1339
 msgid "Sharpness"
 msgstr "Резкость"
 
-#: src/app/scene_fx.cpp:1297
+#: src/app/scene_fx.cpp:1343
 msgid "FSR's sharpening pass (RCAS); DLSS has none"
 msgstr "Этап повышения резкости FSR (RCAS); в DLSS его нет"
 
-#: src/app/scene_fx.cpp:910
+#: src/app/scene_fx.cpp:950
 msgid "Game"
 msgstr "Игра"
 
-#: src/app/scene_fx.cpp:910
+#: src/app/scene_fx.cpp:950
 msgid "Sound"
 msgstr "Звук"
 
-#: src/app/scene_fx.cpp:910 src/app/scene_fx.cpp:1171
+#: src/app/scene_fx.cpp:950 src/app/scene_fx.cpp:1217
 msgid "Display"
 msgstr "Экран"
 
-#: src/app/scene_fx.cpp:910
+#: src/app/scene_fx.cpp:950
 msgid "Detail"
 msgstr "Детализация"
 
-#: src/app/scene_fx.cpp:910
+#: src/app/scene_fx.cpp:950
 msgid "Cheats"
 msgstr "Читы"
 
-#: src/app/scene_fx.cpp:910
+#: src/app/scene_fx.cpp:950
 msgid "Graphics"
 msgstr "Графика"
 

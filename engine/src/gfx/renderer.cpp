@@ -216,9 +216,18 @@ void Renderer::mapScreen(int drawableW, int drawableH) {
     // under the iPhone layout's 3:2: the picture to its edges, the interface drawn a little smaller to fit -
     // interfaceRect)
     const float narrowest = fillScreen_ ? std::min(least, 4.0f / 3.0f) : least;
-    const float aspect = widescreen_ ? std::clamp(windowAspect_, narrowest, 21.0f / 9.0f) : fixed;
+    // (Camera Cutout's Black Bars: the frame less the cutout's side and top insets, as wide again on the other side -
+    // the picture centred and boxed clear of it; the bottom's home indicator is no camera)
+    float fitW = float(frameW_), fitH = float(frameH_);
+    if (cutoutBars_) {
+        const float k = float(frameW_) / float(windowW_);
+        const float side = std::max(safeL_, safeR_) * k, top = safeT_ * k;
+        if (fitW > 4 * side) fitW -= 2 * side;
+        if (fitH > 4 * top) fitH -= 2 * top;
+    }
+    const float aspect = widescreen_ ? std::clamp(cutoutBars_ ? fitW / fitH : windowAspect_, narrowest, 21.0f / 9.0f) : fixed;
     screenW_ = kLogicalH * aspect;
-    const float sx = float(frameW_) / screenW_, sy = float(frameH_) / kLogicalH;
+    const float sx = fitW / screenW_, sy = fitH / kLogicalH;
     scale_ = sx < sy ? sx : sy;
     // The display's safe area (a camera's notch or punch hole) leaves the picture alone: the scene, the
     // backgrounds and the full-screen art fill the screen. The interface keeps off it: where the cutout
@@ -284,7 +293,9 @@ void Renderer::resetHistory() {
 
 void Renderer::endFrame(bool present) {
     endScene();
-    if (phone_) { // the iPad layout's margins land outside the 3:2 screen: keep the bars black
+    // the iPad layout's margins land outside the 3:2 screen, and Camera Cutout's Black Bars box the picture (a
+    // painted room reaches past the screen otherwise - over the cutout): keep the bars black
+    if (phone_ || cutoutBars_) {
         const float l = -offX_ / scaleX_, r = (drawableW_ - offX_) / scaleX_;
         const float t = -offY_ / scaleY_, b = (drawableH_ - offY_) / scaleY_;
         auto bar = [&](float x0, float y0, float x1, float y1) {

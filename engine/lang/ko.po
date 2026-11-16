@@ -8,32 +8,32 @@ msgstr ""
 "X-Language-Name: 한국어\n"
 "Last-Translator: Claude (machine translation, unreviewed)\n"
 
-#: src/app/app.hpp:1297
+#: src/app/app.hpp:1298
 msgid "Native AA"
 msgstr "네이티브 AA"
 
-#: src/app/app.hpp:1297
+#: src/app/app.hpp:1298
 msgid "Quality"
 msgstr "품질"
 
-#: src/app/app.hpp:1297
+#: src/app/app.hpp:1298
 msgid "Balanced"
 msgstr "균형"
 
-#: src/app/app.hpp:1297
+#: src/app/app.hpp:1298
 msgid "Performance"
 msgstr "성능"
 
-#: src/app/app.hpp:1297
+#: src/app/app.hpp:1298
 msgid "Ultra Perf."
 msgstr "울트라 성능"
 
-#: src/app/app.hpp:1298 src/app/scene_fx.cpp:803 src/app/scene_fx.cpp:1106 src/app/scene_fx.cpp:1212
-#: src/app/scene_fx.cpp:1218 src/app/scene_fx.cpp:1268 src/app/scene_fx.cpp:1276
+#: src/app/app.hpp:1299 src/app/scene_fx.cpp:843 src/app/scene_fx.cpp:1146 src/app/scene_fx.cpp:1258
+#: src/app/scene_fx.cpp:1264 src/app/scene_fx.cpp:1314 src/app/scene_fx.cpp:1322
 msgid "Off"
 msgstr "끄기"
 
-#: src/app/explore.cpp:3997 src/app/explore.cpp:4005 src/app/scene_fx.cpp:1039
+#: src/app/explore.cpp:4003 src/app/explore.cpp:4011 src/app/scene_fx.cpp:1079
 msgid "Menu Language"
 msgstr "메뉴 언어"
 
@@ -45,444 +45,448 @@ msgstr "{0} (팬 번역)"
 msgid "Fan translation"
 msgstr "팬 번역"
 
-#: src/app/scene_fx.cpp:1024
+#: src/app/scene_fx.cpp:1064
 msgid "Text Language"
 msgstr "텍스트 언어"
 
-#: src/app/scene_fx.cpp:1037
+#: src/app/scene_fx.cpp:1077
 msgid "Auto ({0})"
 msgstr "자동 ({0})"
 
-#: src/app/scene_fx.cpp:1049
+#: src/app/scene_fx.cpp:1089
 msgid ""
 "The language of the port's own text - these options and its messages; Auto: the text language's"
 msgstr "이식판 자체 텍스트(이 옵션과 메시지)의 언어. 자동: 텍스트 언어를 따름"
 
-#: src/app/scene_fx.cpp:1054
+#: src/app/scene_fx.cpp:1094
 msgid "Control Hints"
 msgstr "조작 힌트"
 
-#: src/app/scene_fx.cpp:1055
+#: src/app/scene_fx.cpp:1095
 msgid ""
 "Show the control hints and status overlay. Off hides the WASD help; F3 is a shortcut."
 msgstr "조작 힌트와 상태 표시를 보여 줍니다. 끄면 WASD 도움말이 숨겨집니다. F3로 전환"
 
-#: src/app/scene_fx.cpp:1056
+#: src/app/scene_fx.cpp:1096
 msgid "Import Vita Saves"
 msgstr "Vita 세이브 가져오기"
 
-#: src/app/scene_fx.cpp:1056
+#: src/app/scene_fx.cpp:1096
 msgid "Choose Folder"
 msgstr "폴더 선택"
 
-#: src/app/scene_fx.cpp:1060
+#: src/app/scene_fx.cpp:1100
 msgid ""
 "Choose your decrypted Vita save export. Existing saves will be backed up."
 msgstr "복호화된 Vita 세이브 데이터 폴더를 선택하세요. 기존 세이브는 백업됩니다."
 
-#: src/app/scene_fx.cpp:1061
+#: src/app/scene_fx.cpp:1101
 msgid "Import saves from the title screen's Options."
 msgstr "세이브는 타이틀 화면의 옵션에서 가져올 수 있습니다."
 
-#: src/app/scene_fx.cpp:1063 src/app/scene_fx.cpp:1084
+#: src/app/scene_fx.cpp:1103 src/app/scene_fx.cpp:1124
 msgid "None"
 msgstr "없음"
 
-#: src/app/scene_fx.cpp:1070 src/app/scene_fx.cpp:1091
+#: src/app/scene_fx.cpp:1110 src/app/scene_fx.cpp:1131
 msgid "The game's data"
 msgstr "게임 데이터"
 
-#: src/app/scene_fx.cpp:1071 src/app/scene_fx.cpp:1092
+#: src/app/scene_fx.cpp:1111 src/app/scene_fx.cpp:1132
 msgid "{0} (next start)"
 msgstr "{0} (다음 실행 시)"
 
-#: src/app/scene_fx.cpp:1072 src/app/scene_fx.cpp:1093
+#: src/app/scene_fx.cpp:1112 src/app/scene_fx.cpp:1133
 msgid "{0} (not found)"
 msgstr "{0} (찾을 수 없음)"
 
-#: src/app/scene_fx.cpp:1073
+#: src/app/scene_fx.cpp:1113
 msgid "Vita Assets"
 msgstr "Vita 에셋"
 
-#: src/app/scene_fx.cpp:1079
+#: src/app/scene_fx.cpp:1119
 msgid "Running from the Vita copy alone: {0}"
 msgstr "Vita판만으로 실행 중: {0}"
 
-#: src/app/scene_fx.cpp:1081
+#: src/app/scene_fx.cpp:1121
 msgid ""
 "Enter: your Vita copy's PCSG00499 folder - its textures, voices, music and scripts; Left / Right: none"
 msgstr "결정: Vita판의 PCSG00499 폴더(텍스처, 음성, 음악, 스크립트). 좌/우: 없음"
 
-#: src/app/scene_fx.cpp:1094
+#: src/app/scene_fx.cpp:1134
 msgid "Android Assets"
 msgstr "Android 에셋"
 
-#: src/app/scene_fx.cpp:1100
+#: src/app/scene_fx.cpp:1140
 msgid "Running from the Android release alone: {0}"
 msgstr "Android판만으로 실행 중: {0}"
 
-#: src/app/scene_fx.cpp:1102
+#: src/app/scene_fx.cpp:1142
 msgid ""
 "Enter: a folder with your Android copy's main.*.obb and its APK - its textures and the art only it has; Left / Right: none"
 msgstr "결정: Android판의 main.*.obb와 APK가 있는 폴더(텍스처와 전용 그림). 좌/우: 없음"
 
-#: src/app/scene_fx.cpp:1112
+#: src/app/scene_fx.cpp:1152
 msgid "Field Speed"
 msgstr "필드 속도"
 
-#: src/app/scene_fx.cpp:1112
+#: src/app/scene_fx.cpp:1152
 msgid ""
 "Walking the field 2 .. 5 times as fast - the scenes, talk and menus as they are"
 msgstr "필드 이동을 2~5배속으로. 이벤트, 대화, 메뉴는 그대로"
 
-#: src/app/scene_fx.cpp:1113
+#: src/app/scene_fx.cpp:1153
 msgid "Battle Speed"
 msgstr "전투 속도"
 
-#: src/app/scene_fx.cpp:1113
+#: src/app/scene_fx.cpp:1153
 msgid "The battles 2 .. 5 times as fast"
 msgstr "전투를 2~5배속으로"
 
-#: src/app/scene_fx.cpp:1115
+#: src/app/scene_fx.cpp:1155
 msgid "Swap ○ and ×"
 msgstr "○와 × 교체"
 
-#: src/app/scene_fx.cpp:1124
+#: src/app/scene_fx.cpp:1164
 msgid "Controller: {0}."
 msgstr "컨트롤러: {0}."
 
-#: src/app/scene_fx.cpp:1124
+#: src/app/scene_fx.cpp:1164
 msgid "With a controller:"
 msgstr "컨트롤러 사용 시:"
 
-#: src/app/scene_fx.cpp:1125
+#: src/app/scene_fx.cpp:1165
 msgid ""
 "○ (the right button) confirms, × (the bottom one) goes back - as on the Vita"
 msgstr "○(오른쪽 버튼)로 결정, ×(아래쪽 버튼)로 취소 - Vita와 같음"
 
-#: src/app/scene_fx.cpp:1126
+#: src/app/scene_fx.cpp:1166
 msgid "× (the bottom button) confirms, ○ (the right one) goes back"
 msgstr "×(아래쪽 버튼)로 결정, ○(오른쪽 버튼)로 취소"
 
-#: src/app/scene_fx.cpp:1145
+#: src/app/scene_fx.cpp:1185
 msgid "Master Volume"
 msgstr "마스터 볼륨"
 
-#: src/app/scene_fx.cpp:1148
+#: src/app/scene_fx.cpp:1188
 msgid "Voice Volume"
 msgstr "음성 볼륨"
 
-#: src/app/scene_fx.cpp:1151
+#: src/app/scene_fx.cpp:1191
 msgid "Sound Test"
 msgstr "사운드 테스트"
 
-#: src/app/scene_fx.cpp:1162
-msgid "Camera Cutout"
-msgstr "카메라 노치"
-
-#: src/app/scene_fx.cpp:1162
+#: src/app/scene_fx.cpp:1203
 msgid "Avoid"
 msgstr "피하기"
 
-#: src/app/scene_fx.cpp:1162
+#: src/app/scene_fx.cpp:1203
+msgid "Black Bars"
+msgstr "검은 띠"
+
+#: src/app/scene_fx.cpp:1203
 msgid "Ignore"
 msgstr "무시"
 
-#: src/app/scene_fx.cpp:1166
-msgid ""
-"Avoid: the menus and buttons kept clear of the camera's notch or punch hole (the picture fills the screen either way). Ignore: they reach the edges too"
-msgstr "피하기: 메뉴와 버튼을 노치나 펀치홀에서 떨어뜨림(화면은 어느 쪽이든 전체). 무시: 가장자리까지 배치"
+#: src/app/scene_fx.cpp:1205
+msgid "Camera Cutout"
+msgstr "카메라 노치"
 
-#: src/app/scene_fx.cpp:1168
+#: src/app/scene_fx.cpp:1211
+msgid ""
+"Avoid: the menus and buttons clear of the camera's notch or punch hole, the picture full. Black Bars: the whole picture clear of it. Ignore: everything to the edges"
+msgstr "피하기: 메뉴와 버튼을 노치나 펀치 홀에서 떨어뜨림, 화면은 가득. 검은 띠: 화면 전체를 피함. 무시: 모두 가장자리까지"
+
+#: src/app/scene_fx.cpp:1214
 msgid "Window"
 msgstr "창 모드"
 
-#: src/app/scene_fx.cpp:1168
+#: src/app/scene_fx.cpp:1214
 msgid "Fullscreen"
 msgstr "전체 화면"
 
-#: src/app/scene_fx.cpp:1168
+#: src/app/scene_fx.cpp:1214
 msgid "Borderless"
 msgstr "테두리 없음"
 
-#: src/app/scene_fx.cpp:1169
+#: src/app/scene_fx.cpp:1215
 msgid "Resolution"
 msgstr "해상도"
 
-#: src/app/scene_fx.cpp:1169
+#: src/app/scene_fx.cpp:1215
 msgid "Desktop"
 msgstr "데스크톱"
 
-#: src/app/scene_fx.cpp:1172
+#: src/app/scene_fx.cpp:1218
 msgid "Aspect"
 msgstr "화면 비율"
 
-#: src/app/scene_fx.cpp:1172
+#: src/app/scene_fx.cpp:1218
 msgid "Wide"
 msgstr "와이드"
 
-#: src/app/scene_fx.cpp:1176
+#: src/app/scene_fx.cpp:1222
 msgid "Auto"
 msgstr "자동"
 
-#: src/app/scene_fx.cpp:1177
+#: src/app/scene_fx.cpp:1223
 msgid "Layout"
 msgstr "레이아웃"
 
-#: src/app/scene_fx.cpp:1178
+#: src/app/scene_fx.cpp:1224
 msgid ""
 "The screens' layout: the iPad release's (4:3), the iPhone's (3:2), the Vita's or the Android release's (16:9, its screens centred); Auto follows the data"
 msgstr ""
 "화면 레이아웃: iPad판(4:3), iPhone판(3:2), Vita 또는 Android판(16:9, 가운데 정렬). 자동은 데이터를 따름"
 
-#: src/app/scene_fx.cpp:1180
+#: src/app/scene_fx.cpp:1226
 msgid "Original"
 msgstr "원본"
 
-#: src/app/scene_fx.cpp:1180
+#: src/app/scene_fx.cpp:1226
 msgid "Fill"
 msgstr "화면 채우기"
 
-#: src/app/scene_fx.cpp:1181
+#: src/app/scene_fx.cpp:1227
 msgid "Painted Rooms"
 msgstr "배경 그림"
 
-#: src/app/scene_fx.cpp:1182
+#: src/app/scene_fx.cpp:1228
 msgid "VSync"
 msgstr "VSync"
 
-#: src/app/scene_fx.cpp:1183
+#: src/app/scene_fx.cpp:1229
 msgid "Frame Rate"
 msgstr "프레임 레이트"
 
-#: src/app/scene_fx.cpp:1183
+#: src/app/scene_fx.cpp:1229
 msgid "Unlimited"
 msgstr "무제한"
 
-#: src/app/scene_fx.cpp:1185
+#: src/app/scene_fx.cpp:1231
 msgid ""
 "Frames drawn a second at most; the game runs at its own 20 a second, shown moving between them"
 msgstr "초당 최대 렌더링 프레임 수. 게임 자체는 초당 20회로 동작하며 그 사이를 보간해 표시"
 
-#: src/app/scene_fx.cpp:1187
+#: src/app/scene_fx.cpp:1233
 msgid "Original Presentation"
 msgstr "원작 표시"
 
-#: src/app/scene_fx.cpp:1188
+#: src/app/scene_fx.cpp:1234
 msgid "Every display and graphics option back to the original's"
 msgstr "모든 화면 및 그래픽 설정을 원작대로 되돌립니다"
 
-#: src/app/scene_fx.cpp:1194
+#: src/app/scene_fx.cpp:1240
 msgid "HD Textures"
 msgstr "HD 텍스처"
 
-#: src/app/scene_fx.cpp:1200
+#: src/app/scene_fx.cpp:1246
 msgid ""
 "waifu2x / Real-ESRGAN upscales from textures/hd (tools/hd_textures.py); from the next room on"
 msgstr ""
 "textures/hd의 waifu2x / Real-ESRGAN 업스케일(tools/hd_textures.py). 다음 방부터 적용"
 
-#: src/app/scene_fx.cpp:1201
+#: src/app/scene_fx.cpp:1247
 msgid "None in textures/hd yet: --export-textures, then tools/hd_textures.py"
 msgstr "textures/hd에 아직 없음: --export-textures 후 tools/hd_textures.py"
 
-#: src/app/scene_fx.cpp:1203
+#: src/app/scene_fx.cpp:1249
 msgid "HD Models"
 msgstr "HD 모델"
 
-#: src/app/scene_fx.cpp:1209
+#: src/app/scene_fx.cpp:1255
 msgid ""
 "Replacement models (glTF) from models/hd, in place of the game's; from the next room on"
 msgstr "models/hd의 교체 모델(glTF)을 게임 모델 대신 사용. 다음 방부터 적용"
 
-#: src/app/scene_fx.cpp:1210
+#: src/app/scene_fx.cpp:1256
 msgid ""
 "None in models/hd yet: --export-models, edit in Blender, save as models/hd/<name>.glb"
 msgstr ""
 "models/hd에 아직 없음: --export-models 후 Blender에서 편집해 models/hd/<name>.glb로 저장"
 
-#: src/app/scene_fx.cpp:1212 src/app/scene_fx.cpp:1223
+#: src/app/scene_fx.cpp:1258 src/app/scene_fx.cpp:1269
 msgid "Smooth"
 msgstr "부드럽게"
 
-#: src/app/scene_fx.cpp:1212
+#: src/app/scene_fx.cpp:1258
 msgid "Smoother"
 msgstr "더 부드럽게"
 
-#: src/app/scene_fx.cpp:1213
+#: src/app/scene_fx.cpp:1259
 msgid "Smooth Models"
 msgstr "모델 스무딩"
 
-#: src/app/scene_fx.cpp:1214
+#: src/app/scene_fx.cpp:1260
 msgid ""
 "Rounder models (4x / 9x triangles), hard edges kept; from the next room on"
 msgstr "모델을 둥글게(삼각형 4배/9배), 날카로운 모서리는 유지. 다음 방부터 적용"
 
-#: src/app/scene_fx.cpp:1215
+#: src/app/scene_fx.cpp:1261
 msgid ""
 "Rounds the models' silhouettes - characters, monsters, props, stages (PN triangles)"
 msgstr "캐릭터, 몬스터, 소품, 스테이지 모델의 윤곽을 둥글게 함(PN 트라이앵글)"
 
-#: src/app/scene_fx.cpp:1218
+#: src/app/scene_fx.cpp:1264
 msgid "Anisotropic Filtering"
 msgstr "이방성 필터링"
 
-#: src/app/scene_fx.cpp:1221
+#: src/app/scene_fx.cpp:1267
 msgid "Textures stay sharp on floors and walls seen at an angle"
 msgstr "비스듬히 보이는 바닥과 벽의 텍스처도 선명하게 유지"
 
-#: src/app/scene_fx.cpp:1221
+#: src/app/scene_fx.cpp:1267
 msgid "Not on this GPU"
 msgstr "이 GPU에서는 사용 불가"
 
-#: src/app/scene_fx.cpp:1223
+#: src/app/scene_fx.cpp:1269
 msgid "Texture Filtering"
 msgstr "텍스처 필터링"
 
-#: src/app/scene_fx.cpp:1223
+#: src/app/scene_fx.cpp:1269
 msgid "Sharp"
 msgstr "선명하게"
 
-#: src/app/scene_fx.cpp:1226
+#: src/app/scene_fx.cpp:1272
 msgid ""
 "Sharp: the world's textures magnified by the nearest texel (square pixels up close)"
 msgstr "선명하게: 월드 텍스처를 최근접 텍셀로 확대(가까이서 보면 네모난 픽셀)"
 
-#: src/app/scene_fx.cpp:1231
+#: src/app/scene_fx.cpp:1277
 msgid "Infinite HP"
 msgstr "HP 무한"
 
-#: src/app/scene_fx.cpp:1232
+#: src/app/scene_fx.cpp:1278
 msgid "The pair's HP never drops: the damage still shows, nobody falls"
 msgstr "페어의 HP가 줄지 않음. 대미지는 표시되지만 쓰러지지 않음"
 
-#: src/app/scene_fx.cpp:1233
+#: src/app/scene_fx.cpp:1279
 msgid "Infinite MP"
 msgstr "MP 무한"
 
-#: src/app/scene_fx.cpp:1234
+#: src/app/scene_fx.cpp:1280
 msgid "Genes cost no MP; the pair's MP stays full"
 msgstr "진의 MP 소비가 0. 페어의 MP는 항상 가득"
 
-#: src/app/scene_fx.cpp:1235
+#: src/app/scene_fx.cpp:1281
 msgid "Max Oz"
 msgstr "Oz 최대"
 
-#: src/app/scene_fx.cpp:1236
+#: src/app/scene_fx.cpp:1282
 msgid "The Oz held at the most (9,999,999)"
 msgstr "소지 Oz를 최대(9,999,999)로"
 
-#: src/app/scene_fx.cpp:1238
+#: src/app/scene_fx.cpp:1284
 msgid "EXP Multiplier"
 msgstr "EXP 배율"
 
-#: src/app/scene_fx.cpp:1245
+#: src/app/scene_fx.cpp:1291
 msgid "The EXP a won battle gives, multiplied"
 msgstr "전투 승리 시 얻는 EXP를 배로"
 
-#: src/app/scene_fx.cpp:1246
+#: src/app/scene_fx.cpp:1292
 msgid "Always First Strike"
 msgstr "항상 선제공격"
 
-#: src/app/scene_fx.cpp:1247
+#: src/app/scene_fx.cpp:1293
 msgid ""
 "Every random encounter starts with the party's first strike - never an ambush"
 msgstr "랜덤 인카운터는 항상 선제공격으로 시작하며 기습당하지 않음"
 
-#: src/app/scene_fx.cpp:1248
+#: src/app/scene_fx.cpp:1294
 msgid "No Random Battles"
 msgstr "랜덤 전투 없음"
 
-#: src/app/scene_fx.cpp:1249
+#: src/app/scene_fx.cpp:1295
 msgid "No random encounters on the field (the story's battles still come)"
 msgstr "필드에서 랜덤 인카운터가 발생하지 않음(스토리 전투는 발생)"
 
-#: src/app/scene_fx.cpp:1250
+#: src/app/scene_fx.cpp:1296
 msgid "One-Hit Kills"
 msgstr "일격필살"
 
-#: src/app/scene_fx.cpp:1251
+#: src/app/scene_fx.cpp:1297
 msgid "Any blow, gene or ability of the pair's that hurts an enemy fells it"
 msgstr "페어의 공격, 진, 어빌리티로 대미지를 입은 적은 즉시 쓰러짐"
 
-#: src/app/scene_fx.cpp:1252
+#: src/app/scene_fx.cpp:1298
 msgid "Full Break Gauge"
 msgstr "브레이크 게이지 최대"
 
-#: src/app/scene_fx.cpp:1253
+#: src/app/scene_fx.cpp:1299
 msgid ""
 "The Break gauge the pair's and full from the first turn - it never changes hands"
 msgstr "브레이크 게이지가 첫 턴부터 페어 쪽에 가득 차며 상대에게 넘어가지 않음"
 
-#: src/app/scene_fx.cpp:1260
+#: src/app/scene_fx.cpp:1306
 msgid "{0} is off here: {1}"
 msgstr "{0}을(를) 이 환경에서 쓸 수 없음: {1}"
 
-#: src/app/scene_fx.cpp:1262
+#: src/app/scene_fx.cpp:1308
 msgid "Render Scale"
 msgstr "렌더링 배율"
 
-#: src/app/scene_fx.cpp:1266
+#: src/app/scene_fx.cpp:1312
 msgid "The frame at this size, then scaled to the window"
 msgstr "이 크기로 렌더링한 뒤 창에 맞게 조정"
 
-#: src/app/scene_fx.cpp:1266 src/app/scene_fx.cpp:1272
+#: src/app/scene_fx.cpp:1312 src/app/scene_fx.cpp:1318
 msgid "Needs the Vulkan renderer"
 msgstr "Vulkan 렌더러 필요"
 
-#: src/app/scene_fx.cpp:1268
+#: src/app/scene_fx.cpp:1314
 msgid "Anti-aliasing"
 msgstr "안티에일리어싱"
 
-#: src/app/scene_fx.cpp:1273
+#: src/app/scene_fx.cpp:1319
 msgid "Temporal: jittered frames accumulated (MSAA is off meanwhile)"
 msgstr "템포럴: 지터링한 프레임을 누적(그동안 MSAA는 꺼짐)"
 
-#: src/app/scene_fx.cpp:1274
+#: src/app/scene_fx.cpp:1320
 msgid "MSAA, or FSR Native AA / DLAA at full resolution"
 msgstr "MSAA, 또는 전체 해상도의 FSR 네이티브 AA / DLAA"
 
-#: src/app/scene_fx.cpp:1276
+#: src/app/scene_fx.cpp:1322
 msgid "Upscaler"
 msgstr "업스케일러"
 
-#: src/app/scene_fx.cpp:1280
+#: src/app/scene_fx.cpp:1326
 msgid "The scene renders smaller and is reconstructed; the menus stay sharp"
 msgstr "장면을 작게 렌더링한 뒤 재구성. 메뉴는 선명하게 유지"
 
-#: src/app/scene_fx.cpp:1282
+#: src/app/scene_fx.cpp:1328
 msgid "Upscale Mode"
 msgstr "업스케일 모드"
 
-#: src/app/scene_fx.cpp:1293
+#: src/app/scene_fx.cpp:1339
 msgid "Sharpness"
 msgstr "선명도"
 
-#: src/app/scene_fx.cpp:1297
+#: src/app/scene_fx.cpp:1343
 msgid "FSR's sharpening pass (RCAS); DLSS has none"
 msgstr "FSR의 샤프닝 처리(RCAS). DLSS에는 없음"
 
-#: src/app/scene_fx.cpp:910
+#: src/app/scene_fx.cpp:950
 msgid "Game"
 msgstr "게임"
 
-#: src/app/scene_fx.cpp:910
+#: src/app/scene_fx.cpp:950
 msgid "Sound"
 msgstr "사운드"
 
-#: src/app/scene_fx.cpp:910 src/app/scene_fx.cpp:1171
+#: src/app/scene_fx.cpp:950 src/app/scene_fx.cpp:1217
 msgid "Display"
 msgstr "화면"
 
-#: src/app/scene_fx.cpp:910
+#: src/app/scene_fx.cpp:950
 msgid "Detail"
 msgstr "디테일"
 
-#: src/app/scene_fx.cpp:910
+#: src/app/scene_fx.cpp:950
 msgid "Cheats"
 msgstr "치트"
 
-#: src/app/scene_fx.cpp:910
+#: src/app/scene_fx.cpp:950
 msgid "Graphics"
 msgstr "그래픽"
 

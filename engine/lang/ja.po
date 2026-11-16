@@ -8,32 +8,32 @@ msgstr ""
 "X-Language-Name: 日本語\n"
 "Last-Translator: Claude (machine translation, unreviewed)\n"
 
-#: src/app/app.hpp:1297
+#: src/app/app.hpp:1298
 msgid "Native AA"
 msgstr "ネイティブAA"
 
-#: src/app/app.hpp:1297
+#: src/app/app.hpp:1298
 msgid "Quality"
 msgstr "品質"
 
-#: src/app/app.hpp:1297
+#: src/app/app.hpp:1298
 msgid "Balanced"
 msgstr "バランス"
 
-#: src/app/app.hpp:1297
+#: src/app/app.hpp:1298
 msgid "Performance"
 msgstr "パフォーマンス"
 
-#: src/app/app.hpp:1297
+#: src/app/app.hpp:1298
 msgid "Ultra Perf."
 msgstr "ウルトラ性能"
 
-#: src/app/app.hpp:1298 src/app/scene_fx.cpp:803 src/app/scene_fx.cpp:1106 src/app/scene_fx.cpp:1212
-#: src/app/scene_fx.cpp:1218 src/app/scene_fx.cpp:1268 src/app/scene_fx.cpp:1276
+#: src/app/app.hpp:1299 src/app/scene_fx.cpp:843 src/app/scene_fx.cpp:1146 src/app/scene_fx.cpp:1258
+#: src/app/scene_fx.cpp:1264 src/app/scene_fx.cpp:1314 src/app/scene_fx.cpp:1322
 msgid "Off"
 msgstr "オフ"
 
-#: src/app/explore.cpp:3997 src/app/explore.cpp:4005 src/app/scene_fx.cpp:1039
+#: src/app/explore.cpp:4003 src/app/explore.cpp:4011 src/app/scene_fx.cpp:1079
 msgid "Menu Language"
 msgstr "メニュー言語"
 
@@ -45,441 +45,445 @@ msgstr "{0}（ファン翻訳）"
 msgid "Fan translation"
 msgstr "ファン翻訳"
 
-#: src/app/scene_fx.cpp:1024
+#: src/app/scene_fx.cpp:1064
 msgid "Text Language"
 msgstr "テキスト言語"
 
-#: src/app/scene_fx.cpp:1037
+#: src/app/scene_fx.cpp:1077
 msgid "Auto ({0})"
 msgstr "自動（{0}）"
 
-#: src/app/scene_fx.cpp:1049
+#: src/app/scene_fx.cpp:1089
 msgid ""
 "The language of the port's own text - these options and its messages; Auto: the text language's"
 msgstr "移植版独自のテキスト（このオプションやメッセージ）の言語。自動：テキスト言語に合わせる"
 
-#: src/app/scene_fx.cpp:1054
+#: src/app/scene_fx.cpp:1094
 msgid "Control Hints"
 msgstr "操作ヒント"
 
-#: src/app/scene_fx.cpp:1055
+#: src/app/scene_fx.cpp:1095
 msgid ""
 "Show the control hints and status overlay. Off hides the WASD help; F3 is a shortcut."
 msgstr "操作ヒントとステータス表示を出す。オフでWASDの説明を隠す。F3で切り替え"
 
-#: src/app/scene_fx.cpp:1056
+#: src/app/scene_fx.cpp:1096
 msgid "Import Vita Saves"
 msgstr "Vitaセーブ取り込み"
 
-#: src/app/scene_fx.cpp:1056
+#: src/app/scene_fx.cpp:1096
 msgid "Choose Folder"
 msgstr "フォルダを選択"
 
-#: src/app/scene_fx.cpp:1060
+#: src/app/scene_fx.cpp:1100
 msgid ""
 "Choose your decrypted Vita save export. Existing saves will be backed up."
 msgstr "復号済みのVitaセーブデータのフォルダを選択。既存のセーブはバックアップされます"
 
-#: src/app/scene_fx.cpp:1061
+#: src/app/scene_fx.cpp:1101
 msgid "Import saves from the title screen's Options."
 msgstr "セーブの取り込みはタイトル画面のオプションから"
 
-#: src/app/scene_fx.cpp:1063 src/app/scene_fx.cpp:1084
+#: src/app/scene_fx.cpp:1103 src/app/scene_fx.cpp:1124
 msgid "None"
 msgstr "なし"
 
-#: src/app/scene_fx.cpp:1070 src/app/scene_fx.cpp:1091
+#: src/app/scene_fx.cpp:1110 src/app/scene_fx.cpp:1131
 msgid "The game's data"
 msgstr "ゲームデータ"
 
-#: src/app/scene_fx.cpp:1071 src/app/scene_fx.cpp:1092
+#: src/app/scene_fx.cpp:1111 src/app/scene_fx.cpp:1132
 msgid "{0} (next start)"
 msgstr "{0}（次回起動時）"
 
-#: src/app/scene_fx.cpp:1072 src/app/scene_fx.cpp:1093
+#: src/app/scene_fx.cpp:1112 src/app/scene_fx.cpp:1133
 msgid "{0} (not found)"
 msgstr "{0}（見つかりません）"
 
-#: src/app/scene_fx.cpp:1073
+#: src/app/scene_fx.cpp:1113
 msgid "Vita Assets"
 msgstr "Vita素材"
 
-#: src/app/scene_fx.cpp:1079
+#: src/app/scene_fx.cpp:1119
 msgid "Running from the Vita copy alone: {0}"
 msgstr "Vita版のみで動作中：{0}"
 
-#: src/app/scene_fx.cpp:1081
+#: src/app/scene_fx.cpp:1121
 msgid ""
 "Enter: your Vita copy's PCSG00499 folder - its textures, voices, music and scripts; Left / Right: none"
 msgstr "決定：Vita版のPCSG00499フォルダ（テクスチャ・ボイス・音楽・スクリプト）。左右：なし"
 
-#: src/app/scene_fx.cpp:1094
+#: src/app/scene_fx.cpp:1134
 msgid "Android Assets"
 msgstr "Android素材"
 
-#: src/app/scene_fx.cpp:1100
+#: src/app/scene_fx.cpp:1140
 msgid "Running from the Android release alone: {0}"
 msgstr "Android版のみで動作中：{0}"
 
-#: src/app/scene_fx.cpp:1102
+#: src/app/scene_fx.cpp:1142
 msgid ""
 "Enter: a folder with your Android copy's main.*.obb and its APK - its textures and the art only it has; Left / Right: none"
 msgstr "決定：Android版のmain.*.obbとAPKのあるフォルダ（テクスチャと専用イラスト）。左右：なし"
 
-#: src/app/scene_fx.cpp:1112
+#: src/app/scene_fx.cpp:1152
 msgid "Field Speed"
 msgstr "フィールド速度"
 
-#: src/app/scene_fx.cpp:1112
+#: src/app/scene_fx.cpp:1152
 msgid ""
 "Walking the field 2 .. 5 times as fast - the scenes, talk and menus as they are"
 msgstr "フィールド移動を2～5倍速に。イベント・会話・メニューはそのまま"
 
-#: src/app/scene_fx.cpp:1113
+#: src/app/scene_fx.cpp:1153
 msgid "Battle Speed"
 msgstr "戦闘速度"
 
-#: src/app/scene_fx.cpp:1113
+#: src/app/scene_fx.cpp:1153
 msgid "The battles 2 .. 5 times as fast"
 msgstr "戦闘を2～5倍速に"
 
-#: src/app/scene_fx.cpp:1115
+#: src/app/scene_fx.cpp:1155
 msgid "Swap ○ and ×"
 msgstr "○と×を入れ替え"
 
-#: src/app/scene_fx.cpp:1124
+#: src/app/scene_fx.cpp:1164
 msgid "Controller: {0}."
 msgstr "コントローラー：{0}。"
 
-#: src/app/scene_fx.cpp:1124
+#: src/app/scene_fx.cpp:1164
 msgid "With a controller:"
 msgstr "コントローラー使用時："
 
-#: src/app/scene_fx.cpp:1125
+#: src/app/scene_fx.cpp:1165
 msgid ""
 "○ (the right button) confirms, × (the bottom one) goes back - as on the Vita"
 msgstr "○（右ボタン）で決定、×（下ボタン）で戻る（Vitaと同じ）"
 
-#: src/app/scene_fx.cpp:1126
+#: src/app/scene_fx.cpp:1166
 msgid "× (the bottom button) confirms, ○ (the right one) goes back"
 msgstr "×（下ボタン）で決定、○（右ボタン）で戻る"
 
-#: src/app/scene_fx.cpp:1145
+#: src/app/scene_fx.cpp:1185
 msgid "Master Volume"
 msgstr "マスター音量"
 
-#: src/app/scene_fx.cpp:1148
+#: src/app/scene_fx.cpp:1188
 msgid "Voice Volume"
 msgstr "ボイス音量"
 
-#: src/app/scene_fx.cpp:1151
+#: src/app/scene_fx.cpp:1191
 msgid "Sound Test"
 msgstr "サウンドテスト"
 
-#: src/app/scene_fx.cpp:1162
-msgid "Camera Cutout"
-msgstr "カメラの切り欠き"
-
-#: src/app/scene_fx.cpp:1162
+#: src/app/scene_fx.cpp:1203
 msgid "Avoid"
 msgstr "避ける"
 
-#: src/app/scene_fx.cpp:1162
+#: src/app/scene_fx.cpp:1203
+msgid "Black Bars"
+msgstr "黒帯"
+
+#: src/app/scene_fx.cpp:1203
 msgid "Ignore"
 msgstr "無視"
 
-#: src/app/scene_fx.cpp:1166
-msgid ""
-"Avoid: the menus and buttons kept clear of the camera's notch or punch hole (the picture fills the screen either way). Ignore: they reach the edges too"
-msgstr "避ける：メニューとボタンをノッチやパンチホールから離す（映像はどちらも全画面）。無視：端まで配置"
+#: src/app/scene_fx.cpp:1205
+msgid "Camera Cutout"
+msgstr "カメラの切り欠き"
 
-#: src/app/scene_fx.cpp:1168
+#: src/app/scene_fx.cpp:1211
+msgid ""
+"Avoid: the menus and buttons clear of the camera's notch or punch hole, the picture full. Black Bars: the whole picture clear of it. Ignore: everything to the edges"
+msgstr "避ける：メニューとボタンをノッチやパンチホールから離す（画面は全体表示）。黒帯：画面全体を避ける。無視：すべて端まで"
+
+#: src/app/scene_fx.cpp:1214
 msgid "Window"
 msgstr "ウィンドウ"
 
-#: src/app/scene_fx.cpp:1168
+#: src/app/scene_fx.cpp:1214
 msgid "Fullscreen"
 msgstr "フルスクリーン"
 
-#: src/app/scene_fx.cpp:1168
+#: src/app/scene_fx.cpp:1214
 msgid "Borderless"
 msgstr "ボーダーレス"
 
-#: src/app/scene_fx.cpp:1169
+#: src/app/scene_fx.cpp:1215
 msgid "Resolution"
 msgstr "解像度"
 
-#: src/app/scene_fx.cpp:1169
+#: src/app/scene_fx.cpp:1215
 msgid "Desktop"
 msgstr "デスクトップ"
 
-#: src/app/scene_fx.cpp:1172
+#: src/app/scene_fx.cpp:1218
 msgid "Aspect"
 msgstr "アスペクト比"
 
-#: src/app/scene_fx.cpp:1172
+#: src/app/scene_fx.cpp:1218
 msgid "Wide"
 msgstr "ワイド"
 
-#: src/app/scene_fx.cpp:1176
+#: src/app/scene_fx.cpp:1222
 msgid "Auto"
 msgstr "自動"
 
-#: src/app/scene_fx.cpp:1177
+#: src/app/scene_fx.cpp:1223
 msgid "Layout"
 msgstr "レイアウト"
 
-#: src/app/scene_fx.cpp:1178
+#: src/app/scene_fx.cpp:1224
 msgid ""
 "The screens' layout: the iPad release's (4:3), the iPhone's (3:2), the Vita's or the Android release's (16:9, its screens centred); Auto follows the data"
 msgstr "画面レイアウト：iPad版（4:3）、iPhone版（3:2）、VitaかAndroid版（16:9、中央寄せ）。自動はデータに従う"
 
-#: src/app/scene_fx.cpp:1180
+#: src/app/scene_fx.cpp:1226
 msgid "Original"
 msgstr "オリジナル"
 
-#: src/app/scene_fx.cpp:1180
+#: src/app/scene_fx.cpp:1226
 msgid "Fill"
 msgstr "拡大"
 
-#: src/app/scene_fx.cpp:1181
+#: src/app/scene_fx.cpp:1227
 msgid "Painted Rooms"
 msgstr "背景画"
 
-#: src/app/scene_fx.cpp:1182
+#: src/app/scene_fx.cpp:1228
 msgid "VSync"
 msgstr "VSync"
 
-#: src/app/scene_fx.cpp:1183
+#: src/app/scene_fx.cpp:1229
 msgid "Frame Rate"
 msgstr "フレームレート"
 
-#: src/app/scene_fx.cpp:1183
+#: src/app/scene_fx.cpp:1229
 msgid "Unlimited"
 msgstr "無制限"
 
-#: src/app/scene_fx.cpp:1185
+#: src/app/scene_fx.cpp:1231
 msgid ""
 "Frames drawn a second at most; the game runs at its own 20 a second, shown moving between them"
 msgstr "1秒あたりの最大描画フレーム数。ゲーム自体は毎秒20回で動き、その間を補間して表示"
 
-#: src/app/scene_fx.cpp:1187
+#: src/app/scene_fx.cpp:1233
 msgid "Original Presentation"
 msgstr "オリジナル表示"
 
-#: src/app/scene_fx.cpp:1188
+#: src/app/scene_fx.cpp:1234
 msgid "Every display and graphics option back to the original's"
 msgstr "画面とグラフィックの設定をすべてオリジナルに戻す"
 
-#: src/app/scene_fx.cpp:1194
+#: src/app/scene_fx.cpp:1240
 msgid "HD Textures"
 msgstr "HDテクスチャ"
 
-#: src/app/scene_fx.cpp:1200
+#: src/app/scene_fx.cpp:1246
 msgid ""
 "waifu2x / Real-ESRGAN upscales from textures/hd (tools/hd_textures.py); from the next room on"
 msgstr "textures/hdのwaifu2x / Real-ESRGAN高解像度版（tools/hd_textures.py）。次の部屋から反映"
 
-#: src/app/scene_fx.cpp:1201
+#: src/app/scene_fx.cpp:1247
 msgid "None in textures/hd yet: --export-textures, then tools/hd_textures.py"
 msgstr "textures/hdにまだなし：--export-texturesの後tools/hd_textures.py"
 
-#: src/app/scene_fx.cpp:1203
+#: src/app/scene_fx.cpp:1249
 msgid "HD Models"
 msgstr "HDモデル"
 
-#: src/app/scene_fx.cpp:1209
+#: src/app/scene_fx.cpp:1255
 msgid ""
 "Replacement models (glTF) from models/hd, in place of the game's; from the next room on"
 msgstr "models/hdの差し替えモデル（glTF）をゲームのものの代わりに使用。次の部屋から反映"
 
-#: src/app/scene_fx.cpp:1210
+#: src/app/scene_fx.cpp:1256
 msgid ""
 "None in models/hd yet: --export-models, edit in Blender, save as models/hd/<name>.glb"
 msgstr "models/hdにまだなし：--export-modelsで出力、Blenderで編集、models/hd/<name>.glbに保存"
 
-#: src/app/scene_fx.cpp:1212 src/app/scene_fx.cpp:1223
+#: src/app/scene_fx.cpp:1258 src/app/scene_fx.cpp:1269
 msgid "Smooth"
 msgstr "なめらか"
 
-#: src/app/scene_fx.cpp:1212
+#: src/app/scene_fx.cpp:1258
 msgid "Smoother"
 msgstr "よりなめらか"
 
-#: src/app/scene_fx.cpp:1213
+#: src/app/scene_fx.cpp:1259
 msgid "Smooth Models"
 msgstr "モデル平滑化"
 
-#: src/app/scene_fx.cpp:1214
+#: src/app/scene_fx.cpp:1260
 msgid ""
 "Rounder models (4x / 9x triangles), hard edges kept; from the next room on"
 msgstr "モデルを丸く（ポリゴン4倍/9倍）、鋭い角は維持。次の部屋から反映"
 
-#: src/app/scene_fx.cpp:1215
+#: src/app/scene_fx.cpp:1261
 msgid ""
 "Rounds the models' silhouettes - characters, monsters, props, stages (PN triangles)"
 msgstr "キャラ・モンスター・小物・ステージのモデルの輪郭を丸める（PNトライアングル）"
 
-#: src/app/scene_fx.cpp:1218
+#: src/app/scene_fx.cpp:1264
 msgid "Anisotropic Filtering"
 msgstr "異方性フィルタリング"
 
-#: src/app/scene_fx.cpp:1221
+#: src/app/scene_fx.cpp:1267
 msgid "Textures stay sharp on floors and walls seen at an angle"
 msgstr "斜めから見た床や壁のテクスチャもくっきり表示"
 
-#: src/app/scene_fx.cpp:1221
+#: src/app/scene_fx.cpp:1267
 msgid "Not on this GPU"
 msgstr "このGPUは非対応"
 
-#: src/app/scene_fx.cpp:1223
+#: src/app/scene_fx.cpp:1269
 msgid "Texture Filtering"
 msgstr "テクスチャフィルタ"
 
-#: src/app/scene_fx.cpp:1223
+#: src/app/scene_fx.cpp:1269
 msgid "Sharp"
 msgstr "シャープ"
 
-#: src/app/scene_fx.cpp:1226
+#: src/app/scene_fx.cpp:1272
 msgid ""
 "Sharp: the world's textures magnified by the nearest texel (square pixels up close)"
 msgstr "シャープ：ワールドのテクスチャを最近傍テクセルで拡大（近くでは四角いドット）"
 
-#: src/app/scene_fx.cpp:1231
+#: src/app/scene_fx.cpp:1277
 msgid "Infinite HP"
 msgstr "HP無限"
 
-#: src/app/scene_fx.cpp:1232
+#: src/app/scene_fx.cpp:1278
 msgid "The pair's HP never drops: the damage still shows, nobody falls"
 msgstr "ペアのHPが減らない。ダメージは表示されるが倒れない"
 
-#: src/app/scene_fx.cpp:1233
+#: src/app/scene_fx.cpp:1279
 msgid "Infinite MP"
 msgstr "MP無限"
 
-#: src/app/scene_fx.cpp:1234
+#: src/app/scene_fx.cpp:1280
 msgid "Genes cost no MP; the pair's MP stays full"
 msgstr "ジーンの消費MPが0に。ペアのMPは常に満タン"
 
-#: src/app/scene_fx.cpp:1235
+#: src/app/scene_fx.cpp:1281
 msgid "Max Oz"
 msgstr "Oz最大"
 
-#: src/app/scene_fx.cpp:1236
+#: src/app/scene_fx.cpp:1282
 msgid "The Oz held at the most (9,999,999)"
 msgstr "所持Ozを最大（9,999,999）に"
 
-#: src/app/scene_fx.cpp:1238
+#: src/app/scene_fx.cpp:1284
 msgid "EXP Multiplier"
 msgstr "EXP倍率"
 
-#: src/app/scene_fx.cpp:1245
+#: src/app/scene_fx.cpp:1291
 msgid "The EXP a won battle gives, multiplied"
 msgstr "戦闘勝利で得るEXPを倍増"
 
-#: src/app/scene_fx.cpp:1246
+#: src/app/scene_fx.cpp:1292
 msgid "Always First Strike"
 msgstr "常に先制攻撃"
 
-#: src/app/scene_fx.cpp:1247
+#: src/app/scene_fx.cpp:1293
 msgid ""
 "Every random encounter starts with the party's first strike - never an ambush"
 msgstr "ランダムエンカウントは必ず先制攻撃で始まり、不意打ちされない"
 
-#: src/app/scene_fx.cpp:1248
+#: src/app/scene_fx.cpp:1294
 msgid "No Random Battles"
 msgstr "エンカウントなし"
 
-#: src/app/scene_fx.cpp:1249
+#: src/app/scene_fx.cpp:1295
 msgid "No random encounters on the field (the story's battles still come)"
 msgstr "フィールドでランダムエンカウントしない（ストーリー上の戦闘は発生）"
 
-#: src/app/scene_fx.cpp:1250
+#: src/app/scene_fx.cpp:1296
 msgid "One-Hit Kills"
 msgstr "一撃必殺"
 
-#: src/app/scene_fx.cpp:1251
+#: src/app/scene_fx.cpp:1297
 msgid "Any blow, gene or ability of the pair's that hurts an enemy fells it"
 msgstr "ペアの攻撃・ジーン・アビリティでダメージを与えた敵は即撃破"
 
-#: src/app/scene_fx.cpp:1252
+#: src/app/scene_fx.cpp:1298
 msgid "Full Break Gauge"
 msgstr "ブレイクゲージ最大"
 
-#: src/app/scene_fx.cpp:1253
+#: src/app/scene_fx.cpp:1299
 msgid ""
 "The Break gauge the pair's and full from the first turn - it never changes hands"
 msgstr "ブレイクゲージは最初のターンからペア側で満タン。相手に移らない"
 
-#: src/app/scene_fx.cpp:1260
+#: src/app/scene_fx.cpp:1306
 msgid "{0} is off here: {1}"
 msgstr "{0}はこの環境では無効：{1}"
 
-#: src/app/scene_fx.cpp:1262
+#: src/app/scene_fx.cpp:1308
 msgid "Render Scale"
 msgstr "描画スケール"
 
-#: src/app/scene_fx.cpp:1266
+#: src/app/scene_fx.cpp:1312
 msgid "The frame at this size, then scaled to the window"
 msgstr "このサイズで描画し、ウィンドウに合わせて拡大縮小"
 
-#: src/app/scene_fx.cpp:1266 src/app/scene_fx.cpp:1272
+#: src/app/scene_fx.cpp:1312 src/app/scene_fx.cpp:1318
 msgid "Needs the Vulkan renderer"
 msgstr "Vulkanレンダラーが必要"
 
-#: src/app/scene_fx.cpp:1268
+#: src/app/scene_fx.cpp:1314
 msgid "Anti-aliasing"
 msgstr "アンチエイリアス"
 
-#: src/app/scene_fx.cpp:1273
+#: src/app/scene_fx.cpp:1319
 msgid "Temporal: jittered frames accumulated (MSAA is off meanwhile)"
 msgstr "テンポラル：ジッターしたフレームを蓄積（その間MSAAはオフ）"
 
-#: src/app/scene_fx.cpp:1274
+#: src/app/scene_fx.cpp:1320
 msgid "MSAA, or FSR Native AA / DLAA at full resolution"
 msgstr "MSAA、またはフル解像度のFSRネイティブAA / DLAA"
 
-#: src/app/scene_fx.cpp:1276
+#: src/app/scene_fx.cpp:1322
 msgid "Upscaler"
 msgstr "アップスケーラー"
 
-#: src/app/scene_fx.cpp:1280
+#: src/app/scene_fx.cpp:1326
 msgid "The scene renders smaller and is reconstructed; the menus stay sharp"
 msgstr "シーンを小さく描画して再構成。メニューはくっきりのまま"
 
-#: src/app/scene_fx.cpp:1282
+#: src/app/scene_fx.cpp:1328
 msgid "Upscale Mode"
 msgstr "アップスケールモード"
 
-#: src/app/scene_fx.cpp:1293
+#: src/app/scene_fx.cpp:1339
 msgid "Sharpness"
 msgstr "シャープネス"
 
-#: src/app/scene_fx.cpp:1297
+#: src/app/scene_fx.cpp:1343
 msgid "FSR's sharpening pass (RCAS); DLSS has none"
 msgstr "FSRのシャープ化処理（RCAS）。DLSSにはなし"
 
-#: src/app/scene_fx.cpp:910
+#: src/app/scene_fx.cpp:950
 msgid "Game"
 msgstr "ゲーム"
 
-#: src/app/scene_fx.cpp:910
+#: src/app/scene_fx.cpp:950
 msgid "Sound"
 msgstr "サウンド"
 
-#: src/app/scene_fx.cpp:910 src/app/scene_fx.cpp:1171
+#: src/app/scene_fx.cpp:950 src/app/scene_fx.cpp:1217
 msgid "Display"
 msgstr "画面"
 
-#: src/app/scene_fx.cpp:910
+#: src/app/scene_fx.cpp:950
 msgid "Detail"
 msgstr "ディテール"
 
-#: src/app/scene_fx.cpp:910
+#: src/app/scene_fx.cpp:950
 msgid "Cheats"
 msgstr "チート"
 
-#: src/app/scene_fx.cpp:910
+#: src/app/scene_fx.cpp:950
 msgid "Graphics"
 msgstr "グラフィック"
 
