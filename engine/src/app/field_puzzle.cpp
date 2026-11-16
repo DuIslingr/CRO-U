@@ -3408,11 +3408,13 @@ void step(App& app) {
         if (app.fadeT >= app.fadeFrames) pz.scene = 4;
         return;
     }
-    // FieldPCCtrl + 0x28: the leader moved this frame; gac + 0x1e2004: 3 frames after the pad was held
+    // FieldPCCtrl + 0x28: the leader moved this frame; gac + 0x1e2004: 3 while the pad is DRAWN (3.1.0 decomp
+    // 35775: its +6 shown flag - moved, or held 5 frames), counted down the same frame. (CR1-U 11b1731: there a finger
+    // anywhere started the pad and no tap on a block took; here a block takes the press before the pad - main.cpp)
     pz.leaderMoved = app.walker.gait != cr::Gait::Stand || app.walker.pos.x != pz.leaderWas.x || app.walker.pos.z != pz.leaderWas.z;
     pz.leaderWas = app.walker.pos;
-    if (app.touchPad.down) pz.padHold = 3;
-    else if (pz.padHold > 0) --pz.padHold;
+    if (app.touchPad.down && app.touchPad.shown) pz.padHold = 3;
+    if (pz.padHold > 0) --pz.padHold;
     if (cleared(app) || app.runner.running() || !app.dialogue.empty()) return;
     for (int k = 0; k < 2; ++k) // the buttons' scripts done: retry (var 0 = 1) / the other (var 1 = 666)
         if (pz.asked[k]) {

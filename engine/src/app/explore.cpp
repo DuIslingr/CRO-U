@@ -5619,6 +5619,43 @@ int runSelfTest(App& app) {
                 tapped = pz.tpState == 1 && app.padLock == 12;
                 settle(3000);
             }
+            bool realTap = false, realHold = false;
+            { // the same through SDL's mouse events, as a finger's (CR1-U 11b1731, a player's report there: a tap on a block never
+              // took - the pad under the finger refused it on any touch): a quick tap teleports, a long hold doesn't
+                auto send = [&](SDL_EventType type, float lx, float ly) { // (logical -> the window's points: toLogical's inverse)
+                    float x0, y0, x1, y1;
+                    app.renderer.toLogical(0, 0, x0, y0);
+                    app.renderer.toLogical(1000, 1000, x1, y1);
+                    int ww = 0, wh = 0;
+                    SDL_GetWindowSize(app.window, &ww, &wh);
+                    SDL_Event e{};
+                    e.type = type;
+                    e.button.x = (lx - x0) * 1000 / (x1 - x0) * float(ww) / float(app.renderer.frameWidth());
+                    e.button.y = (ly - y0) * 1000 / (y1 - y0) * float(wh) / float(app.renderer.frameHeight());
+                    e.button.button = SDL_BUTTON_LEFT;
+                    SDL_AppEvent(&app, &e);
+                };
+                for (int hold : {2, 9}) {
+                    room(0, false);
+                    settle(3000);
+                    setActor(app, 0, puzzle::centre(app, 0, 2), nullptr, false);
+                    steps(2);
+                    const int t = puzzle::objectAt(app, 1, 1, 1);
+                    if (t < 0) break;
+                    const cr::FieldNpc& n = app.npcs[size_t(pz.objs[size_t(t)].npc)];
+                    float lx = 0, ly = 0;
+                    if (!fieldToLogical(app, {n.pos[0], n.pos[1] + n.box[1], n.pos[2]}, lx, ly)) break;
+                    send(SDL_EVENT_MOUSE_BUTTON_DOWN, lx, ly + 20);
+                    steps(hold);
+                    send(SDL_EVENT_MOUSE_BUTTON_UP, lx, ly + 20);
+                    steps(2);
+                    (hold == 2 ? realTap : realHold) = hold == 2 ? pz.tpState == 1 : pz.tpState == 0;
+                    settle(3000);
+                }
+            }
+            tp += !realTap + !realHold;
+            std::printf("puzzle touches: a block tapped through SDL's mouse events (a finger's) - a quick tap teleports %s, a 9-frame hold doesn't %s\n",
+                        realTap ? "yes" : "NO", realHold ? "yes" : "NO");
             for (size_t i = 0; i < pz.objs.size(); ++i) // a gem's window: 7..33 below its point, |dx| <= 17
                 if (pz.objs[i].type == cr::kTypeGem && puzzle::target(app, pz.objs[i])) {
                     float gx, gy;
