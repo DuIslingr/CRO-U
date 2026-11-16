@@ -172,6 +172,7 @@ void Renderer::drawMesh(const GpuMesh& mesh, const Texture* tex, const Mat4& mvp
     st.clampT = mat.wrapT != 0;
     st.minLinear = smoothFilter || linearFilter(mat.minFilter);
     st.magLinear = smoothFilter || linearFilter(mat.magFilter);
+    sh.depthAnchor[0] = depthAnchor_[0], sh.depthAnchor[1] = depthAnchor_[1];
     dev_->drawMesh(mesh, textured ? tex : nullptr, mvp.m, sh, st);
 }
 
@@ -467,5 +468,13 @@ void Renderer::setAdditive(bool on) {
 }
 
 void Renderer::setColorWrite(bool on) { dev_->setColorWrite(on); }
+
+void Renderer::setDepthAnchor(const Mat4& vp, Vec3 p) {
+    const float* m = vp.m;
+    const float z = m[2] * p.x + m[6] * p.y + m[10] * p.z + m[14];
+    const float w = m[3] * p.x + m[7] * p.y + m[11] * p.z + m[15];
+    if (w <= 1e-4f) return clearDepthAnchor(); // (behind the camera: no anchor)
+    depthAnchor_[0] = z / w, depthAnchor_[1] = w;
+}
 
 } // namespace cr

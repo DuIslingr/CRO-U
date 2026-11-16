@@ -96,6 +96,12 @@ public:
     void end3D();
     // Colour writes on/off (glColorMask); off draws depth only, e.g. field occluders.
     void setColorWrite(bool on);
+    // A figure's depth anchor for the mesh draws that follow (until cleared): parts of it further from
+    // the camera than `point` (world space, under the view-projection `vp`) are depth-tested as if at
+    // the point - an occluder in front of the figure's body still hides them, one it reaches behind
+    // (a leg into a bed) doesn't. Its own parts keep their order in front of the point.
+    void setDepthAnchor(const Mat4& vp, Vec3 point);
+    void clearDepthAnchor() { depthAnchor_[0] = depthAnchor_[1] = 0; }
     void setAdditive(bool on); // 2D quads added onto what's there (src alpha, one) until switched off
     float aspect() const { return screenW_ / kLogicalH; }
     float screenW() const { return screenW_; }         // logical width of the whole screen
@@ -189,6 +195,7 @@ private:
     void interfaceRect(float& x, float& y, float& w, float& h) const;
 
     std::unique_ptr<RenderDevice> dev_;
+    float depthAnchor_[2] = {0, 0};
     Backend backend_ = Backend::OpenGL;
     int drawableW_ = 0, drawableH_ = 0;
     std::vector<uint8_t> scratch_;

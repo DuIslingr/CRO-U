@@ -4008,8 +4008,10 @@ void updatePlayer(App& app, float dt, float camYaw) {
         bool trun;
         if (touchPadStick(app, tx, ty, trun)) sx = tx, sy = ty, run = trun;
     }
-    if (const char* w = SDL_getenv("CR_CAPTURE_WALK"); w && !talking && sx == 0 && sy == 0) // (tests: x,y held - a --settle-moving walk)
-        if (SDL_sscanf(w, "%f,%f", &sx, &sy) != 2) sx = sy = 0;
+    if (const char* w = SDL_getenv("CR_CAPTURE_WALK"); w && !talking && sx == 0 && sy == 0) { // (tests: x,y held - a --settle-moving walk;
+        if (SDL_sscanf(w, "%f,%f", &sx, &sy) != 2) sx = sy = 0;                              //  CR_CAPTURE_RUN too: running)
+        else if (SDL_getenv("CR_CAPTURE_RUN")) run = true;
+    }
     constexpr float kStep = 1.0f / kFramesPerSecond;
     app.walkClock += dt;
     while (app.walkClock >= kStep) {
@@ -4369,6 +4371,9 @@ void drawNpcs(App& app, const cr::Mat4& vp) {
 // ones of draw order 0 and up, whichever slot comes first: the ship's waves (c152, draw orders 0..40,
 // blended with depth writes) no longer hide Vieg on the paddle wheel (map 70's opening). Meshes of
 // one key keep the slot order (the original sorts those by their depth from the camera)
+// The leader's depth anchor: its wall sphere's centre (CmpBasic's, the floor + 10 * 0.5)
+constexpr float kLeaderAnchorHeight = 5.0f;
+
 void drawFigureQueue(App& app, const cr::Mat4& vp) {
     const bool player = app.havePlayer && playerShown(app);
     const float playerAlpha = player ? shownPlayerAlpha(app) : 1.0f;
@@ -4397,8 +4402,16 @@ void drawFigureQueue(App& app, const cr::Mat4& vp) {
     const float spinAfter = app.texSpin;
     std::sort(keys.begin(), keys.end());
     keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+    // The leader against the room's occluders by its body, not its limbs: a leg reaching past the bed's
+    // front while the body stands in front of it stays drawn (the original's per-pixel test cut it off
+    // at the mattress - #12); behind the bed, a pillar or a door frame it's hidden as before
+    const cr::Vec3 anchor = shownWalker(app).pos + cr::Vec3{0, kLeaderAnchorHeight, 0};
     for (int key : keys) {
-        if (player) drawLoaded(app, app.player, vp * playerWorld(shownWalker(app)), nullptr, playerAlpha, -1.0f, 0, app.playerFaded, key);
+        if (player) {
+            app.renderer.setDepthAnchor(vp, anchor);
+            drawLoaded(app, app.player, vp * playerWorld(shownWalker(app)), nullptr, playerAlpha, -1.0f, 0, app.playerFaded, key);
+            app.renderer.clearDepthAnchor();
+        }
         for (size_t j = 0; j < app.npcDraws.size(); ++j) {
             if (app.npcDraws[j].alpha <= 0.001f) continue;
             app.texSpin = spinAt[j];

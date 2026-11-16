@@ -43,12 +43,14 @@ layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec2 aUV;
 layout(location = 2) in vec4 aColor;
 uniform mat4 uMvp;
+uniform vec2 uDepthAnchor; // a figure's depth anchor: NDC depth, clip w (w <= 0 off)
 out vec2 vUV;
 out vec4 vColor;
 void main() {
     vUV = aUV;
     vColor = aColor;
     gl_Position = uMvp * vec4(aPos, 1.0);
+    if (uDepthAnchor.y > 0.0 && gl_Position.w > uDepthAnchor.y) gl_Position.z = uDepthAnchor.x * gl_Position.w;
 }
 )";
 
@@ -350,6 +352,7 @@ public:
         const bool second = sh.tex2 && sh.tex2->id && sh.texMode2 >= 0;
         gl::Uniform1i(uTexMode2_, second ? sh.texMode2 : -1);
         gl::Uniform4f(uUv2_, sh.uv2[0], sh.uv2[1], sh.uv2[2], sh.uv2[3]);
+        gl::Uniform2f(uDepthAnchor_, sh.depthAnchor[0], sh.depthAnchor[1]);
         gl::Uniform1i(uMeshTex2_, 1);
         gl::ActiveTexture(GL_TEXTURE1);
         gl::BindTexture(GL_TEXTURE_2D, second ? textureName(sh.tex2->id) : whiteId());
@@ -487,6 +490,7 @@ private:
         uMeshTex2_ = gl::GetUniformLocation(meshProgram_, "uTex2");
         uTexMode2_ = gl::GetUniformLocation(meshProgram_, "uTexMode2");
         uUv2_ = gl::GetUniformLocation(meshProgram_, "uUv2");
+        uDepthAnchor_ = gl::GetUniformLocation(meshProgram_, "uDepthAnchor");
         uAlphaTex_ = gl::GetUniformLocation(meshProgram_, "uAlphaTex");
         uVertexColor_ = gl::GetUniformLocation(meshProgram_, "uVertexColor");
         uProj_ = gl::GetUniformLocation(program_, "uProj");
@@ -525,7 +529,7 @@ private:
     int uProj_ = -1, uColor_ = -1, uTex_ = -1;
     unsigned meshProgram_ = 0;
     int uMvp_ = -1, uMeshTex_ = -1, uAlphaRef_ = -1, uMeshColor_ = -1, uTexMode_ = -1, uAlphaTex_ = -1, uVertexColor_ = -1;
-    int uMeshTex2_ = -1, uTexMode2_ = -1, uUv2_ = -1;
+    int uMeshTex2_ = -1, uTexMode2_ = -1, uUv2_ = -1, uDepthAnchor_ = -1;
     int drawableW_ = 0, drawableH_ = 0;
     std::unordered_set<unsigned> mipmapped_; // textures uploaded with a mip chain
     TextureFiltering filtering_;

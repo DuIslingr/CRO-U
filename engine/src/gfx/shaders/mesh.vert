@@ -15,6 +15,7 @@ void main() {
     vUV = aUV;
     vColor = aColor;
     gl_Position = pc.matrix * vec4(aPos, 1.0);
+    if (pc.anchorW > 0.0 && gl_Position.w > pc.anchorW) gl_Position.z = pc.anchorDepth * gl_Position.w;
 #ifdef SCENE
     vCur = gl_Position;
     vPrev = pc.prevMatrix * vec4(aPrevPos, 1.0);

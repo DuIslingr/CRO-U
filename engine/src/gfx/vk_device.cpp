@@ -88,7 +88,7 @@ struct PushConstants {
     float reactive;
     int32_t texMode2; // texture unit 1 (set 1): its environment, -1 none
     int32_t noVertexColor; // meshes: 1 the colour array off
-    int32_t pad[2];
+    float anchorDepth, anchorW; // the depth anchor (Vulkan NDC depth, clip w; w <= 0 off)
     float uv2[4];     // its coordinates: uv * xy + zw
 };
 static_assert(sizeof(PushConstants) == 128, "push constant layout");
@@ -857,6 +857,7 @@ public:
                             sh.texMode2 >= 0;
         pc.base.texMode2 = second ? sh.texMode2 : -1;
         std::memcpy(pc.base.uv2, sh.uv2, sizeof pc.base.uv2);
+        pc.base.anchorDepth = (sh.depthAnchor[0] + 1.0f) * 0.5f, pc.base.anchorW = sh.depthAnchor[1];
         // Reactive mask: alpha-blended layers by their alpha, additive ones by brightness
         if (st.blend && !st.depthWrite) pc.base.reactive = st.blendDst == 1 ? -0.8f : 0.8f;
         VkBuffer prevBuf = vb;

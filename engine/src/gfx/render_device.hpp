@@ -43,6 +43,10 @@ struct MeshShading {
     const Texture* tex2 = nullptr;
     int texMode2 = -1;
     float uv2[4] = {1, 1, 0, 0};
+    // A figure's depth anchor (Renderer::setDepthAnchor): its GL-convention NDC depth and clip w.
+    // Vertices further than it take its depth, so occluders between the anchor and a limb reaching
+    // behind it don't cut that limb off; w <= 0: off
+    float depthAnchor[2] = {0, 0};
 };
 
 // Temporal upscalers (Vulkan): the scene renders smaller (or at the same size: Native AA /
