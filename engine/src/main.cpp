@@ -647,6 +647,10 @@ struct App {
     // opens / closes the menu, □ skips text, L / R turn pages; in puzzle rooms START restarts,
     // SELECT shows the help, and □ (no text to skip) uses the ability, which the Vita leaves to touch
     SDL_Gamepad* pad = nullptr;
+    // The other controllers connected, open too: SDL sends a controller's buttons and sticks only once it's open,
+    // and one pad can come as two (CRO-U #4: a Flydigi Vader 4 Pro listed twice as "Xbox 360 Controller", its
+    // input on the second while the first was taken). The one pressed or moved last becomes `pad`
+    std::vector<SDL_Gamepad*> morePads;
     bool padConfirmEast = true;
     // CRO-U's own (Options, Game: Field Speed, Battle Speed): the field - while the player walks it,
     // nothing over it - and the battles run this many times as fast (1, or 2 .. 5)
@@ -27486,6 +27490,40 @@ int runSelfTest(App& app) {
                         handedOver ? "yes" : "NO", takenOver ? "yes" : "NO");
             if (app.pad) SDL_CloseGamepad(app.pad);
             if (second) SDL_DetachVirtualJoystick(second);
+            app.pad = nullptr;
+            { // one pad as two (CRO-U #4): both opened as they come; a button on the second makes it the one in use,
+              // a stick pushed on the first takes it back, and with the one in use taken out the other goes on
+                const SDL_JoystickID a = SDL_AttachVirtualJoystick(&desc), b = SDL_AttachVirtualJoystick(&desc);
+                SDL_Event e{};
+                e.type = SDL_EVENT_GAMEPAD_ADDED, e.gdevice.which = a;
+                SDL_AppEvent(&app, &e);
+                e.gdevice.which = b;
+                SDL_AppEvent(&app, &e);
+                const bool bothOpen = app.pad && SDL_GetGamepadID(app.pad) == a && app.morePads.size() == 1 && SDL_GetGamepadID(app.morePads[0]) == b;
+                e = SDL_Event{};
+                e.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN, e.gbutton.which = b, e.gbutton.button = SDL_GAMEPAD_BUTTON_DPAD_DOWN, e.gbutton.down = true;
+                SDL_AppEvent(&app, &e);
+                const bool pressedTakes = app.pad && SDL_GetGamepadID(app.pad) == b;
+                e = SDL_Event{};
+                e.type = SDL_EVENT_GAMEPAD_AXIS_MOTION, e.gaxis.which = a, e.gaxis.axis = SDL_GAMEPAD_AXIS_LEFTX, e.gaxis.value = 3000;
+                SDL_AppEvent(&app, &e);
+                const bool nudgeKeeps = app.pad && SDL_GetGamepadID(app.pad) == b;
+                e.gaxis.value = 30000;
+                SDL_AppEvent(&app, &e);
+                const bool pushedTakes = app.pad && SDL_GetGamepadID(app.pad) == a;
+                e = SDL_Event{};
+                e.type = SDL_EVENT_GAMEPAD_REMOVED, e.gdevice.which = a;
+                SDL_AppEvent(&app, &e);
+                const bool otherGoesOn = app.pad && SDL_GetGamepadID(app.pad) == b && app.morePads.empty();
+                problems += !bothOpen + !pressedTakes + !nudgeKeeps + !pushedTakes + !otherGoesOn;
+                std::printf("controller: one pad as two - both open %s, a button on the second takes it %s (a nudge doesn't %s), a stick "
+                            "pushed on the first takes it back %s, the one in use taken out: the other goes on %s\n", bothOpen ? "yes" : "NO",
+                            pressedTakes ? "yes" : "NO", nudgeKeeps ? "yes" : "NO", pushedTakes ? "yes" : "NO", otherGoesOn ? "yes" : "NO");
+                if (app.pad) SDL_CloseGamepad(app.pad);
+                for (SDL_Gamepad* g : app.morePads) SDL_CloseGamepad(g);
+                app.morePads.clear();
+                SDL_DetachVirtualJoystick(a), SDL_DetachVirtualJoystick(b);
+            }
             app.pad = keepPad;
             app.game = keepGame;
             if (pad) SDL_CloseGamepad(pad);
@@ -31074,6 +31112,20 @@ bool consumeGraphicsReset(App& app) {
     return false;
 }
 
+// A pad among morePads pressed or moved: it becomes the one in use, the one before kept open with the others
+void takePad(App& app, SDL_JoystickID which) {
+    if (app.pad && SDL_GetGamepadID(app.pad) == which) return;
+    for (size_t k = 0; k < app.morePads.size(); ++k)
+        if (SDL_GetGamepadID(app.morePads[k]) == which) {
+            SDL_Gamepad* now = app.morePads[k];
+            app.morePads.erase(app.morePads.begin() + std::ptrdiff_t(k));
+            if (app.pad) holdSkip(app, kSkipPad, false), app.morePads.push_back(app.pad);
+            app.pad = now;
+            SDL_Log("controller: %s in use", SDL_GetGamepadName(app.pad));
+            return;
+        }
+}
+
 SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
     auto& app = *static_cast<App*>(state);
     if (event->type == SDL_EVENT_RENDER_DEVICE_RESET) {
@@ -31109,29 +31161,48 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
                 unsigned(SDL_GetJoystickProductForID(id)), int(SDL_GetJoystickTypeForID(id)), SDL_IsGamepad(id) ? "" : " - not a gamepad to SDL");
         break;
     }
-    case SDL_EVENT_GAMEPAD_ADDED: // (taken while none is in use - or the one held went quiet: a wireless pad's receiver keeps a dead handle)
-        if (!app.pad || !SDL_GamepadConnected(app.pad))
+    case SDL_EVENT_GAMEPAD_ADDED: // (taken while none is in use - or the one held went quiet: a wireless pad's receiver keeps a dead
+        // handle); any other opened as well, for its input to come (morePads)
+        if (!app.pad || !SDL_GamepadConnected(app.pad)) {
             if (SDL_Gamepad* pad = SDL_OpenGamepad(event->gdevice.which)) {
                 if (app.pad) holdSkip(app, kSkipPad, false), SDL_CloseGamepad(app.pad);
                 app.pad = pad;
                 SDL_Log("controller: %s", SDL_GetGamepadName(app.pad));
             }
+        } else if (SDL_GetGamepadID(app.pad) != event->gdevice.which &&
+                   std::none_of(app.morePads.begin(), app.morePads.end(), [&](SDL_Gamepad* g) { return SDL_GetGamepadID(g) == event->gdevice.which; }))
+            if (SDL_Gamepad* pad = SDL_OpenGamepad(event->gdevice.which)) {
+                app.morePads.push_back(pad);
+                SDL_Log("controller: %s (also open: it takes over once it's pressed)", SDL_GetGamepadName(pad));
+            }
         break;
     case SDL_EVENT_GAMEPAD_REMOVED:
+        for (size_t k = 0; k < app.morePads.size(); ++k)
+            if (SDL_GetGamepadID(app.morePads[k]) == event->gdevice.which) {
+                SDL_CloseGamepad(app.morePads[k]);
+                app.morePads.erase(app.morePads.begin() + std::ptrdiff_t(k));
+                break;
+            }
         if (app.pad && SDL_GetGamepadID(app.pad) == event->gdevice.which) {
             holdSkip(app, kSkipPad, false);
             SDL_CloseGamepad(app.pad), app.pad = nullptr;
+            if (!app.morePads.empty()) app.pad = app.morePads.front(), app.morePads.erase(app.morePads.begin());
             int count = 0; // (another still connected: that one, not none until a new one comes)
-            if (SDL_JoystickID* ids = SDL_GetGamepads(&count)) {
-                for (int k = 0; k < count && !app.pad; ++k)
-                    if (ids[k] != event->gdevice.which) app.pad = SDL_OpenGamepad(ids[k]);
-                SDL_free(ids);
-            }
+            if (!app.pad)
+                if (SDL_JoystickID* ids = SDL_GetGamepads(&count)) {
+                    for (int k = 0; k < count && !app.pad; ++k)
+                        if (ids[k] != event->gdevice.which) app.pad = SDL_OpenGamepad(ids[k]);
+                    SDL_free(ids);
+                }
             if (app.pad) SDL_Log("controller: %s", SDL_GetGamepadName(app.pad));
         }
         break;
+    case SDL_EVENT_GAMEPAD_AXIS_MOTION: // (a stick or trigger well off its rest on another pad: that one in use now)
+        if (std::abs(int(event->gaxis.value)) > 16000) takePad(app, event->gaxis.which);
+        break;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
         app.pointerLast = false;
+        takePad(app, event->gbutton.which); // (a button on another pad: that one in use now)
         if (app.pad && SDL_GetGamepadID(app.pad) == event->gbutton.which) {
             if (event->gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_STICK) stickPointerButton(app, true); // R3: a puzzle room's finger
             else padButton(app, event->gbutton.button);
