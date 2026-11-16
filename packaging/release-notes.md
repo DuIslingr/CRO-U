@@ -1,38 +1,39 @@
-# CRO-U v0.7.2
+# CRO-U v0.7.3
 
-A fix release for [v0.7.1](https://github.com/DuIslingr/CRO-U/releases/tag/v0.7.1): Flydigi controllers on
-Windows, and three things that looked wrong - all reported by metastigma. Everything in v0.7.0's and
-v0.7.1's notes still applies.
+A fix release for [v0.7.2](https://github.com/DuIslingr/CRO-U/releases/tag/v0.7.2): Flydigi controllers
+again, a battle on the ship, and DDS texture replacements. Everything in the earlier v0.7.x notes still
+applies.
 
 ## Fixed
 
-- **Flydigi controllers on Windows, take two** ([#4](https://github.com/DuIslingr/CRO-U/issues/4)): v0.7.1's
-  fix didn't bring the Vader 4 Pro back. The Windows build now uses SDL's development version from
-  2026-11-14, which has SDL's later Flydigi fixes - the setup metastigma's fork uses and its user
-  confirmed works with this controller, wired and through its receiver. v0.7.1's workaround is gone.
-  Other platforms keep SDL 3.4.20.
-- **Battle models no longer turn speckled and see-through on some graphics cards**
-  ([#5](https://github.com/DuIslingr/CRO-U/issues/5)). A battle model draws parts of itself twice, and
-  the second copy only keeps pixels that are fully opaque. CRO-U checked that with an exact
-  comparison, while the original allows for rounding; on GPUs that land a hair short, scattered pixels
-  were dropped and Vieg's skin, arms and sword showed the sky through them. The check now matches the
-  original's, in both the Vulkan and the OpenGL renderer.
-- **The opening's "CHAOS RINGS" title sits inside the eclipse's ring**
-  ([#7](https://github.com/DuIslingr/CRO-U/issues/7)), as the original has it, instead of up and to
-  the left of it with its black box showing over the glow.
-- **The snowfield's frosty frame borders the whole screen**
-  ([#8](https://github.com/DuIslingr/CRO-U/issues/8)) on the iPhone, Android and Vita layouts and in
-  widescreen, instead of sitting off-centre with a second copy at the edge. The same goes for the
-  canvas and frames of a later area.
-- **Infinite HP no longer traps you in a battle the story has you lose** (already in v0.7.1's
-  re-uploaded downloads): it holds while you can still bring a foe down, and lapses once none can
-  fall, so the defeat and the story come.
+- **Flydigi controllers, take three** ([#4](https://github.com/DuIslingr/CRO-U/issues/4)): v0.7.2's SDL
+  update found the Vader 4 Pro, but the controller shows up as two "Xbox 360 Controller" devices and its
+  buttons and sticks come through the second one, which CRO-U never opened. Now every controller is
+  opened, and the one you press or move takes over.
+- **Vieg no longer walks into the turret's platform when he attacks it**
+  ([#6](https://github.com/DuIslingr/CRO-U/issues/6)). The original places that battle's stage, the
+  ship's deck, 10 units further back than CRO-U did. Vieg's blow now ends on the deck in front of the
+  platform, as on the Vita and Android releases, instead of inside its wall with his legs hidden.
+  v0.7.2 wrongly said this matched the original.
+- **Vieg walks back from the area edges the game turns you away from**, instead of sliding back in
+  his standing pose.
+- **Battle stages are lit as the original lights them.** The original draws a stage unlit, with a few
+  rules for its transparent parts. Some stages were up to 20% too bright, and the reflective floor of
+  the Agent's last stage mirrored the sky instead of showing its grey sheen.
+
+## New
+
+- **DDS texture replacements:** a `<hash>.dds` in `textures/hd` works like a `<hash>.png`. It can hold
+  BC1-BC5 (DXT1/3/5, ATI1/2), BC7 or uncompressed 32-bit RGBA/BGRA; the first mip is used. Cube
+  maps, volumes and arrays aren't supported. The blocks are decoded by
+  [bcdec](https://github.com/iOrange/bcdec) (MIT / Unlicense).
 
 ### Thanks to metastigma
 
-[metastigma](https://github.com/metastigma) reported all four, with screenshots that made each one
-easy to find, and worked out the Windows SDL setup in their fork
-([CRO-U-metastigma#42](https://github.com/metastigma/CRO-U-metastigma/pull/42)).
+[metastigma](https://github.com/metastigma) sent the log that showed the controller as two devices, the
+Vita3K screenshots that showed I had #6 wrong, and the report of the sliding Vieg. Their fork's
+texture replacements ([CRO-U-metastigma#10](https://github.com/metastigma/CRO-U-metastigma/pull/10))
+led to the DDS support.
 
 ## Downloads
 
