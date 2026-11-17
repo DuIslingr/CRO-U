@@ -1,39 +1,53 @@
-# CRO-U v0.7.3
+# CRO-U v0.7.4
 
-A fix release for [v0.7.2](https://github.com/DuIslingr/CRO-U/releases/tag/v0.7.2): Flydigi controllers
-again, a battle on the ship, and DDS texture replacements. Everything in the earlier v0.7.x notes still
-applies.
-
-## Fixed
-
-- **Flydigi controllers, take three** ([#4](https://github.com/DuIslingr/CRO-U/issues/4)): v0.7.2's SDL
-  update found the Vader 4 Pro, but the controller shows up as two "Xbox 360 Controller" devices and its
-  buttons and sticks come through the second one, which CRO-U never opened. Now every controller is
-  opened, and the one you press or move takes over.
-- **Vieg no longer walks into the turret's platform when he attacks it**
-  ([#6](https://github.com/DuIslingr/CRO-U/issues/6)). The original places that battle's stage, the
-  ship's deck, 10 units further back than CRO-U did. Vieg's blow now ends on the deck in front of the
-  platform, as on the Vita and Android releases, instead of inside its wall with his legs hidden.
-  v0.7.2 wrongly said this matched the original.
-- **Vieg walks back from the area edges the game turns you away from**, instead of sliding back in
-  his standing pose.
-- **Battle stages are lit as the original lights them.** The original draws a stage unlit, with a few
-  rules for its transparent parts. Some stages were up to 20% too bright, and the reflective floor of
-  the Agent's last stage mirrored the sky instead of showing its grey sheen.
+A fix and feature release for [v0.7.3](https://github.com/DuIslingr/CRO-U/releases/tag/v0.7.3): the port's menus in nine languages, fan translations as a language of their own, and fixes for
+three of metastigma's reports. Everything in the v0.7.x notes still applies.
 
 ## New
 
-- **DDS texture replacements:** a `<hash>.dds` in `textures/hd` works like a `<hash>.png`. It can hold
-  BC1-BC5 (DXT1/3/5, ATI1/2), BC7 or uncompressed 32-bit RGBA/BGRA; the first mip is used. Cube
-  maps, volumes and arrays aren't supported. The blocks are decoded by
-  [bcdec](https://github.com/iOrange/bcdec) (MIT / Unlicense).
+- **Menu Language** ([#10](https://github.com/DuIslingr/CRO-U/issues/10)): the port's own text
+  (its Options, the first start's setup and the Vita save import) now comes in Japanese, French,
+  German, Spanish, Chinese (simplified and traditional), Korean and Russian, as well as English.
+  *Options > Game > Menu Language*; Auto, the default, follows the game's text language. The
+  translations are gettext catalogs in `engine/lang/`; a `.po` dropped into a `lang/` folder in the
+  game or profile folder is read in place of the built-in one, without building anything.
+- **Fan translations** ([#11](https://github.com/DuIslingr/CRO-U/issues/11)): a translation of the
+  game's text, put into `translation/` in the game folder, appears as a language of its own after the
+  game's eight, e.g. "Русский (fan translation)" in *Options > Game > Language*. Nothing is
+  replaced, and a message the translation lacks shows in English. It can be the translated `sys.evt`
+  and area `.evt` files (and any redrawn `.gxt`) from the Vita's `cro.psarc` in `translation/ru/`, a
+  rePatch folder with the whole translated `cro.psarc`, or the `.7z` / `.rar` / `.zip` either comes
+  in, dropped into `translation/` and unpacked on the next start. The README has the details.
+- **Camera Cutout: Black Bars.** A third choice besides Avoid and Ignore: the whole picture boxed
+  inside the screen's safe area, the rest black.
+
+## Fixed
+
+- **Vieg is seen on the paddle wheel** ([#9](https://github.com/DuIslingr/CRO-U/issues/9)): on the
+  ship, after the fade-in he climbs the wheel and stands on it for "Made it onboard somehow." and
+  again after the camera's pan. The ship's waves were drawn over him; the figures are now drawn in
+  one queue by draw order, as the original draws them.
+- **Vieg's leg no longer disappears into the bed** ([#12](https://github.com/DuIslingr/CRO-U/issues/12)):
+  running into furniture in a painted room, the forward leg of his stride went behind the piece's
+  front and was cut off, so he looked as if he stepped onto or into the bed. A figure is now hidden
+  by furniture in front of its body, not by furniture only its limbs reach behind. The original
+  has the same glitch; this is a deliberate departure from it.
+- **Android: the game no longer sits under the camera notch** with Camera Cutout on Avoid. SDL
+  reports the safe area only from Android 11, and on 11 - 14 can lose it as the window goes
+  fullscreen; the port now also asks Android for the cutout itself.
+- **Russian letters are no longer spaced out.** The Japanese fonts the game uses draw Cyrillic a
+  full character cell wide; Russian now comes from the system's proportional font (Noto Sans,
+  Segoe UI, Arial, Roboto ...) when the game's font draws it that way.
+- **Puzzle rooms:** the touch pad holds taps on the blocks off only while the pad is shown, as the
+  original does.
+- **Linux, AMD:** FSR 4 about 0.3 ms faster at 4K on RADV.
 
 ### Thanks to metastigma
 
-[metastigma](https://github.com/metastigma) sent the log that showed the controller as two devices, the
-Vita3K screenshots that showed I had #6 wrong, and the report of the sliding Vieg. Their fork's
-texture replacements ([CRO-U-metastigma#10](https://github.com/metastigma/CRO-U-metastigma/pull/10))
-led to the DDS support.
+[metastigma](https://github.com/metastigma) reported #9 - #12 with the shots and the Vita3K
+recordings that pinned them down, asked for the menus in every language, and wrote the Russian
+Options' wording (CRO-U-metastigma PR #51). The other menu translations are machine translations
+not yet reviewed by native speakers; corrections are welcome.
 
 ## Downloads
 
