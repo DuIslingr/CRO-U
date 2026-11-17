@@ -9,6 +9,8 @@
 
 #include "assets/texture.hpp"
 
+struct stbtt_fontinfo; // (stb_truetype)
+
 namespace cr {
 
 class Font {
@@ -29,7 +31,8 @@ public:
     // In a collection, the face with this PostScript name ("HiraKakuProN-W6"); false if none has it
     bool selectPostScript(const char* name);
     // Whether every character of `utf8` has a glyph in the current face.
-    bool covers(const std::string& utf8) const;
+    bool covers(const std::string& utf8) const; // (Cyrillic: the proportional fallback's, when the face's is full-width)
+    const ::stbtt_fontinfo* cyrillicInfo() const; // (font.cpp: the face as a Cyrillic fallback)
     // White-on-transparent lines: `em` pixels to the em, baselines `lineStep` apart, `pad`
     // pixels of margin.
     bool rasterise(const std::vector<std::string>& lines, float em, float lineStep, int pad, Image& out) const;
@@ -48,6 +51,8 @@ private:
     std::string path_;
     int faceIndex_ = -1;
     int generation_ = 0;
+    mutable int cyrillicOwn_ = -1; // (the face's Cyrillic proportional - 1 -, full-width or missing - 0; -1 not looked at)
+    bool cyrillicFromFallback() const;
     bool openFace(int index);
 };
 

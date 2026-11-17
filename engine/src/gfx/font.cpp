@@ -38,8 +38,84 @@ int glyphIndex(const stbtt_fontinfo& info, uint32_t c) {
 }
 } // namespace
 
+// Cyrillic from a proportional face where the font's own is full-width or missing (the Japanese faces: the
+// Vita's TB Gothic Pro, Android's TypeBank Gothic - their Cyrillic a CJK cell wide, Russian letter-spaced; CR2-U
+// found it first) - the system's sans (bold for a bold face). The games' own text has none: only translations
+namespace {
+bool isCyrillic(uint32_t c) { return c >= 0x400 && c <= 0x52F; }
+
+std::vector<std::string> cyrillicCandidates(bool bold) {
+    std::vector<std::string> out;
+#if defined(SDL_PLATFORM_WINDOWS)
+    const char* windir = SDL_getenv("WINDIR");
+    const std::string fonts = std::string(windir ? windir : "C:\\Windows") + "\\Fonts\\";
+    for (const char* f : bold ? std::vector<const char*>{"segoeuib.ttf", "arialbd.ttf"} : std::vector<const char*>{"segoeui.ttf", "arial.ttf"})
+        out.push_back(fonts + f);
+#elif defined(SDL_PLATFORM_ANDROID)
+    for (const char* f : bold ? std::vector<const char*>{"Roboto-Bold.ttf", "NotoSans-Bold.ttf", "Roboto-Regular.ttf"}
+                              : std::vector<const char*>{"Roboto-Regular.ttf", "NotoSans-Regular.ttf"})
+        out.push_back(std::string("/system/fonts/") + f);
+#elif defined(SDL_PLATFORM_MACOS)
+    for (const char* f : bold ? std::vector<const char*>{"/System/Library/Fonts/Supplemental/Arial Bold.ttf", "/Library/Fonts/Arial Bold.ttf"}
+                              : std::vector<const char*>{"/System/Library/Fonts/Supplemental/Arial.ttf", "/Library/Fonts/Arial.ttf"})
+        out.push_back(f);
+#elif !defined(SDL_PLATFORM_IOS)
+    const char* const kRegular[] = {"/usr/share/fonts/noto/NotoSans-Regular.ttf", "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+                                    "/usr/share/fonts/TTF/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                                    "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+                                    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"};
+    const char* const kBold[] = {"/usr/share/fonts/noto/NotoSans-Bold.ttf", "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+                                 "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                                 "/usr/share/fonts/liberation/LiberationSans-Bold.ttf",
+                                 "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"};
+    if (bold) out.assign(std::begin(kBold), std::end(kBold));
+    out.insert(out.end(), std::begin(kRegular), std::end(kRegular));
+#endif
+    return out;
+}
+
+// whether a face is bold: its subfamily name (id 2) says so
+bool boldFace(const stbtt_fontinfo& info) {
+    int len = 0;
+    std::string s;
+    if (const char* u = stbtt_GetFontNameString(&info, &len, STBTT_PLATFORM_ID_MICROSOFT, STBTT_MS_EID_UNICODE_BMP, STBTT_MS_LANG_ENGLISH, 2))
+        for (int k = 1; k < len; k += 2) s += u[k];
+    return s.find("Bold") != std::string::npos || s.find("Black") != std::string::npos || s.find("Heavy") != std::string::npos;
+}
+} // namespace
+
+// (one regular and one bold for the process, loaded when first wanted; null: none found)
+static const stbtt_fontinfo* cyrillicFallback(bool bold) {
+    static Font faces[2];
+    static bool tried[2] = {false, false};
+    Font& f = faces[bold ? 1 : 0];
+    if (!tried[bold ? 1 : 0]) {
+        tried[bold ? 1 : 0] = true;
+#ifdef SDL_PLATFORM_APPLE
+        loadAppleFont(f, bold ? "Arial-BoldMT" : "ArialMT");
+#endif
+        for (const std::string& p : cyrillicCandidates(bold))
+            if (!f.loaded() && f.load(p)) SDL_Log("font: Cyrillic from %s (the text's face draws it a CJK cell wide)", p.c_str());
+    }
+    return f.loaded() ? f.cyrillicInfo() : nullptr;
+}
+
 Font::Font() = default;
 Font::~Font() = default;
+
+const stbtt_fontinfo* Font::cyrillicInfo() const { return face_ ? &face_->info : nullptr; }
+
+bool Font::cyrillicFromFallback() const {
+    if (!face_) return false;
+    if (cyrillicOwn_ < 0) { // (А's advance: a proportional face's about 0.6 - 0.7 em, a CJK face's full-width one 1)
+        const stbtt_fontinfo& info = face_->info;
+        const int g = stbtt_FindGlyphIndex(&info, 0x410);
+        int adv = 0, lsb = 0;
+        if (g) stbtt_GetGlyphHMetrics(&info, g, &adv, &lsb);
+        cyrillicOwn_ = g && float(adv) * stbtt_ScaleForMappingEmToPixels(&info, 1) < 0.8f;
+    }
+    return cyrillicOwn_ == 0 && cyrillicFallback(boldFace(face_->info)) != nullptr;
+}
 
 bool Font::openFace(int index) {
     const int offset = stbtt_GetFontOffsetForIndex(data_.data(), index);
@@ -48,6 +124,7 @@ bool Font::openFace(int index) {
     if (!stbtt_InitFont(&f->info, data_.data(), offset)) return false;
     face_ = std::move(f);
     faceIndex_ = index;
+    cyrillicOwn_ = -1;
     ++generation_;
     return true;
 }
@@ -110,6 +187,7 @@ bool Font::covers(const std::string& utf8) const {
     if (!loaded()) return false;
     for (size_t i = 0; i < utf8.size();) {
         const uint32_t c = nextUtf8(utf8, i);
+        if (isCyrillic(c) && cyrillicFromFallback()) continue;
         if (c > 0x20 && c != 0x3000 && !glyphIndex(face_->info, c)) return false;
     }
     return true;
@@ -128,24 +206,45 @@ bool Font::rasterise(const std::vector<std::string>& lines, float em, float line
 
     const float base0 = float(pad) + float(ascent) * scale;
 
-    // Glyph indices per line ('?' for characters the face lacks), then the widest line
-    std::vector<std::vector<int>> glyphs(lines.size());
+    // Glyph indices per line ('?' for characters the face lacks), each with its face (Cyrillic perhaps the
+    // proportional fallback's), then the widest line
+    struct Glyph {
+        const stbtt_fontinfo* face;
+        int g;
+    };
+    std::vector<std::vector<Glyph>> glyphs(lines.size());
     const int fallback = stbtt_FindGlyphIndex(&info, '?');
+    const stbtt_fontinfo* cyr = nullptr;
+    bool cyrLooked = false;
+    auto scaleOf = [&](const stbtt_fontinfo* f) { return f == &info ? scale : stbtt_ScaleForMappingEmToPixels(f, em); };
     float widest = 1;
     for (size_t l = 0; l < lines.size(); ++l) {
         float x = 0;
-        int prev = 0;
+        Glyph prev{nullptr, 0};
+        // (a line with kana, kanji or hangul keeps the face's own Cyrillic: the Japanese and Korean text's few
+        // Cyrillic letters are symbols in it, drawn as the original's face draws them)
+        bool cjkLine = false;
+        for (size_t i = 0; i < lines[l].size() && !cjkLine;) {
+            const uint32_t c = nextUtf8(lines[l], i);
+            cjkLine = (c >= 0x3040 && c <= 0x30FF) || (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0xAC00 && c <= 0xD7AF);
+        }
         for (size_t i = 0; i < lines[l].size();) {
             const uint32_t c = nextUtf8(lines[l], i);
             if (c < 0x20) continue; // (a message's marks, such as the centred line's \x01: not drawn)
-            int g = glyphIndex(info, c);
-            if (!g && c > 0x20 && c != 0x3000) g = fallback;
+            Glyph gl{&info, 0};
+            if (isCyrillic(c) && !cjkLine) {
+                if (!cyrLooked) cyrLooked = true, cyr = cyrillicFromFallback() ? cyrillicFallback(boldFace(info)) : nullptr;
+                if (cyr && stbtt_FindGlyphIndex(cyr, int(c))) gl = {cyr, stbtt_FindGlyphIndex(cyr, int(c))};
+            }
+            if (!gl.g) gl = {&info, glyphIndex(info, c)};
+            if (!gl.g && c > 0x20 && c != 0x3000) gl.g = fallback;
+            const float s = scaleOf(gl.face);
             int adv = 0, lsb = 0;
-            stbtt_GetGlyphHMetrics(&info, g, &adv, &lsb);
-            if (prev) x += float(stbtt_GetGlyphKernAdvance(&info, prev, g)) * scale;
-            x += float(adv) * scale;
-            glyphs[l].push_back(g);
-            prev = g;
+            stbtt_GetGlyphHMetrics(gl.face, gl.g, &adv, &lsb);
+            if (prev.g && prev.face == gl.face) x += float(stbtt_GetGlyphKernAdvance(gl.face, prev.g, gl.g)) * s;
+            x += float(adv) * s;
+            glyphs[l].push_back(gl);
+            prev = gl;
         }
         widest = std::max(widest, x);
     }
@@ -157,19 +256,22 @@ bool Font::rasterise(const std::vector<std::string>& lines, float em, float line
     for (size_t l = 0; l < lines.size(); ++l) {
         const float baseline = base0 + float(l) * lineStep;
         float x = float(pad);
-        int prev = 0;
-        for (int g : glyphs[l]) {
-            if (prev) x += float(stbtt_GetGlyphKernAdvance(&info, prev, g)) * scale;
-            prev = g;
+        Glyph prev{nullptr, 0};
+        for (const Glyph& gl : glyphs[l]) {
+            const stbtt_fontinfo* face = gl.face;
+            const int g = gl.g;
+            const float s = scaleOf(face);
+            if (prev.g && prev.face == face) x += float(stbtt_GetGlyphKernAdvance(face, prev.g, g)) * s;
+            prev = gl;
             int adv = 0, lsb = 0;
-            stbtt_GetGlyphHMetrics(&info, g, &adv, &lsb);
+            stbtt_GetGlyphHMetrics(face, g, &adv, &lsb);
             const float fx = x - std::floor(x);
             int x0, y0, x1, y1;
-            stbtt_GetGlyphBitmapBoxSubpixel(&info, g, scale, scale, fx, 0, &x0, &y0, &x1, &y1);
+            stbtt_GetGlyphBitmapBoxSubpixel(face, g, s, s, fx, 0, &x0, &y0, &x1, &y1);
             const int gw = x1 - x0, gh = y1 - y0;
             if (gw > 0 && gh > 0) {
                 bmp.assign(size_t(gw) * gh, 0);
-                stbtt_MakeGlyphBitmapSubpixel(&info, bmp.data(), gw, gh, gw, scale, scale, fx, 0, g);
+                stbtt_MakeGlyphBitmapSubpixel(face, bmp.data(), gw, gh, gw, s, s, fx, 0, g);
                 const int ox = int(std::floor(x)) + x0, oy = int(std::lround(baseline)) + y0;
                 for (int y = 0; y < gh; ++y) {
                     const int ty = oy + y;
@@ -183,7 +285,7 @@ bool Font::rasterise(const std::vector<std::string>& lines, float em, float line
                     }
                 }
             }
-            x += float(adv) * scale;
+            x += float(adv) * s;
         }
     }
     return true;
