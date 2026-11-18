@@ -274,12 +274,14 @@ void drawSceneLayer(App& app, int slot, float x, float y, float w, float h, floa
 }
 
 // ScnEffectProc's layers at z -1998, drawn before the field's painting: 11 / 12 the magma, 13..22,
-// 26, 27 the elevator shaft's walls, 28 the space backdrop, 30 the sky. sx, sy: half the scroll
+// 26, 27 the elevator shaft's walls, 28 the space backdrop, 30 the sky. sx, sy: half the scroll - GetScroll's, whose
+// y counts down the screen (FieldCamera +8 = viewH / 2 - the target's y): our offY's negative, as FrmPanCam takes it
+// (#18: the sky above the ship's deck, not its sea)
 void drawSceneBack(App& app, bool battle) {
     using namespace scenefx;
     const App::SceneFx& fx = app.fx;
     if (fx.set < 0) return;
-    const float sx = battle ? 0.0f : app.scroll.offX * 0.5f, sy = battle ? 0.0f : app.scroll.offY * 0.5f;
+    const float sx = battle ? 0.0f : app.scroll.offX * 0.5f, sy = battle ? 0.0f : -app.scroll.offY * 0.5f;
     cr::Renderer& r = app.renderer;
     r.setOrigin(r.uiX());
     for (int id = 1; id < 31; ++id) {
@@ -333,7 +335,7 @@ void drawSceneEffects(App& app, bool battle) {
     using namespace scenefx;
     const App::SceneFx& fx = app.fx;
     if (fx.set < 0) return;
-    const float sx = battle ? 0.0f : app.scroll.offX * 0.5f, sy = battle ? 0.0f : app.scroll.offY * 0.5f;
+    const float sx = battle ? 0.0f : app.scroll.offX * 0.5f, sy = battle ? 0.0f : -app.scroll.offY * 0.5f;
     cr::Renderer& r = app.renderer;
     r.setOrigin(r.uiX());
     const int ch0 = fx.ch[0].alpha, ch1 = fx.ch[1].alpha, ch2 = fx.ch[2].alpha;
@@ -598,7 +600,7 @@ void loadVideo(App& app, const char* text) {
     App::Video& v = app.video;
     v.width = std::clamp(keyValue(text, "\nwidth=", v.width), 320, 3840);
     v.height = std::clamp(keyValue(text, "\nheight=", v.height), 240, 2160);
-    v.display = std::clamp(keyValue(text, "\ndisplay=", v.display), 0, 2);
+    v.display = v.savedDisplay = std::clamp(keyValue(text, "\ndisplay=", v.display), 0, 2);
     v.fullscreenKind = std::clamp(keyValue(text, "\nfullscreen_kind=", v.display ? v.display : v.fullscreenKind), 1, 2);
     v.widescreen = keyValue(text, "\nwidescreen=", v.widescreen) != 0;
     // painted_fill= 0 / 1 (Original / Fill); the old painted_rooms= (0 Original, 1 Whole, 2 Fill Width) and
@@ -808,11 +810,11 @@ void applyVideo(App& app) {
 void toggleFullscreen(App& app) {
 #if !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_IOS)
     App::Video& v = app.video;
-    if (v.display) v.fullscreenKind = v.display;
-    v.display = v.display ? 0 : std::clamp(v.fullscreenKind, 1, 2);
-    SDL_Log("display: %s (F11 / Alt+Enter)", v.display == 0 ? "windowed" : v.display == 1 ? "fullscreen" : "borderless");
+    // (for this session only: settings.ini keeps Options' Display - savedDisplay - and fullscreen_kind, #15)
+    if (v.display) v.toggleKind = v.display;
+    v.display = v.display ? 0 : std::clamp(v.toggleKind ? v.toggleKind : v.fullscreenKind, 1, 2);
+    SDL_Log("display: %s (F11 / Alt+Enter, this session)", v.display == 0 ? "windowed" : v.display == 1 ? "fullscreen" : "borderless");
     applyVideo(app);
-    saveMix(app);
 #else
     (void)app;
 #endif
@@ -864,8 +866,8 @@ void adjustVideo(App& app, int row, int dir) {
         break;
     }
     case 1:
-        v.display = (v.display + dir + 3) % 3;
-        if (v.display) v.fullscreenKind = v.display; // (F11's from now on)
+        v.display = v.savedDisplay = (v.display + dir + 3) % 3; // (Options': saved - F11's aren't)
+        if (v.display) v.fullscreenKind = v.display, v.toggleKind = 0; // (F11's from now on)
         break;
     case 2: v.widescreen = !v.widescreen; break;
     case 3: v.paintings = (v.paintings + dir + 2) % 2; break;
@@ -1179,6 +1181,12 @@ std::vector<OptRow> optionRows(App& app, int page) {
             title.act = [&app](int) { app.resetAsk = 3, app.resetConfirm = 1; }; // OptionPrc 0xc: "return to the title?" (57060)
         }
         rows.push_back(title);
+#if !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_IOS)
+        OptRow quit; // ours, the desktop's (#16): asked first, as Return to Title is
+        quit.label = tr("Quit Game");
+        quit.act = [&app](int) { app.resetAsk = 4, app.resetConfirm = 1; };
+        rows.push_back(quit);
+#endif
         break;
     }
     case 1: { // Sound
@@ -1539,14 +1547,24 @@ void drawOptions(App& app, float, float) {
         const float y = optRowY(i - app.optionsScroll), mid = y + 12;
         const bool cursor = app.optionsRow == i;
         const float dim = row.enabled ? a : a * 0.45f;
-        m.rowBar(20 + rowsX, y, row.label, dim, cursor);
+        // (the cursor row as the Vita shows it - white, the others 0xc8 grey (the Vita: at most 0xd2), its gauge light cyan - while the keys or a
+        // pad lead; under a finger or the mouse every row alike, 3.1.0's white at 0xb3: #17)
+        const bool focus = !app.pointerLast, vita = r.vitaScreen();
+        m.rowBar(20 + rowsX, y, row.label, dim, false, focus && !cursor ? 0xc8 / 255.0f : 1, (vita ? 0xd2 : 0xb3) / 255.0f);
         // The control in the original's design units (buttons 8 above the bar, gauges 4 below),
         // scaled about (kOptCtrlX, the bar's middle)
         m.setScale(kOptCtrlX + ctrlX, mid, kOptCtrlScale);
         const float cx = kOptCtrlX + ctrlX;
         switch (row.kind) {
         case OptControl::Check: m.button(cx + 120, y - 8, 23, "", false, dim, cursor && row.enabled); break;
-        case OptControl::Gauge: m.gauge(cx, y + 4, row.value, a, cursor); break;
+        case OptControl::Gauge: {
+            App::GaugeEase& e = app.gaugeEase[row.gauge];
+            if (e.to < 0) e.from = e.to = row.value;
+            if (row.value != e.to) e.from = e.to, e.to = row.value, e.left = 10; // (a new step: from the last knob)
+            const float fill = e.left > 0 ? float(e.to) + float(e.from - e.to) * float(e.left) / 10.0f : -1.0f;
+            m.gauge(cx, y + 4, row.value, a, cursor && focus, fill);
+            break;
+        }
         case OptControl::Pair:
             for (int k = 0; k < 2; ++k)
                 m.button(cx + 120 * k, y - 8, row.words[k], row.texts[k], row.selected == k, a, false);
@@ -1601,7 +1619,8 @@ void drawOptions(App& app, float, float) {
     }
     if (app.resetAsk) { // OptionPrc 9 / 10: the message board (57078, then 57079), Yes / No at (336, 104 / 160)
         std::vector<std::vector<std::string>> pages;
-        app.systemText.message(app.resetAsk == 1 ? 57078 : app.resetAsk == 2 ? 57079 : 57060, textLanguage(app), nullptr, pages, nullptr);
+        if (app.resetAsk == 4) pages = {{std::string(tr("Quit the game?"))}}; // (ours: Quit Game)
+        else app.systemText.message(app.resetAsk == 1 ? 57078 : app.resetAsk == 2 ? 57079 : 57060, textLanguage(app), nullptr, pages, nullptr);
         r.setOrigin(0); // (the rows' window goes while it asks: WinDispOff(5))
         r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 0.75f);
         r.setOrigin(r.uiX());
@@ -1621,6 +1640,8 @@ void stepOptions(App& app) {
     takeAndroidFolder(app);
     if (!app.optionsOpen) return;
     if (optionsAbout(app)) { app.optionsAnim = 0; return; } // (the page slides in once "About Option" has shut)
+    for (auto& [setting, e] : app.gaugeEase) // (SideGuageDraw's count: one a frame)
+        if (e.left > 0) --e.left;
     ++app.optionsAnim;
     app.optionsBob += app.optionsBobDir;
     if (app.optionsBob >= 5 || app.optionsBob <= 0) app.optionsBobDir = -app.optionsBobDir;
@@ -1631,6 +1652,15 @@ void resetAnswer(App& app, bool yes) {
     if (yes && app.resetAsk == 1) {
         app.resetAsk = 2, app.resetConfirm = 1;
         menuSound(app, se::kChoose);
+        return;
+    }
+    if (app.resetAsk == 4) { // Quit Game (ours, #16): Yes - the app closes, as its window's close button does
+        app.resetAsk = 0;
+        menuSound(app, se::kChoose);
+        if (!yes) return;
+        SDL_Event quit{};
+        quit.type = SDL_EVENT_QUIT;
+        SDL_PushEvent(&quit);
         return;
     }
     if (app.resetAsk == 3) { // Return to Title (OptionPrc 0xd / 0x18 / 0x19): Yes - black over 500 ms, the music off,
@@ -1783,7 +1813,7 @@ void optionsClick(App& app, float px, float py) {
         case OptControl::Gauge: { // set the value where the track was hit (knob at x + 11 + v x 2.03)
             if (!inX(224, 444) || !r.gauge) return;
             const float design = kOptCtrlX + (mx - kOptCtrlX) / kOptCtrlScale; // back to design units
-            *r.gauge = std::clamp(int(std::lround((design - 235) / 2.03f)), 0, 100);
+            *r.gauge = std::clamp(int(std::lround((design - 235) / 2.03f / 10)) * 10, 0, 100); // (steps of 10, as the keys')
             applyMix(app);
             saveMix(app);
             if (r.sound >= 0) menuSound(app, uint32_t(r.sound));

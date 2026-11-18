@@ -22,6 +22,7 @@ struct Texture {
     bool alphaOnly = false;
     bool noAlpha = false; // (Image::noAlpha: a mesh's GL_REPLACE keeps the fragment's alpha)
     bool cutout = false; // (an HD texture standing in for a cut-out: see Image::cutout)
+    bool hdSheet = false; // (Image::hdSheet: a _hd / _ipad file's - its pictures at twice their units)
 };
 
 // A mesh uploaded to the GPU: interleaved position/uv plus a triangle index buffer.

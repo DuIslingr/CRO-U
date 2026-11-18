@@ -3994,8 +3994,20 @@ int runSelfTest(App& app) {
         app.game.setFlag(0x43, true); // ("About Option" read)
         openOptions(app, 0);
         const std::vector<OptRow> titlePage = optionRows(app, 0);
-        problems += titlePage.size() != size_t(14 - languageSheet(app)) || // (3.1.0: one Language row)
-                    titlePage.back().label != sysLabel(app, 58122, "Reset Data");
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+        const size_t quitRows = 0;
+#else
+        const size_t quitRows = 1; // (the desktop's Quit Game after Reset Data, #16)
+#endif
+        problems += titlePage.size() != size_t(14 - languageSheet(app)) + quitRows || // (3.1.0: one Language row)
+                    titlePage[titlePage.size() - 1 - quitRows].label != sysLabel(app, 58122, "Reset Data") ||
+                    (quitRows && titlePage.back().label != tr("Quit Game"));
+        if (quitRows) { // its question, answered No: Options stay (a Yes would close the app)
+            titlePage.back().act(0);
+            const bool asked = app.resetAsk == 4;
+            resetAnswer(app, false);
+            problems += !asked || app.resetAsk != 0 || !app.optionsOpen;
+        }
         { // Menu Language (platform/ui_text): Auto first; a step right names English or a catalog, and the port's text follows
             const std::string keepLang = app.uiLang;
             int at = -1;
@@ -4030,7 +4042,7 @@ int runSelfTest(App& app) {
                 for (int pair = 1; pair <= 4; ++pair) n += SDL_GetPathInfo(slotPath(app, pair).c_str(), nullptr);
                 return n + int(SDL_GetPathInfo(savePath(app, "resume.dat").c_str(), nullptr));
             };
-            app.optionsRow = int(titlePage.size()) - 1;
+            app.optionsRow = int(titlePage.size() - 1 - quitRows); // (Reset Data: before the desktop's Quit Game)
             optionsKey(app, SDLK_RETURN);                 // "Erase all the data from your game?"
             int bad = app.resetAsk != 1 || app.resetConfirm != 1;
             optionsKey(app, SDLK_RETURN);                 // No (under the cursor)
@@ -4073,8 +4085,15 @@ int runSelfTest(App& app) {
         app.game.setFlag(0x43, true);
         openOptions(app, 0);
         std::vector<OptRow> gamePage = optionRows(app, 0);
-        problems += gamePage.size() != size_t(14 - languageSheet(app)) || gamePage.back().label != sysLabel(app, 58123, "Return to Title") || !gamePage.back().enabled;
-        if (gamePage.size() == size_t(14 - languageSheet(app)) && gamePage.back().act) gamePage.back().act(0);
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+        const size_t quitRow = 0;
+#else
+        const size_t quitRow = 1; // (the desktop's Quit Game last, #16)
+#endif
+        const size_t titleRow = gamePage.size() - 1 - quitRow;
+        problems += gamePage.size() != size_t(14 - languageSheet(app)) + quitRow || gamePage[titleRow].label != sysLabel(app, 58123, "Return to Title") ||
+                    !gamePage[titleRow].enabled;
+        if (gamePage.size() == size_t(14 - languageSheet(app)) + quitRow && gamePage[titleRow].act) gamePage[titleRow].act(0);
         problems += app.resetAsk != 3; // "return to the title?"
         resetAnswer(app, true);
         for (int f = 0; f < 14 && app.titleReturnIn > 0; ++f) stepEvents(app); // (twelve frames of black)
@@ -6815,7 +6834,7 @@ int runSelfTest(App& app) {
         app.titleOpen = true;
         app.titleStage = 1; // (past the title's tap-to-start)
         app.titleCursor = 2;
-        tap(wideRight(app), 328 + 60, 114 + 20, px, py); // Start's plate
+        tap(wideRight(app), 328 + 60, titlePlateY(0) + 20, px, py); // Start's plate
         const int before = app.titleCursor;
         titleClick(app, px, py);
         const bool title = app.titleCursor == 0 && before == 2;
@@ -7357,7 +7376,7 @@ int runSelfTest(App& app) {
     }
 #if !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_IOS)
     { // F11 / Alt+Enter: windowed <-> fullscreen, the kind last chosen (borderless at first; exclusive once
-      // Options chose it), as Options' Display setting; a held key's repeats ignored
+      // Options chose it), for the session: settings.ini keeps Options' Display (#15); a held key's repeats ignored
         const App::Video keepVideo = app.video;
         const bool keepPersist = app.persist;
         app.persist = false; // (settings.ini left as it was)
@@ -7366,21 +7385,26 @@ int runSelfTest(App& app) {
             ev.type = SDL_EVENT_KEY_DOWN, ev.key.key = key, ev.key.mod = mod, ev.key.down = true, ev.key.repeat = repeat;
             SDL_AppEvent(&app, &ev);
         };
-        app.video.display = 0, app.video.fullscreenKind = 2;
+        app.video.display = app.video.savedDisplay = 0, app.video.fullscreenKind = 2, app.video.toggleKind = 0;
+        // (#15: the keys' choice lasts the session - settings.ini's display= stays Options' through any save)
+        auto saved = [&app](int d) { return settingsText(app).find("\ndisplay=" + std::to_string(d) + "\n") != std::string::npos; };
         press(SDLK_F11, SDL_KMOD_NONE);
-        const bool borderless = app.video.display == 2;
+        const bool borderless = app.video.display == 2 && saved(0) && app.video.fullscreenKind == 2;
         press(SDLK_F11, SDL_KMOD_NONE, true);
         const bool repeatIgnored = app.video.display == 2;
         press(SDLK_RETURN, SDL_KMOD_LALT);
-        const bool windowed = app.video.display == 0;
+        const bool windowed = app.video.display == 0 && saved(0);
         adjustVideo(app, 1, 1); // (Options: Fullscreen)
-        const bool chosen = app.video.display == 1;
+        const bool chosen = app.video.display == 1 && saved(1);
         press(SDLK_F11, SDL_KMOD_NONE);
+        const bool keptSaved = app.video.display == 0 && saved(1) && app.video.fullscreenKind == 1;
         press(SDLK_F11, SDL_KMOD_NONE);
         const bool exclusive = app.video.display == 1;
-        const int problems = !borderless + !repeatIgnored + !windowed + !chosen + !exclusive;
-        std::printf("fullscreen key: F11 borderless %s (a repeat ignored %s), Alt+Enter windowed %s, Options' Fullscreen %s then F11 back to it %s; %d problems\n",
-                    borderless ? "yes" : "NO", repeatIgnored ? "yes" : "NO", windowed ? "yes" : "NO", chosen ? "yes" : "NO", exclusive ? "yes" : "NO", problems);
+        const int problems = !borderless + !repeatIgnored + !windowed + !chosen + !keptSaved + !exclusive;
+        std::printf("fullscreen key: F11 borderless %s (a repeat ignored %s), Alt+Enter windowed %s, Options' Fullscreen saved %s, "
+                    "F11 windowed with Fullscreen still saved %s, then back to it %s; %d problems\n",
+                    borderless ? "yes" : "NO", repeatIgnored ? "yes" : "NO", windowed ? "yes" : "NO", chosen ? "yes" : "NO",
+                    keptSaved ? "yes" : "NO", exclusive ? "yes" : "NO", problems);
         app.video = keepVideo;
         applyVideo(app);
         app.persist = keepPersist;

@@ -32,15 +32,23 @@ msgid "Off"
 msgstr ""
 
 #: src/app/explore.cpp src/app/scene_fx.cpp
+msgid "Quit Game"
+msgstr ""
+
+#: src/app/explore.cpp src/app/scene_fx.cpp
 msgid "Menu Language"
+msgstr ""
+
+#: src/app/field_puzzle.cpp
+msgid "Fan translation"
 msgstr ""
 
 #: src/app/field_puzzle.cpp
 msgid "{0} (fan translation)"
 msgstr ""
 
-#: src/app/field_puzzle.cpp
-msgid "Fan translation"
+#: src/app/menus.cpp src/platform/setup.cpp
+msgid "Quit"
 msgstr ""
 
 #: src/app/scene_fx.cpp
@@ -485,6 +493,10 @@ msgstr ""
 msgid "FSR's sharpening pass (RCAS); DLSS has none"
 msgstr ""
 
+#: src/app/scene_fx.cpp
+msgid "Quit the game?"
+msgstr ""
+
 #: src/gfx/render_device.hpp
 msgid "needs the Vulkan renderer"
 msgstr ""
@@ -772,10 +784,6 @@ msgstr ""
 
 #: src/platform/setup.cpp
 msgid "Look again"
-msgstr ""
-
-#: src/platform/setup.cpp
-msgid "Quit"
 msgstr ""
 
 #: src/platform/setup.cpp

@@ -33,16 +33,24 @@ msgid "Off"
 msgstr "Desactivado"
 
 #: src/app/explore.cpp src/app/scene_fx.cpp
+msgid "Quit Game"
+msgstr "Salir del juego"
+
+#: src/app/explore.cpp src/app/scene_fx.cpp
 msgid "Menu Language"
 msgstr "Idioma de los menús"
+
+#: src/app/field_puzzle.cpp
+msgid "Fan translation"
+msgstr "Traducción de fans"
 
 #: src/app/field_puzzle.cpp
 msgid "{0} (fan translation)"
 msgstr "{0} (traducción de fans)"
 
-#: src/app/field_puzzle.cpp
-msgid "Fan translation"
-msgstr "Traducción de fans"
+#: src/app/menus.cpp src/platform/setup.cpp
+msgid "Quit"
+msgstr "Salir"
 
 #: src/app/scene_fx.cpp
 msgid "Game"
@@ -509,6 +517,10 @@ msgstr "Nitidez"
 msgid "FSR's sharpening pass (RCAS); DLSS has none"
 msgstr "Pase de nitidez de FSR (RCAS); DLSS no lo tiene"
 
+#: src/app/scene_fx.cpp
+msgid "Quit the game?"
+msgstr "¿Salir del juego?"
+
 #: src/gfx/render_device.hpp
 msgid "needs the Vulkan renderer"
 msgstr "requiere el renderizador Vulkan"
@@ -810,10 +822,6 @@ msgstr "Iniciar"
 #: src/platform/setup.cpp
 msgid "Look again"
 msgstr "Buscar de nuevo"
-
-#: src/platform/setup.cpp
-msgid "Quit"
-msgstr "Salir"
 
 #: src/platform/setup.cpp
 msgid "iOS app (.ipa)"

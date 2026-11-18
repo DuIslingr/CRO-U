@@ -227,6 +227,8 @@ struct App {
     bool optionsBarDrag = false;           // the scroll bar's thumb held
     int optionsAnim = 0;                   // frames since the page appeared (windows slide in)
     int optionsBob = 0, optionsBobDir = 1; // ComUty_CmdBack's arrows
+    struct GaugeEase { int from = -1, to = -1, left = 0; }; // SideGuageProc / Draw: the fill 10 frames from the old
+    std::map<const int*, GaugeEase> gaugeEase;           // knob to the new (#17), by the setting it shows
     float optionsClock = 0;
     bool environmentEffects = true;        // the original's Environment Effects (weather; stored)
     bool lockLandscapeFlipped = false; // the landscape direction retained by the orientation lock
@@ -263,6 +265,9 @@ struct App {
         int width = 1024, height = 768;    // window size (windowed) or display mode (fullscreen)
         int display = 0;                   // 0 windowed, 1 fullscreen (that mode), 2 borderless (the desktop's)
         int fullscreenKind = 2;            // F11 / Alt+Enter's fullscreen: the last one chosen (1 or 2)
+        int savedDisplay = 0;              // settings.ini's display=: Options' choice alone - F11 / Alt+Enter and the
+                                           // command line change display for the session (#15)
+        int toggleKind = 0;                // F11's fullscreen this session (0: fullscreenKind's)
 #if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
         bool widescreen = true;            // the screen widens to the window (up to 21:9); else 4:3 (a phone's: wide, filling it)
 #else
@@ -2040,6 +2045,7 @@ void loadMix(App& app);
 bool seenFlag(const App& app, int f);
 void markSeen(App& app, int f);
 void saveMix(const App& app);
+std::string settingsText(const App& app);
 void setSystemConfFlag(App& app, int f);
 void fieldCheckAchievements(App& app);
 void battleConfFlag(App& app, int f);
@@ -2047,6 +2053,7 @@ bool achievementBannerUp(const App& app);
 void stepAchievements(App& app, float dt);
 constexpr bool upscalerHere(int u);
 void loadVideo(App& app, const char* text);
+void loadSavedVideo(App& app);
 void applyOrientation(App& app, bool captureDirection = false);
 void applyVideo(App& app);
 std::string sysLabel(const App& app, int id, const char* fallback);
@@ -2262,6 +2269,10 @@ void titleStart(App& app);
 void titleBoardTap(App& app);
 void titleTap(App& app);
 void titleChoose(App& app, int i);
+float titlePlateY(int i);
+// A menu sheet's pictures in its units: twice them on a _hd / _ipad file's (_tex2d_add, chk_hd_name's flags - by the
+// name, not the size: the Status page's 512 j039_L01_hd whole, #14), and on any sheet 1024 wide or more
+inline float sheetScale(const cr::Texture& t) { return t.hdSheet || t.width >= 1024 ? 2.0f : 1.0f; } // (the title's plate i: Start, Scenarios, Options, and the desktop's Quit)
 bool titleKey(App& app, SDL_Keycode key);
 void titleClick(App& app, float px, float py);
 std::string achievementName(const App& app, int n);

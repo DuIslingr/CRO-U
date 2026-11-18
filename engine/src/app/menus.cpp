@@ -4344,12 +4344,12 @@ void drawScenarios(App& app) {
     };
     auto sheet = [&](int p, float x, float y, float alpha) {
         const short* q = kSheetPict[p];
-        const float k = s.sheet.width >= 1024 ? 2.0f : 1.0f;
+        const float k = sheetScale(s.sheet);
         m.imagePieceTo(s.sheet, x, y, q[2], q[3], q[0] * k, q[1] * k, q[2] * k, q[3] * k, alpha);
     };
     auto card = [&](int p, float x, float y, float alpha) {
         const short* q = kCardPict[p];
-        const float k = s.cardTex.width >= 1024 ? 2.0f : 1.0f;
+        const float k = sheetScale(s.cardTex);
         m.imagePieceTo(s.cardTex, x, y, q[2], q[3], q[0] * k, q[1] * k, q[2] * k, q[3] * k, alpha);
     };
     // A rate: its strip of 24 (picture 15) and the two lines under it (_C_84_13820: grey 0x565853
@@ -4369,7 +4369,7 @@ void drawScenarios(App& app) {
         // (__Birthday_PictNumDraw: three digits from (385, y), the first at z -2, under the label)
         const int d[3] = {value / 100 % 10, value / 10 % 10, value % 10};
         const short* q = kSheetPict[5];
-        const float k = s.sheet.width >= 1024 ? 2.0f : 1.0f;
+        const float k = sheetScale(s.sheet);
         for (int i = 0; i < 3; ++i)
             m.imagePieceTo(s.sheet, 385 + 24.0f * float(i), which ? 254 : 136, q[2], q[3], (q[0] + q[2] * d[i]) * k, q[1] * k,
                            q[2] * k, q[3] * k, alpha);
@@ -4451,7 +4451,7 @@ void drawScenarios(App& app) {
     if (s.cardTex.id && a6 > 0) card(0, x6, 0, a6); // window 6: the card's name
     drawClockAndOz(app, m, a);         // window 1: BattryAndRealTimeAndOzDraw, the list's and the card's alike
     if (s.complete && s.complete < 3 && s.completeTex.id) { // window 9: the pieces (picture i at the i-th place)
-        const float k = s.completeTex.width >= 1024 ? 2.0f : 1.0f;
+        const float k = sheetScale(s.completeTex);
         for (int p = 0; p < 7; ++p) {
             const short* q = kCompletePict[p];
             m.imagePieceTo(s.completeTex, float(s.piece[size_t(p)][0]), float(s.piece[size_t(p)][1]), q[2], q[3], q[0] * k, q[1] * k,
@@ -4647,7 +4647,7 @@ void drawCollection(App& app) {
     m.begin(r, app.windowTex, &app.font);
     const PhoneMenu pm(app, m);
     const float t = std::min(1.0f, float(c.anim) / 8.0f), ease = 1 - (1 - t) * (1 - t);
-    const float k = c.tex.width >= 1024 ? 2.0f : 1.0f;
+    const float k = sheetScale(c.tex);
     auto pict = [&](int p, float x, float y, float a, bool flipU = false, bool flipV = false) {
         const short* q = kPict[p];
         const float u = (q[0] + (flipU ? q[2] : 0)) * k, v = (q[1] + (flipV ? q[3] : 0)) * k;
@@ -5157,7 +5157,7 @@ float charArtScale(const App& app) {
 void drawFullPicture(App& app, const cr::Texture& tex, int pict, float x, float y, float alpha, float grey = 1) {
     if (!tex.id) return;
     const short* p = cr::kOutReadPicture[pict];
-    const float k = tex.width >= 1024 ? 2.0f : 1.0f, s = charArtScale(app);
+    const float k = sheetScale(tex), s = charArtScale(app);
     app.menu.imagePieceTo(tex, 240 - (240 - x) * s, 160 - (160 - y) * s, p[2] * s, p[3] * s, p[0] * k, p[1] * k, p[2] * k,
                           p[3] * k, alpha, grey, grey, grey);
 }
@@ -5170,7 +5170,7 @@ void drawCharArt(App& app, float alpha, bool banner, float grey) {
     const float x = phone ? 0.0f : -32.0f, y = phone ? 0.0f : -64.0f;
     const auto draw = [&](int pict, float dy) {
         const short* p = cr::kOutReadPicture[pict];
-        const float k = tex.width >= 1024 ? 2.0f : 1.0f;
+        const float k = sheetScale(tex);
         m.imagePieceTo(tex, x, y + dy, p[2], p[3], p[0] * k, p[1] * k, p[2] * k, p[3] * k, alpha, grey, grey, grey);
     };
     if (banner) draw(phone ? 26 : 27, -androidEdgeY(app));
@@ -5213,7 +5213,7 @@ void drawCharSelect(App& app) {
             (app.charSelectCursor == 0 && !app.pointerLast) || pressIn(app, kPressCharSelect, app.renderer.uiX(), 172, 232, 136, 40), t, false); // (StartPrc's DAT_000ecad8: held)
     if (later && sp.serect.id) { // window 2: the cord (serect 29, tex2d_add at (260, pull - 205), turned), the arrow while held, 28
         const short* q = cr::kOutReadPicture[29];
-        const float k = sp.serect.width >= 1024 ? 2.0f : 1.0f;
+        const float k = sheetScale(sp.serect);
         // (Android 1.1.6: the cord - oy, the card - ox: StartPut's floor(-oy / scale), floor(-ox / scale))
         const float ex = androidEdgeX(app), ey = androidEdgeY(app);
         r.drawQuadUVRotated(sp.serect, 2 * (16 + 260 + q[2] / 2.0f), 2 * (32 - ey + std::max(sp.pull, 0.0f) - 205 + q[3] / 2.0f),
@@ -5276,13 +5276,22 @@ constexpr int kTitleIcons[3] = {2, 27, 3};
 
 bool titleChoiceReady(int) { return true; }
 
+// The title's plates: Start, Scenarios, Options at 114 + 56 i (TitlePut) - and on the desktop a fourth, Quit
+// (ours, #16), the four 48 apart from 96 to keep clear of the copyright line
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+constexpr int kTitlePlates = 3;
+#else
+constexpr int kTitlePlates = 4;
+#endif
+float titlePlateY(int i) { return kTitlePlates == 4 ? 96 + 48.0f * float(i) : 114 + 56.0f * float(i); }
+
 // A group-1 picture (MuTex_GetTexInfo(1, pict), half-scale units) of one of a menu's own sheets
 // at (x, y): the _hd / _ipad sheets (1024 wide and up) hold them at twice those units
 // (`frame`: ComUty_PictAnimDraw's, the next piece to the right)
 void outPicture(cr::MenuPainter& m, const cr::Texture& tex, int pict, float x, float y, float a, int frame) {
     if (!tex.id || pict < 0 || pict >= cr::kNumOutReadPictures) return;
     const short* p = cr::kOutReadPicture[pict];
-    const float k = tex.width >= 1024 ? 2.0f : 1.0f;
+    const float k = sheetScale(tex);
     m.imagePieceTo(tex, x, y, p[2], p[3], float(p[0] + p[2] * frame) * k, p[1] * k, p[2] * k, p[3] * k, a);
 }
 
@@ -5337,10 +5346,20 @@ void drawTitleMenu(App& app) {
         const float q = std::min(1.0f, float(app.titleOut) / 4.0f), dx = 240 * (1 - ease) + 240 * q * q, pa = t * (1 - q);
         // (the Vita: the plates at 0x173 = 371 - vitaRight)
         app.renderer.setOrigin(vitaRight(app)); // (widescreen: the plates to the screen's right)
-        for (int i = 0; i < 3; ++i)
-            m.plate(328 + dx, 114 + 56.0f * float(i), kTitleIcons[i], kTitleWords[i],
-                    (app.titleCursor == i && !app.pointerLast) || pressIn(app, kPressTitle, vitaRight(app), 328, 114 + 56.0f * float(i), 136, 40),
-                    pa, !titleChoiceReady(i)); // (lit: the keys' cursor, or a touch holding it - TitlePrc's DAT_000ecb60)
+        for (int i = 0; i < kTitlePlates; ++i) {
+            const bool lit = (app.titleCursor == i && !app.pointerLast) || pressIn(app, kPressTitle, vitaRight(app), 328, titlePlateY(i), 136, 40);
+            if (i == 3) { // (the sheet's x; "Exit" in its lettering - Extra's "Ex" and "t", Vieg's "i" - while the sheet is
+                          // the English one and so is the port's text, else our word)
+                const bool english = !app.vita.isOpen() && !(app.fanText && app.fan.isOpen()) && uitext::language() == "en";
+                m.plate(328 + dx, titlePlateY(i), 1, -1, lit, pa, false, english ? std::string() : std::string(tr("Quit")));
+                if (english) {
+                    const float x = 328 + dx + 84 - 18.25f, y = titlePlateY(i) + 8; // (36.5 wide, centred on the word's 88)
+                    m.piece(x, y, 196, 584, 24.5f, 24, pa);           // "Ex" (Extra, word 17)
+                    m.piece(x + 24.5f, y, 216, 560, 5, 24, pa);       // "i" (Vieg, word 12)
+                    m.piece(x + 29.5f, y, 220.5f, 584, 7, 24, pa);    // "t" (Extra)
+                }
+            } else m.plate(328 + dx, titlePlateY(i), kTitleIcons[i], kTitleWords[i], lit, pa, !titleChoiceReady(i));
+        } // (lit: the keys' cursor, or a touch holding it - TitlePrc's DAT_000ecb60)
         app.renderer.setOrigin(wideLeft(app)); // (... and the pictures down the left to its left)
         if (!vita) { // (the Vita's TitlePut draws none of them)
             m.picture(125, 8 + dx, 16, pa);
@@ -5459,6 +5478,12 @@ void titleChoose(App& app, int i) {
     app.titleCursor = i;
     if (!titleChoiceReady(i)) { menuSound(app, se::kBuzzer); return; }
     menuSound(app, se::kChoose);
+    if (i == 3) { // Quit (ours, the desktop's: #16)
+        SDL_Event quit{};
+        quit.type = SDL_EVENT_QUIT;
+        SDL_PushEvent(&quit);
+        return;
+    }
     if (i == 2) { openOptions(app, 0); return; } // SetOptionMenu + ModeOptionMenu(1)
     if (i == 1) { openScenarios(app, 0); return; }  // ModeSccnariosMenu(0), SetSccnariosMenu
     // Start (TitlePrc 8 -> 0x16): the Progress Tracker's offer first, when there is a resume point
@@ -5480,8 +5505,8 @@ bool titleKey(App& app, SDL_Keycode key) {
     }
     switch (key) {
     case SDLK_A: menuSound(app, se::kChoose); openAchievementList(app); break; // (our key for the picture at (8, 176))
-    case SDLK_UP: case SDLK_W: app.titleCursor = (app.titleCursor + 2) % 3; menuSound(app, se::kCursor); break;
-    case SDLK_DOWN: case SDLK_S: app.titleCursor = (app.titleCursor + 1) % 3; menuSound(app, se::kCursor); break;
+    case SDLK_UP: case SDLK_W: app.titleCursor = (app.titleCursor + kTitlePlates - 1) % kTitlePlates; menuSound(app, se::kCursor); break;
+    case SDLK_DOWN: case SDLK_S: app.titleCursor = (app.titleCursor + 1) % kTitlePlates; menuSound(app, se::kCursor); break;
     case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: case SDLK_E: titleChoose(app, app.titleCursor); break;
     case SDLK_ESCAPE: case SDLK_AC_BACK: return false;
     default: break;
@@ -5497,8 +5522,8 @@ void titleClick(App& app, float px, float py) {
     if (app.titleStage == 2) { titleBoardTap(app); return; } // (a tap anywhere)
     float mx, my;
     menuPointAt(app, lx, ly, vitaRight(app), mx, my); // (widescreen: the plates on the right; the Vita's at 371)
-    for (int i = 0; i < 3; ++i)
-        if (mx >= 328 && mx < 464 && my >= 114 + 56 * i && my < 154 + 56 * i) titleChoose(app, i);
+    for (int i = 0; i < kTitlePlates; ++i)
+        if (mx >= 328 && mx < 464 && my >= titlePlateY(i) && my < titlePlateY(i) + 40) titleChoose(app, i);
     if (app.renderer.vitaScreen()) return; // (no pictures down the left on the Vita: its TitlePrc 8 has no boxes there)
     float sx, sy;
     menuPointAt(app, lx, ly, wideLeft(app), sx, sy); // the store's pictures (8, 16) / (8, 96) 80 x 72: their sound, no store here

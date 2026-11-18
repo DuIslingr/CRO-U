@@ -96,6 +96,7 @@ Texture Renderer::upload(const Image& img) {
     Texture t = dev_->upload(img);
     t.cutout = img.cutout;
     t.noAlpha = img.noAlpha;
+    t.hdSheet = img.hdSheet;
     if (img.logicalW > 0 && img.logicalH > 0) { // HD: drawn at the original's size
         t.width = img.logicalW;
         t.height = img.logicalH;

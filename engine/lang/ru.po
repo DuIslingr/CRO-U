@@ -33,16 +33,24 @@ msgid "Off"
 msgstr "Выкл."
 
 #: src/app/explore.cpp src/app/scene_fx.cpp
+msgid "Quit Game"
+msgstr "Выйти из игры"
+
+#: src/app/explore.cpp src/app/scene_fx.cpp
 msgid "Menu Language"
 msgstr "Язык интерфейса"
+
+#: src/app/field_puzzle.cpp
+msgid "Fan translation"
+msgstr "Фанатский перевод"
 
 #: src/app/field_puzzle.cpp
 msgid "{0} (fan translation)"
 msgstr "{0} (фанатский перевод)"
 
-#: src/app/field_puzzle.cpp
-msgid "Fan translation"
-msgstr "Фанатский перевод"
+#: src/app/menus.cpp src/platform/setup.cpp
+msgid "Quit"
+msgstr "Выход"
 
 #: src/app/scene_fx.cpp
 msgid "Game"
@@ -508,6 +516,10 @@ msgstr "Резкость"
 msgid "FSR's sharpening pass (RCAS); DLSS has none"
 msgstr "Этап повышения резкости FSR (RCAS); в DLSS его нет"
 
+#: src/app/scene_fx.cpp
+msgid "Quit the game?"
+msgstr "Выйти из игры?"
+
 #: src/gfx/render_device.hpp
 msgid "needs the Vulkan renderer"
 msgstr "требуется рендерер Vulkan"
@@ -805,10 +817,6 @@ msgstr "Запустить"
 #: src/platform/setup.cpp
 msgid "Look again"
 msgstr "Искать снова"
-
-#: src/platform/setup.cpp
-msgid "Quit"
-msgstr "Выход"
 
 #: src/platform/setup.cpp
 msgid "iOS app (.ipa)"

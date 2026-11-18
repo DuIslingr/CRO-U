@@ -146,7 +146,7 @@ A controller plays as the Vita does. The face buttons go by position, so on an X
 | PgUp / PgDn (Q / E in Options) | pages |
 | T, F5, F6 | puzzle rooms: the ability straight ahead, retry, help |
 | F3 | toggle Control Hints (also in Options, Game; saved between runs) |
-| F11 or Alt+Enter | windowed / fullscreen (Options, Display page's Display row; the fullscreen kind last chosen there, borderless at first; saved between runs; desktop only) |
+| F11 or Alt+Enter | windowed / fullscreen (Options, Display page's Display row; the fullscreen kind last chosen there, borderless at first; for this session: the next start uses the Display set in Options; desktop only) |
 | Mouse | everything the original takes by touch: plates, buttons, the dialogue, the corner button; drag to push a block in puzzle rooms |
 
 **Touch** (or the mouse) plays the field as the original does: put a finger down anywhere and drag.
@@ -206,8 +206,8 @@ data has Japanese and English.
 - Auto, the default, follows the text language.
 
 **Fan translation:** a translation of the game's text, in `translation/` in the game folder. It doesn't
-replace anything: it's a language of its own after the game's eight, e.g. "Русский (fan translation)"
-in Options > Game > Language, and English stays. The scripts run from the game's own files; only the
+replace anything: it's a language of its own after the game's eight, e.g. "Русский" in Options > Game >
+Language ("Español (fan translation)" where the game has that language too), and English stays. The scripts run from the game's own files; only the
 text, and any art the translation redrew, are read from it. It can be:
 - the translated files themselves, as extracted from the Vita's `cro.psarc` - `sys.evt` and the areas'
   `.evt` files (plus any redrawn `.gxt`) - in a folder named by its language: `translation/ru/`;

@@ -151,6 +151,7 @@ void applyHd(App& app, cr::Image& img) {
     hd.logicalW = img.width;
     hd.logicalH = img.height;
     hd.noAlpha = img.noAlpha;
+    hd.hdSheet = img.hdSheet;
     { // (a cut-out: its alpha only 0 and 255, some of it 0)
         bool binary = !img.alphaOnly, some = false;
         for (size_t i = 3; binary && i < img.rgba.size(); i += 4) {
@@ -206,16 +207,22 @@ bool loadOriginalImage(App& app, const std::string& mct, cr::Image& img, bool* f
     for (size_t k = 0; k < names.size(); ++k) {
         if (names[k].empty()) continue;
         const std::string name = names[k] + ".mct";
+        // (_tex2d_add doubles a picture's rectangle on the sheets chk_hd_name named _hd / _ipad, whatever their size:
+        // the Status page's 512 portrait j039_L01_hd whole, #14)
+        const bool hdName = names[k].size() > 3 && (names[k].compare(names[k].size() - 3, 3, "_hd") == 0 ||
+                                               (names[k].size() > 5 && names[k].compare(names[k].size() - 5, 5, "_ipad") == 0));
         const bool redrawn = std::any_of(std::begin(kVitaRedrawn), std::end(kVitaRedrawn), [&](const char* n) { return name == n; });
         // the fan translation's own art while it is the language (its window, names, titles: Vita sheets, as the
         // Vita copy's - those redrawn for the Vita's screen alone with the Vita copy as the game)
         if (app.fanText && app.fan.isOpen() && (!redrawn || app.vitaOnly) && app.fan.read(names[k] + ".gxt", data) && cr::decodeGxt(data, img)) {
             if (k + 1 < names.size()) ++(k == 0 ? app.ipadImages : app.hdImages);
+            img.hdSheet = hdName;
             return true;
         }
         if (app.vita.isOpen() && (!redrawn || app.vitaOnly) && app.vita.read(names[k] + ".gxt", data) && cr::decodeGxt(data, img)) {
             ++app.vitaTextures;
             if (k + 1 < names.size()) ++(k == 0 ? app.ipadImages : app.hdImages);
+            img.hdSheet = hdName;
             return true;
         }
         // the Android copy of the same name: when the data has none, or one of the same size
@@ -233,12 +240,14 @@ bool loadOriginalImage(App& app, const std::string& mct, cr::Image& img, bool* f
                 if (fromAndroid) *fromAndroid = true;
                 ++app.androidTextures;
                 if (k + 1 < names.size()) ++(k == 0 ? app.ipadImages : app.hdImages);
+                img.hdSheet = hdName;
                 return true;
             }
         }
         if (!app.vitaOnly && cr::readFile(app.dataDir + name, data) && cr::decodeMct(data, img)) {
             if (fromAndroid) *fromAndroid = app.androidOnly;
             if (k + 1 < names.size()) ++(k == 0 ? app.ipadImages : app.hdImages);
+            img.hdSheet = hdName;
             return true;
         }
     }
@@ -729,6 +738,16 @@ std::string userDir() {
 }
 std::string settingsPath() { return userDir() + "settings.ini"; }
 
+// settings.ini's video alone, before the window shows (#13): its display mode and size from the start
+void loadSavedVideo(App& app) {
+    size_t size = 0;
+    char* text = static_cast<char*>(SDL_LoadFile(settingsPath().c_str(), &size));
+    if (!text) return;
+    const std::string t = "\n" + std::string(text, size); // (keys are matched after a line break)
+    SDL_free(text);
+    loadVideo(app, t.c_str());
+}
+
 bool App::FanSource::read(const std::string& name, std::vector<uint8_t>& out) const {
     if (archive.isOpen()) return archive.read(name, out);
     std::string key = name;
@@ -901,15 +920,15 @@ void markSeen(App& app, int f) {
     saveMix(app);
 }
 
-void saveMix(const App& app) {
-    if (!app.persist) return;
+// settings.ini's text (saveMix; the self-test reads it for what F11 leaves alone)
+std::string settingsText(const App& app) {
     std::string t = "master=" + std::to_string(app.mix.master) + "\nmusic=" + std::to_string(app.mix.music) +
                           "\neffects=" + std::to_string(app.mix.effects) + "\nvoice=" + std::to_string(app.mix.voice) + "\n";
     std::string list;
     for (int e : app.voiceEntries) list += (list.empty() ? "" : ",") + std::to_string(e);
     const App::Video& v = app.video;
     const std::string video = "width=" + std::to_string(v.width) + "\nheight=" + std::to_string(v.height) +
-                              "\ndisplay=" + std::to_string(v.display) + "\nfullscreen_kind=" + std::to_string(v.fullscreenKind) + "\nwidescreen=" + std::to_string(int(v.widescreen)) +
+                              "\ndisplay=" + std::to_string(v.savedDisplay) + "\nfullscreen_kind=" + std::to_string(v.fullscreenKind) + "\nwidescreen=" + std::to_string(int(v.widescreen)) +
                               "\npainted_fill=" + std::to_string(v.paintings) + "\nrender_scale=" +
                               std::to_string(v.renderScale) + "\nmsaa=" + std::to_string(v.msaa) +
                               "\nvsync=" + std::to_string(int(v.vsync)) + "\nframe_limit=" + std::to_string(v.frameLimit) + "\nupscaler=" + std::to_string(v.upscaler) +
@@ -933,8 +952,13 @@ void saveMix(const App& app) {
     for (int f : app.seenFlags) seen += (seen.empty() ? "" : ",") + std::to_string(f);
     const std::string all = t + "language=" + std::to_string(app.language) + "\nui_lang=" + app.uiLang + "\nfan_text=" + std::to_string(int(app.fanText)) + "\nvoice_entries=" + list + "\nseen_flags=" + seen + "\n" + video +
                             "achievements=" + app.ach.flags.hex() + "\n";
+    return all;
+}
+
+void saveMix(const App& app) {
+    if (!app.persist) return;
     std::string error;
-    if (!crstorage::replaceFile(settingsPath(), all, &error)) SDL_Log("settings: %s", error.c_str());
+    if (!crstorage::replaceFile(settingsPath(), settingsText(app), &error)) SDL_Log("settings: %s", error.c_str());
 }
 
 } // namespace crapp
