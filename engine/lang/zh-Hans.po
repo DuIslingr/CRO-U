@@ -48,9 +48,13 @@ msgstr "民间翻译"
 msgid "{0} (fan translation)"
 msgstr "{0}（民间翻译）"
 
-#: src/app/menus.cpp src/platform/setup.cpp
+#: src/app/menus.cpp src/app/scene_fx.cpp src/platform/setup.cpp
 msgid "Quit"
 msgstr "退出"
+
+#: src/app/menus.cpp src/app/scene_fx.cpp
+msgid "Quit the game?"
+msgstr "要退出游戏吗？"
 
 #: src/app/scene_fx.cpp
 msgid "Game"
@@ -494,10 +498,6 @@ msgstr "锐度"
 #: src/app/scene_fx.cpp
 msgid "FSR's sharpening pass (RCAS); DLSS has none"
 msgstr "FSR的锐化处理（RCAS）；DLSS没有此项"
-
-#: src/app/scene_fx.cpp
-msgid "Quit the game?"
-msgstr "要退出游戏吗？"
 
 #: src/gfx/render_device.hpp
 msgid "needs the Vulkan renderer"

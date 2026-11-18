@@ -48,9 +48,13 @@ msgstr "ファン翻訳"
 msgid "{0} (fan translation)"
 msgstr "{0}（ファン翻訳）"
 
-#: src/app/menus.cpp src/platform/setup.cpp
+#: src/app/menus.cpp src/app/scene_fx.cpp src/platform/setup.cpp
 msgid "Quit"
 msgstr "終了"
+
+#: src/app/menus.cpp src/app/scene_fx.cpp
+msgid "Quit the game?"
+msgstr "ゲームを終了しますか？"
 
 #: src/app/scene_fx.cpp
 msgid "Game"
@@ -493,10 +497,6 @@ msgstr "シャープネス"
 #: src/app/scene_fx.cpp
 msgid "FSR's sharpening pass (RCAS); DLSS has none"
 msgstr "FSRのシャープ化処理（RCAS）。DLSSにはなし"
-
-#: src/app/scene_fx.cpp
-msgid "Quit the game?"
-msgstr "ゲームを終了しますか？"
 
 #: src/gfx/render_device.hpp
 msgid "needs the Vulkan renderer"

@@ -257,6 +257,7 @@ struct App {
     } titleBoard;
     bool verUpShown = false;
     bool optionsFromTitle = false;         // ModeOptionMenu(1): Reset Data instead of Return to Title
+    int quitAsk = 0, quitConfirm = 1;      // the title's Quit question (ours, the desktop's: #16), No under the cursor
     int resetAsk = 0, resetConfirm = 1;    // Reset Data's two questions (OptionPrc 9 / 10: 1, 2), No under the cursor
     bool captureTitle = false;             // --capture ... --title
     // Video. The defaults are the original presentation: a 1024x768 window, 4:3, the paintings at
@@ -1340,6 +1341,7 @@ struct OptRow {
     std::function<void(int)> act; // Gauge / Value: -1 / +1 (Value: 0 = Enter); Pair: 0 / 1; Check: 0
     int sound = int(se::kChoose); // played when act runs (OptionPrc: 2 for every button; gauges below)
     bool enterSounds = false;     // act(0) plays a sound of its own (Sound Test), so none from the menu
+    bool quitWord = false;        // Check: "Exit" on its button in place of "Check" (Quit Game, #16)
 };
 
 constexpr int kOptionPages = 6; // Game, Sound, Display, Detail, Cheats, Graphics (the last: its default:)
@@ -2073,6 +2075,10 @@ float vitaLeft(const App& app);
 float vitaRight(const App& app);
 void menuPointAt(const App& app, float lx, float ly, float origin, float& mx, float& my);
 void menuPointFit(const App& app, float lx, float ly, float& mx, float& my);
+// The Yes / No question (OptionPrc 9 / 10's board): the screen darkened, the message window with its lines, Yes / No at (336, 104 / 160)
+void drawYesNoBoard(App& app, const std::vector<std::string>& lines, int cursor);
+// "Exit" in the word sheet's lettering (#16) - while the sheet and the menu text are English - centred in an 88-wide word at (x, y); false: none
+bool drawExitWord(const App& app, cr::MenuPainter& m, float x, float y, float alpha);
 void menuPoint(const App& app, float lx, float ly, float& mx, float& my);
 void stepOptions(App& app);
 void resetAnswer(App& app, bool yes);

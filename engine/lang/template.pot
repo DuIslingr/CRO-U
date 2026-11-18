@@ -47,8 +47,12 @@ msgstr ""
 msgid "{0} (fan translation)"
 msgstr ""
 
-#: src/app/menus.cpp src/platform/setup.cpp
+#: src/app/menus.cpp src/app/scene_fx.cpp src/platform/setup.cpp
 msgid "Quit"
+msgstr ""
+
+#: src/app/menus.cpp src/app/scene_fx.cpp
+msgid "Quit the game?"
 msgstr ""
 
 #: src/app/scene_fx.cpp
@@ -491,10 +495,6 @@ msgstr ""
 
 #: src/app/scene_fx.cpp
 msgid "FSR's sharpening pass (RCAS); DLSS has none"
-msgstr ""
-
-#: src/app/scene_fx.cpp
-msgid "Quit the game?"
 msgstr ""
 
 #: src/gfx/render_device.hpp

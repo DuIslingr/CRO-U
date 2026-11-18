@@ -48,9 +48,13 @@ msgstr "Traduction amateur"
 msgid "{0} (fan translation)"
 msgstr "{0} (traduction amateur)"
 
-#: src/app/menus.cpp src/platform/setup.cpp
+#: src/app/menus.cpp src/app/scene_fx.cpp src/platform/setup.cpp
 msgid "Quit"
 msgstr "Quitter"
+
+#: src/app/menus.cpp src/app/scene_fx.cpp
+msgid "Quit the game?"
+msgstr "Quitter le jeu ?"
 
 #: src/app/scene_fx.cpp
 msgid "Game"
@@ -513,10 +517,6 @@ msgstr "Netteté"
 #: src/app/scene_fx.cpp
 msgid "FSR's sharpening pass (RCAS); DLSS has none"
 msgstr "Passe d'accentuation de FSR (RCAS) ; DLSS n'en a pas"
-
-#: src/app/scene_fx.cpp
-msgid "Quit the game?"
-msgstr "Quitter le jeu ?"
 
 #: src/gfx/render_device.hpp
 msgid "needs the Vulkan renderer"

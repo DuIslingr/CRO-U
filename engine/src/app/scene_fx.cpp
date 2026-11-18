@@ -1185,6 +1185,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
         OptRow quit; // ours, the desktop's (#16): asked first, as Return to Title is
         quit.label = tr("Quit Game");
         quit.act = [&app](int) { app.resetAsk = 4, app.resetConfirm = 1; };
+        quit.quitWord = true;
         rows.push_back(quit);
 #endif
         break;
@@ -1556,7 +1557,13 @@ void drawOptions(App& app, float, float) {
         m.setScale(kOptCtrlX + ctrlX, mid, kOptCtrlScale);
         const float cx = kOptCtrlX + ctrlX;
         switch (row.kind) {
-        case OptControl::Check: m.button(cx + 120, y - 8, 23, "", false, dim, cursor && row.enabled); break;
+        case OptControl::Check:
+            if (row.quitWord) { // ("Exit" - the title's Quit plate's word - or our "Quit" where that lettering isn't the menu's language)
+                const bool art = !app.vita.isOpen() && !(app.fanText && app.fan.isOpen()) && uitext::language() == "en";
+                m.button(cx + 120, y - 8, -1, art ? std::string() : std::string(tr("Quit")), false, dim, cursor && row.enabled);
+                if (art) drawExitWord(app, m, cx + 130, y, dim);
+            } else m.button(cx + 120, y - 8, 23, "", false, dim, cursor && row.enabled);
+            break;
         case OptControl::Gauge: {
             App::GaugeEase& e = app.gaugeEase[row.gauge];
             if (e.to < 0) e.from = e.to = row.value;
@@ -1621,16 +1628,21 @@ void drawOptions(App& app, float, float) {
         std::vector<std::vector<std::string>> pages;
         if (app.resetAsk == 4) pages = {{std::string(tr("Quit the game?"))}}; // (ours: Quit Game)
         else app.systemText.message(app.resetAsk == 1 ? 57078 : app.resetAsk == 2 ? 57079 : 57060, textLanguage(app), nullptr, pages, nullptr);
-        r.setOrigin(0); // (the rows' window goes while it asks: WinDispOff(5))
-        r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 0.75f);
-        r.setOrigin(r.uiX());
-        m.picture(12, 0, 220, 1);
-        if (!pages.empty())
-            for (size_t l = 0; l < pages[0].size(); ++l) m.text(pages[0][l], 24, 234 + 16.0f * float(l), false, 1, 14);
-        m.plate(336, 104, 0, 0, app.resetConfirm == 0, 1, false);
-        m.plate(336, 160, 1, 1, app.resetConfirm == 1, 1, false);
+        drawYesNoBoard(app, pages.empty() ? std::vector<std::string>{} : pages[0], app.resetConfirm); // (the rows' window goes: WinDispOff(5))
     }
     r.setOrigin(r.uiX());
+}
+
+void drawYesNoBoard(App& app, const std::vector<std::string>& lines, int cursor) {
+    cr::Renderer& r = app.renderer;
+    cr::MenuPainter& m = app.menu;
+    r.setOrigin(0);
+    r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 0.75f);
+    r.setOrigin(r.uiX());
+    m.picture(12, 0, 220, 1);
+    for (size_t l = 0; l < lines.size(); ++l) m.text(lines[l], 24, 234 + 16.0f * float(l), false, 1, 14);
+    m.plate(336, 104, 0, 0, cursor == 0, 1, false);
+    m.plate(336, 160, 1, 1, cursor == 1, 1, false);
 }
 
 // One 20 Hz step: the slide-in and the Back arrows' bob (0..5 and back)

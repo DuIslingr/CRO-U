@@ -48,9 +48,13 @@ msgstr "Фанатский перевод"
 msgid "{0} (fan translation)"
 msgstr "{0} (фанатский перевод)"
 
-#: src/app/menus.cpp src/platform/setup.cpp
+#: src/app/menus.cpp src/app/scene_fx.cpp src/platform/setup.cpp
 msgid "Quit"
 msgstr "Выход"
+
+#: src/app/menus.cpp src/app/scene_fx.cpp
+msgid "Quit the game?"
+msgstr "Выйти из игры?"
 
 #: src/app/scene_fx.cpp
 msgid "Game"
@@ -515,10 +519,6 @@ msgstr "Резкость"
 #: src/app/scene_fx.cpp
 msgid "FSR's sharpening pass (RCAS); DLSS has none"
 msgstr "Этап повышения резкости FSR (RCAS); в DLSS его нет"
-
-#: src/app/scene_fx.cpp
-msgid "Quit the game?"
-msgstr "Выйти из игры?"
 
 #: src/gfx/render_device.hpp
 msgid "needs the Vulkan renderer"

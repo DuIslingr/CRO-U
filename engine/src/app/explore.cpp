@@ -3992,6 +3992,14 @@ int runSelfTest(App& app) {
         for (; bootFrames < 1000 && !app.titleOpen; ++bootFrames) stepEvents(app);
         problems += !app.titleOpen;
         app.game.setFlag(0x43, true); // ("About Option" read)
+#if !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_IOS)
+        { // the title's Quit asks first (No under the cursor); Esc answers No, and the title stays (#16)
+            titleChoose(app, 3);
+            const bool asked = app.quitAsk == 1 && app.quitConfirm == 1;
+            titleKey(app, SDLK_ESCAPE);
+            problems += !asked || app.quitAsk != 0 || !app.titleOpen;
+        }
+#endif
         openOptions(app, 0);
         const std::vector<OptRow> titlePage = optionRows(app, 0);
 #if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
@@ -8956,6 +8964,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
         app.verUpShown = true;  // (the plates, not a version-up board)
         titleTap(app);          // --title: the title's tap - its plates, slid in
         app.titleAnim = 30;
+        if (SDL_getenv("CR_CAPTURE_TITLE_QUIT")) app.quitAsk = 1, app.quitConfirm = 1; // (Quit's question)
     }
     if (app.vita.isOpen()) std::printf("vita textures used: %d\n", app.vitaTextures);
     if (app.android.isOpen()) std::printf("android textures used: %d\n", app.androidTextures);

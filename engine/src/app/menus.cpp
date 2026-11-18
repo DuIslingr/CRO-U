@@ -5346,18 +5346,12 @@ void drawTitleMenu(App& app) {
         const float q = std::min(1.0f, float(app.titleOut) / 4.0f), dx = 240 * (1 - ease) + 240 * q * q, pa = t * (1 - q);
         // (the Vita: the plates at 0x173 = 371 - vitaRight)
         app.renderer.setOrigin(vitaRight(app)); // (widescreen: the plates to the screen's right)
-        for (int i = 0; i < kTitlePlates; ++i) {
+        for (int i = 0; i < kTitlePlates && !app.quitAsk; ++i) { // (they go while Quit asks, as Options' rows do)
             const bool lit = (app.titleCursor == i && !app.pointerLast) || pressIn(app, kPressTitle, vitaRight(app), 328, titlePlateY(i), 136, 40);
-            if (i == 3) { // (the sheet's x; "Exit" in its lettering - Extra's "Ex" and "t", Vieg's "i" - while the sheet is
-                          // the English one and so is the port's text, else our word)
+            if (i == 3) { // (the sheet's x; "Exit" in its lettering, else our word)
                 const bool english = !app.vita.isOpen() && !(app.fanText && app.fan.isOpen()) && uitext::language() == "en";
                 m.plate(328 + dx, titlePlateY(i), 1, -1, lit, pa, false, english ? std::string() : std::string(tr("Quit")));
-                if (english) {
-                    const float x = 328 + dx + 84 - 18.25f, y = titlePlateY(i) + 8; // (36.5 wide, centred on the word's 88)
-                    m.piece(x, y, 196, 584, 24.5f, 24, pa);           // "Ex" (Extra, word 17)
-                    m.piece(x + 24.5f, y, 216, 560, 5, 24, pa);       // "i" (Vieg, word 12)
-                    m.piece(x + 29.5f, y, 220.5f, 584, 7, 24, pa);    // "t" (Extra)
-                }
+                if (english) drawExitWord(app, m, 328 + dx + 40, titlePlateY(i) + 8, pa);
             } else m.plate(328 + dx, titlePlateY(i), kTitleIcons[i], kTitleWords[i], lit, pa, !titleChoiceReady(i));
         } // (lit: the keys' cursor, or a touch holding it - TitlePrc's DAT_000ecb60)
         app.renderer.setOrigin(wideLeft(app)); // (... and the pictures down the left to its left)
@@ -5367,9 +5361,29 @@ void drawTitleMenu(App& app) {
             m.picture(127, 8 + dx, 176, pa); // (3.1.0: with Game Center - its achievements; Android: always - its list; ours: the list)
         }
     }
-    if (keyHints(app) && !app.resumeNotice && !app.resumePrompt) // (our key hints)
+    if (keyHints(app) && !app.resumeNotice && !app.resumePrompt && !app.quitAsk) // (our key hints)
         m.text("Up/Down  Enter  V: Options  A: Achievements  Esc: quit", 20, 360, false, t * 0.8f, 9);
+    if (app.quitAsk) drawYesNoBoard(app, {std::string(tr("Quit the game?"))}, app.quitConfirm); // (Quit's question, as Options' Quit Game asks)
     app.renderer.setOrigin(app.renderer.uiX());
+}
+
+bool drawExitWord(const App& app, cr::MenuPainter& m, float x, float y, float alpha) {
+    if (app.vita.isOpen() || (app.fanText && app.fan.isOpen()) || uitext::language() != "en") return false;
+    x += 44 - 18.25f; // (36.5 wide, centred on the word's 88)
+    m.piece(x, y, 196, 584, 24.5f, 24, alpha);        // "Ex" (Extra, word 17)
+    m.piece(x + 24.5f, y, 216, 560, 5, 24, alpha);    // "i" (Vieg, word 12)
+    m.piece(x + 29.5f, y, 220.5f, 584, 7, 24, alpha); // "t" (Extra)
+    return true;
+}
+
+// Quit's question answered: Yes - the app closes, as its window's close button does; No - the plates again
+static void titleQuitAnswer(App& app, bool yes) {
+    app.quitAsk = 0;
+    menuSound(app, se::kChoose);
+    if (!yes) return;
+    SDL_Event quit{};
+    quit.type = SDL_EVENT_QUIT;
+    SDL_PushEvent(&quit);
 }
 
 // Start: the boot script goes on (flag 0 clear) to Character Select (Util 4), then the pair's save /
@@ -5478,12 +5492,7 @@ void titleChoose(App& app, int i) {
     app.titleCursor = i;
     if (!titleChoiceReady(i)) { menuSound(app, se::kBuzzer); return; }
     menuSound(app, se::kChoose);
-    if (i == 3) { // Quit (ours, the desktop's: #16)
-        SDL_Event quit{};
-        quit.type = SDL_EVENT_QUIT;
-        SDL_PushEvent(&quit);
-        return;
-    }
+    if (i == 3) { app.quitAsk = 1, app.quitConfirm = 1; return; } // Quit (ours, the desktop's: #16): asked first
     if (i == 2) { openOptions(app, 0); return; } // SetOptionMenu + ModeOptionMenu(1)
     if (i == 1) { openScenarios(app, 0); return; }  // ModeSccnariosMenu(0), SetSccnariosMenu
     // Start (TitlePrc 8 -> 0x16): the Progress Tracker's offer first, when there is a resume point
@@ -5496,6 +5505,17 @@ void titleChoose(App& app, int i) {
 bool titleKey(App& app, SDL_Keycode key) {
     if (app.resumeNotice) { // "About Progress Tracker": a page out, or the next
         if (app.resumeNotice == 1 && (key == SDLK_RETURN || key == SDLK_KP_ENTER || key == SDLK_SPACE || key == SDLK_E)) tapDialogue(app);
+        return true;
+    }
+    if (app.quitAsk) { // Quit's question: Yes / No
+        switch (key) {
+        case SDLK_UP: case SDLK_DOWN: case SDLK_LEFT: case SDLK_RIGHT: case SDLK_W: case SDLK_S: case SDLK_A: case SDLK_D:
+            app.quitConfirm ^= 1, menuSound(app, se::kCursor);
+            break;
+        case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: case SDLK_E: titleQuitAnswer(app, app.quitConfirm == 0); break;
+        case SDLK_ESCAPE: case SDLK_BACKSPACE: case SDLK_AC_BACK: titleQuitAnswer(app, false); break;
+        default: break;
+        }
         return true;
     }
     if (app.titleStage == 0 && key != SDLK_ESCAPE && key != SDLK_AC_BACK) { titleTap(app); return true; }
@@ -5521,6 +5541,12 @@ void titleClick(App& app, float px, float py) {
     if (app.titleStage == 0) { titleTap(app); return; } // (a tap anywhere)
     if (app.titleStage == 2) { titleBoardTap(app); return; } // (a tap anywhere)
     float mx, my;
+    if (app.quitAsk) { // Quit's question: the Yes / No plates (0x88 x 0x28)
+        menuPointAt(app, lx, ly, app.renderer.uiX(), mx, my);
+        if (mx >= 336 && mx < 472 && my >= 104 && my < 144) titleQuitAnswer(app, true);
+        else if (mx >= 336 && mx < 472 && my >= 160 && my < 200) titleQuitAnswer(app, false);
+        return;
+    }
     menuPointAt(app, lx, ly, vitaRight(app), mx, my); // (widescreen: the plates on the right; the Vita's at 371)
     for (int i = 0; i < kTitlePlates; ++i)
         if (mx >= 328 && mx < 464 && my >= titlePlateY(i) && my < titlePlateY(i) + 40) titleChoose(app, i);
@@ -5762,7 +5788,7 @@ void bootTitle(App& app) {
     app.itemWindowOpen = app.optionsOpen = app.optionsFromTitle = false;
     app.resetAsk = 0;
     app.saveScreen = App::SaveScreen();
-    app.resumePrompt = app.resumeCursor = app.resumeNotice = app.resumeIn = app.titleOut = 0;
+    app.resumePrompt = app.resumeCursor = app.resumeNotice = app.resumeIn = app.titleOut = app.quitAsk = 0;
     app.resumeWin = 0;
     app.saveImport.cancel();
     app.parkedRunner.stop();

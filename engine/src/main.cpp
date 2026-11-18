@@ -1320,7 +1320,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             break;
         }
         if (event->key.key == SDLK_F3) { app.showHud = !app.showHud; saveMix(app); break; } // the saved Control Hints setting
-        if (event->key.key == SDLK_V && !app.manualOpen && !app.scc.open) { // the Options screen
+        if (event->key.key == SDLK_V && !app.manualOpen && !app.scc.open && !app.quitAsk) { // the Options screen
             if (app.optionsOpen) app.optionsOpen = false;
             else openOptions(app, 0);
             break;

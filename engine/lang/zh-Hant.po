@@ -48,9 +48,13 @@ msgstr "非官方翻譯"
 msgid "{0} (fan translation)"
 msgstr "{0}（非官方翻譯）"
 
-#: src/app/menus.cpp src/platform/setup.cpp
+#: src/app/menus.cpp src/app/scene_fx.cpp src/platform/setup.cpp
 msgid "Quit"
 msgstr "結束"
+
+#: src/app/menus.cpp src/app/scene_fx.cpp
+msgid "Quit the game?"
+msgstr "要結束遊戲嗎？"
 
 #: src/app/scene_fx.cpp
 msgid "Game"
@@ -494,10 +498,6 @@ msgstr "銳利度"
 #: src/app/scene_fx.cpp
 msgid "FSR's sharpening pass (RCAS); DLSS has none"
 msgstr "FSR的銳化處理（RCAS）；DLSS沒有此項"
-
-#: src/app/scene_fx.cpp
-msgid "Quit the game?"
-msgstr "要結束遊戲嗎？"
 
 #: src/gfx/render_device.hpp
 msgid "needs the Vulkan renderer"

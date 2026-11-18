@@ -48,9 +48,13 @@ msgstr "Traducción de fans"
 msgid "{0} (fan translation)"
 msgstr "{0} (traducción de fans)"
 
-#: src/app/menus.cpp src/platform/setup.cpp
+#: src/app/menus.cpp src/app/scene_fx.cpp src/platform/setup.cpp
 msgid "Quit"
 msgstr "Salir"
+
+#: src/app/menus.cpp src/app/scene_fx.cpp
+msgid "Quit the game?"
+msgstr "¿Salir del juego?"
 
 #: src/app/scene_fx.cpp
 msgid "Game"
@@ -516,10 +520,6 @@ msgstr "Nitidez"
 #: src/app/scene_fx.cpp
 msgid "FSR's sharpening pass (RCAS); DLSS has none"
 msgstr "Pase de nitidez de FSR (RCAS); DLSS no lo tiene"
-
-#: src/app/scene_fx.cpp
-msgid "Quit the game?"
-msgstr "¿Salir del juego?"
 
 #: src/gfx/render_device.hpp
 msgid "needs the Vulkan renderer"

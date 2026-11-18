@@ -48,9 +48,13 @@ msgstr "팬 번역"
 msgid "{0} (fan translation)"
 msgstr "{0} (팬 번역)"
 
-#: src/app/menus.cpp src/platform/setup.cpp
+#: src/app/menus.cpp src/app/scene_fx.cpp src/platform/setup.cpp
 msgid "Quit"
 msgstr "종료"
+
+#: src/app/menus.cpp src/app/scene_fx.cpp
+msgid "Quit the game?"
+msgstr "게임을 종료하시겠습니까?"
 
 #: src/app/scene_fx.cpp
 msgid "Game"
@@ -496,10 +500,6 @@ msgstr "선명도"
 #: src/app/scene_fx.cpp
 msgid "FSR's sharpening pass (RCAS); DLSS has none"
 msgstr "FSR의 샤프닝 처리(RCAS). DLSS에는 없음"
-
-#: src/app/scene_fx.cpp
-msgid "Quit the game?"
-msgstr "게임을 종료하시겠습니까?"
 
 #: src/gfx/render_device.hpp
 msgid "needs the Vulkan renderer"
