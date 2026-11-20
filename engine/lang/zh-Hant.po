@@ -37,6 +37,10 @@ msgid "Quit Game"
 msgstr "結束遊戲"
 
 #: src/app/explore.cpp src/app/scene_fx.cpp
+msgid "Voice Volume"
+msgstr "語音音量"
+
+#: src/app/explore.cpp src/app/scene_fx.cpp
 msgid "Menu Language"
 msgstr "介面語言"
 
@@ -202,10 +206,6 @@ msgstr "×（下方鍵）確定，○（右側鍵）返回"
 #: src/app/scene_fx.cpp
 msgid "Master Volume"
 msgstr "主音量"
-
-#: src/app/scene_fx.cpp
-msgid "Voice Volume"
-msgstr "語音音量"
 
 #: src/app/scene_fx.cpp
 msgid "Sound Test"

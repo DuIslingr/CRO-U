@@ -1739,6 +1739,7 @@ void optionsKey(App& app, SDL_Keycode key) {
         if (r->kind == OptControl::Pair) r->act(dir > 0 ? 1 : 0);
         else r->act(dir);
         if (r->sound >= 0) menuSound(app, uint32_t(r->sound));
+        else if (r->sound == -2) app.sound.playBattleLine(0x2b1, -77); // (the Voice gauge's sample line, as a click's: #20)
         return;
     }
     case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: {

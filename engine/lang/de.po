@@ -37,6 +37,10 @@ msgid "Quit Game"
 msgstr "Spiel beenden"
 
 #: src/app/explore.cpp src/app/scene_fx.cpp
+msgid "Voice Volume"
+msgstr "Stimmenlautstärke"
+
+#: src/app/explore.cpp src/app/scene_fx.cpp
 msgid "Menu Language"
 msgstr "Menüsprache"
 
@@ -209,10 +213,6 @@ msgstr "× (untere Taste) bestätigt, ○ (rechte Taste) geht zurück"
 #: src/app/scene_fx.cpp
 msgid "Master Volume"
 msgstr "Gesamtlautstärke"
-
-#: src/app/scene_fx.cpp
-msgid "Voice Volume"
-msgstr "Stimmenlautstärke"
 
 #: src/app/scene_fx.cpp
 msgid "Sound Test"

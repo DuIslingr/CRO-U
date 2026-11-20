@@ -4327,6 +4327,12 @@ void drawScenarios(App& app) {
         if (s.mode == 0) {
             m.quad(-ex, -ey, 480 + 2 * ex, 48 + ey, black, black);
             m.quad(-ex, 284, 480 + 2 * ex, 36 + ey, black, black);
+        } else if (r.vitaScreen()) { // (the Vita's, vita decomp 81470: the bands from x -48, 576 wide, and its side
+            // masks with them - 43 wide to its screen's edges, at z -2, behind the clock and Oz that reach past 480: #20)
+            m.quad(-48, -32, 576, 80, black, black);
+            m.quad(-48, 284, 576, 100, black, black);
+            m.quad(-43, 0, 43, 640, black, black);
+            m.quad(480, 0, 43, 640, black, black);
         } else {
             m.quad(-32 - ex, -32 - ey, 544 + 2 * ex, 80 + ey, black, black);
             m.quad(-32 - ex, 284, 544 + 2 * ex, 100 + ey, black, black);
@@ -4338,7 +4344,7 @@ void drawScenarios(App& app) {
     const auto sideMasks = [&]() {
         const float black[4] = {0, 0, 0, 1};
         const float ex = androidEdgeX(app), ey = androidEdgeY(app), w = (s.mode == 0 ? 0.0f : 16.0f) + ex;
-        if (w <= 0) return;
+        if (w <= 0 || r.vitaScreen()) return; // (the Vita's are behind: above)
         m.quad(-w, -ey - (s.mode == 0 ? 0.0f : 32.0f), w, 320 + 2 * ey + (s.mode == 0 ? 0.0f : 64.0f), black, black);
         m.quad(480, -ey - (s.mode == 0 ? 0.0f : 32.0f), w, 320 + 2 * ey + (s.mode == 0 ? 0.0f : 64.0f), black, black);
     };

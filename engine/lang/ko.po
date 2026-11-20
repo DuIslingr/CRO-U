@@ -37,6 +37,10 @@ msgid "Quit Game"
 msgstr "게임 종료"
 
 #: src/app/explore.cpp src/app/scene_fx.cpp
+msgid "Voice Volume"
+msgstr "음성 볼륨"
+
+#: src/app/explore.cpp src/app/scene_fx.cpp
 msgid "Menu Language"
 msgstr "메뉴 언어"
 
@@ -202,10 +206,6 @@ msgstr "×(아래쪽 버튼)로 결정, ○(오른쪽 버튼)로 취소"
 #: src/app/scene_fx.cpp
 msgid "Master Volume"
 msgstr "마스터 볼륨"
-
-#: src/app/scene_fx.cpp
-msgid "Voice Volume"
-msgstr "음성 볼륨"
 
 #: src/app/scene_fx.cpp
 msgid "Sound Test"

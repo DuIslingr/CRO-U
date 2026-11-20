@@ -37,6 +37,10 @@ msgid "Quit Game"
 msgstr "Выйти из игры"
 
 #: src/app/explore.cpp src/app/scene_fx.cpp
+msgid "Voice Volume"
+msgstr "Громкость голосов"
+
+#: src/app/explore.cpp src/app/scene_fx.cpp
 msgid "Menu Language"
 msgstr "Язык интерфейса"
 
@@ -209,10 +213,6 @@ msgstr "× (нижняя кнопка) подтверждает, ○ (права
 #: src/app/scene_fx.cpp
 msgid "Master Volume"
 msgstr "Общая громкость"
-
-#: src/app/scene_fx.cpp
-msgid "Voice Volume"
-msgstr "Громкость голосов"
 
 #: src/app/scene_fx.cpp
 msgid "Sound Test"

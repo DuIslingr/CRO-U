@@ -4016,6 +4016,29 @@ int runSelfTest(App& app) {
             resetAnswer(app, false);
             problems += !asked || app.resetAsk != 0 || !app.optionsOpen;
         }
+        { // Voice Volume's sample line (battle clip 0x2b1, __MuOptionSetInfo) for a key's step and a click on the track (#20)
+            openOptions(app, 1);
+            const std::vector<OptRow> sound = optionRows(app, 1);
+            int voice = -1;
+            for (size_t i = 0; i < sound.size(); ++i)
+                if (sound[i].label == tr("Voice Volume")) voice = int(i);
+            auto sampled = [&app]() { return !app.sound.battleLineLog.empty() && app.sound.battleLineLog.back() == 0x2b1; };
+            app.sound.battleLineLog.clear();
+            app.optionsRow = voice;
+            optionsKey(app, SDLK_LEFT);
+            const bool byKey = sampled();
+            app.sound.battleLineLog.clear();
+            float l0x, l0y, l1x, l1y; // (the frame's pixels for a menu point: toLogical is linear)
+            app.renderer.toLogical(0, 0, l0x, l0y);
+            app.renderer.toLogical(1, 1, l1x, l1y);
+            const float mx = optCtrlX(235 + 30 * 2.03f), my = optRowY(voice - app.optionsScroll) + 12;
+            const float lx = mx * 2 + app.renderer.uiX(), ly = my * 2;
+            optionsClick(app, (lx - l0x) / (l1x - l0x), (ly - l0y) / (l1y - l0y));
+            const bool byClick = sampled() && app.mix.voice == 30;
+            if (voice < 0 || !byKey || !byClick) std::printf("voice sample: row %d, key %d, click %d (voice %d)\n", voice, int(byKey), int(byClick), app.mix.voice);
+            problems += voice < 0 || !byKey || !byClick;
+            openOptions(app, 0);
+        }
         { // Menu Language (platform/ui_text): Auto first; a step right names English or a catalog, and the port's text follows
             const std::string keepLang = app.uiLang;
             int at = -1;

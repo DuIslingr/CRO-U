@@ -2085,6 +2085,8 @@ void resetAnswer(App& app, bool yes);
 void optionsKey(App& app, SDL_Keycode key);
 int optionsBackPart(float mx, float my);
 void optionsClick(App& app, float px, float py);
+float optRowY(int i);       // Options: row i's bar top, in menu units
+float optCtrlX(float x);    // Options: a control's design x on screen
 std::string savePath(const App& app, const char* file);
 cr::SaveData captureSave(const App& app);
 bool applySave(App& app, const cr::SaveData& s);
