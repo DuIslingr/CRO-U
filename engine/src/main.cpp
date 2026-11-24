@@ -788,14 +788,15 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     }
     showTexture(*app, 0);
     setMode(*app, app->newGame ? Mode::Maps : app->mode);
-    if (app->newGame) {
-        startNewGame(*app);
+    if (app->newGame) { // through the title (its boot script sets the opening's scene up: the field's
+        titleToNewGame(*app, app->captureScenario ? 2 : 1); // map alone drew a flat fill and a far camera)
     } else { // the game boots to its title unless a viewer mode was asked for
         bool viewer = false;
         for (int i = 1; i < argc; ++i)
             for (const char* f : {"--viewer", "--map", "--model", "--models", "--maps"})
                 viewer = viewer || SDL_strcmp(argv[i], f) == 0;
         app->viewer = viewer;
+        if (viewer) updateTitle(*app); // (the status in the title: the viewers' only)
         if (!viewer) bootTitle(*app);
     }
     if (SDL_getenv("CR_TRACE_NATIVES")) { // debugging: every native Call, its id and the last args pushed
