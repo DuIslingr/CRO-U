@@ -4324,9 +4324,10 @@ void drawScenarios(App& app) {
         // Android 1.1.6 (0x784e8) takes the bands out to the phone's edges
         const float black[4] = {0, 0, 0, 1};
         const float ex = androidEdgeX(app), ey = androidEdgeY(app);
-        if (s.mode == 0) {
-            m.quad(-ex, -ey, 480 + 2 * ex, 48 + ey, black, black);
-            m.quad(-ex, 284, 480 + 2 * ex, 36 + ey, black, black);
+        if (s.mode == 0) { // (the Vita: as wide as Camp's bands below, -48 + 576 - the field showed at the edges; metastigma's cd379ae)
+            const float maskX = r.vitaScreen() ? -48.0f : -ex, maskW = r.vitaScreen() ? 576.0f : 480 + 2 * ex;
+            m.quad(maskX, -ey, maskW, 48 + ey, black, black);
+            m.quad(maskX, 284, maskW, 36 + ey, black, black);
         } else if (r.vitaScreen()) { // (the Vita's, vita decomp 81470: the bands from x -48, 576 wide, and its side
             // masks with them - 43 wide to its screen's edges, at z -2, behind the clock and Oz that reach past 480: #20)
             m.quad(-48, -32, 576, 80, black, black);
