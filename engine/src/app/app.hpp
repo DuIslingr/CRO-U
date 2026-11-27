@@ -231,6 +231,7 @@ struct App {
     std::map<const int*, GaugeEase> gaugeEase;           // knob to the new (#17), by the setting it shows
     float optionsClock = 0;
     bool environmentEffects = true;        // the original's Environment Effects (weather; stored)
+    bool cleanTextOutline = true;           // one antialiased outline pass instead of the original eight offsets
     bool lockLandscapeFlipped = false; // the landscape direction retained by the orientation lock
     bool lockOrientation = false;          // Lock Screen Orientation (an iPad setting; stored)
     cr::MenuPainter menu;

@@ -3940,7 +3940,7 @@ void drawBattleHud(App& app, float W, float H) {
     // a talk: the portraits and the message box instead - the left HUD going out (+0x3c) first
     const bool talk = battletalk::on(app);
     if (talk && b.hudSlide >= 480) return;
-    m.begin(r, app.windowTex, &app.font);
+    m.begin(r, app.windowTex, &app.font, app.cleanTextOutline);
     if (b.phase == App::Battle::Results && !talk) {
         drawBattleResults(app, m, std::min(1.0f, float(b.phaseFrames + 1) / 8.0f));
         r.setOrigin(r.uiX());

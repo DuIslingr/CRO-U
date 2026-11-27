@@ -4,6 +4,8 @@
 // its coordinates doubled too) and plain colour (slot 45). Text uses the font the game's text
 // uses (gfx/font.hpp) at its size: 14 menu units.
 
+#include <array>
+#include <cstdint>
 #include <map>
 #include <string>
 
@@ -15,10 +17,11 @@ class Font;
 
 class MenuPainter {
 public:
-    void begin(Renderer& r, const Texture& sheet, const Font* font) {
+    void begin(Renderer& r, const Texture& sheet, const Font* font, bool cleanOutline) {
         r_ = &r;
         sheet_ = &sheet;
         font_ = font;
+        cleanOutline_ = cleanOutline;
     }
     void release(Renderer& r); // the cached text
     // Everything drawn after this is scaled by k about (x, y) (our denser Options pages draw
@@ -68,6 +71,7 @@ public:
     // colour - white text edged black, black text edged white - then itself. drawfont_btl (the battle
     // banner) and drawfont_text (messages) draw it plain: setOutline(false) around those
     void setOutline(bool on) { outline_ = on; }
+    void setCleanOutline(bool on) { cleanOutline_ = on; }
     // Text with its top-left at (x, y), 14 units high; dark = black (style 1), else white
     void text(const std::string& s, float x, float y, bool dark, float alpha = 1, float size = 14);
     float textWidth(const std::string& s, float size = 14);
@@ -108,6 +112,7 @@ private:
     float sx_ = 0, sy_ = 0, k_ = 1, dx_ = 0, dy_ = 0, fx_ = 0, fy_ = 0, fk_ = 1;
     float menuFont_ = 14;
     bool outline_ = true;
+    bool cleanOutline_ = true;
     void edge(const Texture& tex, float x, float y, float w, float h, float k, float alpha);
     float X(float x) const { return fx_ + (sx_ + (x - sx_) * k_ + dx_) * fk_; }
     float Y(float y) const { return fy_ + (sy_ + (y - sy_) * k_ + dy_) * fk_; }
@@ -117,11 +122,13 @@ private:
     const Font* font_ = nullptr;
     struct Cached {
         Texture tex;
-        float w = 0, h = 0, density = 0; // logical size, texture pixels per logical pixel
+        Texture edgeTex; // dilated glyph alpha, drawn once behind the face
+        float w = 0, h = 0, density = 0; // glyph bounds in logical pixels
+        float pad = 0; // transparent border around both cached textures
         int generation = -1;
     };
     std::map<std::string, Cached> text_;
-    Texture white_;
+    std::map<std::array<uint8_t, 8>, Texture> gradients_; // quad()'s ramps, by their ends
     Cached& rasterise(const std::string& s, float size);
 };
 

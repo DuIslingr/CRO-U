@@ -1826,7 +1826,7 @@ void drawPuzzleBanner(App& app) {
     if (!b.on || b.alpha <= 0 || !app.windowTex.id) return;
     cr::Renderer& r = app.renderer;
     cr::MenuPainter& m = app.menu;
-    m.begin(r, app.windowTex, &app.font);
+    m.begin(r, app.windowTex, &app.font, app.cleanTextOutline);
     r.setOrigin(r.uiX());
     const float a = float(b.alpha) / 255.0f;
     m.piece(b.x1 + 16, b.y1 + 32, 516, 264, 224, 64, a);
@@ -1932,7 +1932,7 @@ bool fieldButtonShown(const App& app, int k) {
 void drawItemWindow(App& app) {
     cr::Renderer& r = app.renderer;
     cr::MenuPainter& m = app.menu;
-    m.begin(r, app.windowTex, &app.font);
+    m.begin(r, app.windowTex, &app.font, app.cleanTextOutline);
     const PhoneMenu phoneMenu(app, m);
     r.setOrigin(r.uiX());
     const float top = 32.0f * float(app.itemWindowRow) - 32;
@@ -1961,7 +1961,7 @@ void drawFieldMenu(App& app) {
     if (!app.windowTex.id) return;
     cr::Renderer& r = app.renderer;
     cr::MenuPainter& m = app.menu;
-    m.begin(r, app.windowTex, &app.font);
+    m.begin(r, app.windowTex, &app.font, app.cleanTextOutline);
     const bool phone = app.renderer.phoneLayout();
     const float ex = androidEdgeX(app), ey = androidEdgeY(app); // (Android: the phone's corners)
     // (the Vita's __menuf_mainPut draws no low battery)
@@ -2421,7 +2421,7 @@ void drawMapScreen(App& app) {
     // (TnlQuNZ6qCY) 384 / 1376 s: the field a quarter as bright inside 160..1120 x 40..680 and untouched outside -
     // the port dimmed the whole screen under the panel too (inside a sixteenth)
     r.setOrigin(r.uiX());
-    m.begin(r, app.windowTex, &app.font);
+    m.begin(r, app.windowTex, &app.font, app.cleanTextOutline);
     if (!ms.tex.id) return;
     const PhoneMenu phoneMenu(app, m);
     const cr::Texture& t = ms.tex;

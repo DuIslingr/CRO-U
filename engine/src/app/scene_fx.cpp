@@ -1350,6 +1350,12 @@ std::vector<OptRow> optionRows(App& app, int page) {
         });
         rows.back().enabled = scalable && (v.upscaler == 1 || v.upscaler == 4);
         rows.back().hint = tr("FSR's sharpening pass (RCAS); DLSS has none");
+        pair(tr("Text Outline"), tr("Original"), tr("Fixed"), app.cleanTextOutline ? 1 : 0, [&app](int i) {
+            app.cleanTextOutline = i == 1;
+            app.menu.setCleanOutline(app.cleanTextOutline);
+            saveMix(app);
+        });
+        rows.back().hint = tr("Original: eight offset draws; Fixed: one antialiased pass.");
         break;
     }
     }
@@ -1521,7 +1527,7 @@ void drawOptions(App& app, float, float) {
     cr::Renderer& r = app.renderer;
     cr::MenuPainter& m = app.menu;
     if (optionsAbout(app)) return; // (OptionPrc 0..2: the message window alone - drawManual)
-    m.begin(r, app.windowTex, &app.font);
+    m.begin(r, app.windowTex, &app.font, app.cleanTextOutline);
     // (a translation the font can't draw - a menu language other than the text's - shown in English)
     uitext::setCoverage([&app](const std::string& s) { return app.font.covers(s); }, app.font.generation());
     const PhoneFit phoneFit(app, m); // the iPhone layout: its screen's menu coordinates
@@ -1989,7 +1995,7 @@ void drawPadArt(App& app) {
     if (!app.windowTex.id) return;
     cr::Renderer& r = app.renderer;
     cr::MenuPainter& m = app.menu;
-    m.begin(r, app.windowTex, &app.font);
+    m.begin(r, app.windowTex, &app.font, app.cleanTextOutline);
     r.setOrigin(r.uiX());
     // Uty_DrawController_Put (2.2.0's too): tex2d_add(0x2a, 32, 192, (928, 796) 96 x 96) - the grey
     // ring - and (48, 208, (944, 724) 64 x 64) - the black button; the screen's (96, 448) and (128, 480)
@@ -2007,7 +2013,7 @@ void drawExclamation(App& app) {
     r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, float(0xc0) / 255.0f);
     r.setOrigin(r.uiX());
     if (!app.windowTex.id) return;
-    app.menu.begin(r, app.windowTex, &app.font);
+    app.menu.begin(r, app.windowTex, &app.font, app.cleanTextOutline);
     app.menu.piece(220 + 16, 180 + 32, 468, 440, 44, 48, 1);
 }
 
@@ -3308,7 +3314,7 @@ void drawFrame(App& app, bool present) {
         // window 0, which slides in from 360 to the right
         const float t = std::min(1.0f, float(app.choiceAnim) / 4.0f), dx = 360 * (1 - t) * (1 - t);
         if (app.windowTex.id) {
-            app.menu.begin(r, app.windowTex, &app.font);
+            app.menu.begin(r, app.windowTex, &app.font, app.cleanTextOutline);
             r.setOrigin(r.uiX());
             const PhoneMenu phoneMenu(app, app.menu);
             // (__menuu_EventPrc 0x321 clears the lit plate (+0x34) every frame and ComUty_YesNoChoiceProc
@@ -3355,7 +3361,7 @@ void drawFrame(App& app, bool present) {
     drawFrontFade(app); // (189: over the message window, when no text came)
     r.setOrigin(r.uiX());
     if (app.nowLoading.on && app.windowTex.id) { // NowLoadProc (draw order 500): 8 frames of (820 + 24k, 96, 24 x 24) at tex2d (464, 320)
-        app.menu.begin(r, app.windowTex, &app.font);
+        app.menu.begin(r, app.windowTex, &app.font, app.cleanTextOutline);
         r.setOrigin(r.uiX());
         const bool phone = app.renderer.phoneLayout(); // 2.2.0: (448, 288), the iPhone screen's corner (Android: + ex, + ey)
         app.menu.piece((phone ? 448 + androidEdgeX(app) : 464) + 16, (phone ? 288 + androidEdgeY(app) : 320) + 32, 820 + 24.0f * float(app.nowLoading.frame % 8), 96, 24, 24, 1);

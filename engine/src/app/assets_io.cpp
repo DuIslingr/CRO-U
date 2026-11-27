@@ -885,6 +885,8 @@ void loadMix(App& app) {
         if (const char* at = SDL_strstr(text, "ui_lang=")) app.uiLang = std::string(at + 8, std::strcspn(at + 8, "\r\n"));
         if (app.uiLang.empty()) app.uiLang = "auto";
         if (const char* at = SDL_strstr(text, "fan_text=")) app.fanText = SDL_atoi(at + 9) != 0 && app.language == 1; // (applyLanguage: while the translation is there)
+        if (const char* at = SDL_strstr(text, "clean_text_outline="))
+            app.cleanTextOutline = SDL_atoi(at + SDL_strlen("clean_text_outline=")) != 0;
         // the system config flags (system.dat's +0x87604 on Android): the achievements earned
         if (const char* at = SDL_strstr(text, "achievements=")) app.ach.flags.fromHex(std::string(at + 13, SDL_strnlen(at + 13, 32)));
         app.seenFlags.clear();
@@ -941,7 +943,8 @@ std::string settingsText(const App& app) {
                               "\nlayout=" + std::to_string(v.layout) +
                               "\ncontrol_hints=" + std::to_string(int(app.showHud)) +
                               "\nenvironment_effects=" +
-                              std::to_string(int(app.environmentEffects)) + "\nlock_orientation=" +
+                              std::to_string(int(app.environmentEffects)) + "\nclean_text_outline=" +
+                              std::to_string(int(app.cleanTextOutline)) + "\nlock_orientation=" +
                               std::to_string(int(app.lockOrientation)) + "\nlock_landscape_flipped=" +
                               std::to_string(int(app.lockLandscapeFlipped)) + "\n" + "vita=" + app.vitaPath + "\n" + "android=" + app.androidPath + "\n" + "pad_confirm=" +
                               (app.padConfirmEast ? "east" : "south") + "\n" + "field_speed=" + std::to_string(app.fieldSpeed) +
